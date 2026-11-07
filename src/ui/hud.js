@@ -35,6 +35,7 @@ export class Hud {
       <div class="hud-corner tl">
         <div id="pos">P–<span class="of">/ –</span></div>
         <div id="clock">0:00.000</div>
+        <div id="ghostLine" class="none">NO GHOST</div>
         <div id="sector">SECTOR 1 / ${this.course.sectorCount}</div>
       </div>
 
@@ -79,7 +80,7 @@ export class Hud {
 
     const q = (id) => el.querySelector('#' + id);
     this.dom = {
-      pos: q('pos'), clock: q('clock'), sector: q('sector'),
+      pos: q('pos'), clock: q('clock'), sector: q('sector'), ghost: q('ghostLine'),
       gates: q('gates'), combo: q('combo'), progress: q('gatesProgress i'),
       flowBar: q('flowBar i'), boostBar: q('boostBar i'), flowWrap: q('flowWrap'),
       tachyon: q('tachyon'), speed: q('speed'), gear: q('gearState'),
@@ -118,6 +119,25 @@ export class Hud {
     d.pos.innerHTML = `P${p.rank || '-'}<span class="of">/ ${total}</span>`;
     const t = race.state === 'racing' || race.state === 'finished' ? race.elapsed : 0;
     d.clock.textContent = fmtTime(t);
+    // --- ghost delta: compared at equal progress, not equal clock ----------
+    if (!race.ghostPlayback) {
+      d.ghost.textContent = 'NO GHOST — SET A TIME';
+      d.ghost.className = 'none';
+    } else if (race.ghostBestTime != null && !race.running) {
+      d.ghost.textContent = `GHOST BEST ${fmtTime(race.ghostBestTime)}`;
+      d.ghost.className = 'none';
+    } else {
+      const gd = race.ghostDelta;
+      if (gd == null) {
+        d.ghost.textContent = 'GHOST';
+        d.ghost.className = 'none';
+      } else {
+        const behind = gd > 0;
+        d.ghost.textContent = `${behind ? '+' : '\u2212'}${Math.abs(gd).toFixed(2)}s GHOST`;
+        d.ghost.className = behind ? 'behind' : 'ahead';
+      }
+    }
+
     const sector = clamp((race.sectorForGate(Math.min(race.nextGateIndex, race.course.gateCount - 1)) ?? 0) + 1, 1, race.course.sectorCount);
     d.sector.textContent = `SECTOR ${sector} / ${race.course.sectorCount}`;
 
@@ -239,6 +259,22 @@ export class Hud {
       if (isNext) {
         ctx.fillStyle = 'rgba(159,246,255,.18)';
         ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // --- ghost ---------------------------------------------------------------
+    if (race.ghostVehicle && race.state !== 'menu') {
+      const gp = race.ghostVehicle.position;
+      if (Math.abs(gp.z - p.position.z) < MAP_RANGE) {
+        const [mx, my] = toMap(gp.x, gp.z);
+        ctx.save();
+        ctx.translate(mx, my);
+        ctx.rotate(-(race.ghostVehicle.yaw - yaw));
+        ctx.fillStyle = 'rgba(168,200,255,.85)';
+        ctx.beginPath();
+        ctx.moveTo(0, -4.4); ctx.lineTo(3.2, 3.6); ctx.lineTo(-3.2, 3.6);
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
       }
     }
 

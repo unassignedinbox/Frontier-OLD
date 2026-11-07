@@ -6,7 +6,7 @@ A flow-racing prototype in the spirit of *Tachyon Flow* — built specifically t
 ```
 npm install
 npm run dev        # playable build at http://localhost:5173
-npm test           # 43 headless tests against the real sim
+npm test           # 52 headless tests against the real sim
 npm run build      # production bundle
 node tools/simrun.js [seed] [seconds]   # headless run harness / balance check
 ```
@@ -84,6 +84,13 @@ management.
 - **Rivals** (VANTA / KESTREL / ORPHEUS) run the *same* flight model under a
   pursuit controller, with distinct skill, aggression and boost discipline. They
   drift and overshoot like you do, so an overtake reads as an overtake.
+- **Your ghost** is the fourth opponent and the one that matters. Finish a run and
+  it is recorded; beat it and the recording becomes the new ghost for that seed.
+  It flies translucent alongside you, appears on the tactical map, and the HUD
+  shows a live delta compared at **equal progress**, not equal clock — the only
+  comparison that means anything on a point-to-point run. Because corridors are
+  seeded, a ghost is exactly comparable run to run, and `#seed=…` makes "beat this"
+  a link you can send someone.
 
 ---
 
@@ -102,6 +109,7 @@ src/
     vehicle.js         hover flight model (heading vs velocity, grip, drift)
     ai.js              rival pursuit brain
     race.js            run state machine, scoring, collision, standings
+    ghost.js           run recording, replay, per-seed best-time store
   render/
     scene.js           sky, canyon mesh, gate rings, structure, speed streaks
     craft.js           hull, engine bloom, ground cushion, ribbon trail
@@ -144,6 +152,7 @@ Everything with a feel to it is a number in `src/config.js`:
 | Run length | `course.nodes` × `course.nodeSpacing` |
 | Rival difficulty | `rivals[].skill`, `.aggression`, `.boostUse` |
 | Surge payoff | `flow.surgeDuration`, `flow.surgeTimeDilation` |
+| How far you can see | `scene.js` fog density (0.00055) — a gameplay value, not just atmosphere |
 
 The sim runs on a fixed 120 Hz timestep with an accumulator, so these numbers mean
 the same thing on a 60 Hz laptop and a 165 Hz monitor.

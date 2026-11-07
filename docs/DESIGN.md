@@ -137,6 +137,19 @@ Two causes, two fixes:
    was taught the same manoeuvre, which is what lets the harness prove a seed is
    completable.
 
+Three more were found by reading the browser-only code rather than by testing,
+because none of them are reachable headlessly:
+
+- **The run started before the player did.** The `Race` constructor armed the
+  countdown and the main loop steps the sim during `'countdown'`, so the grid went
+  green behind the title screen. A fresh race now sits in `'menu'` until launch.
+- **Fog hid the entire gate chain.** `FogExp2` at density 0.0016 is 92% opaque at
+  1000 m and 100% at 1500 m — you were flying blind into rings you could not see.
+  At 0.00055 the chain still reads at 1500 m (49%) and fades by 4000 m. Fog density
+  is now documented as a gameplay value, not atmosphere.
+- **Results only ever showed once.** `_resultsShown` was cleared on corridor build
+  but not on restart, so finishing a second run produced nothing.
+
 Second bug of the same family: solid impacts re-applied a full speed bleed every
 frame, so a craft pressed against a pylon bled to zero and welded itself there
 (5347 impacts in one run, 25 seconds stuck at 0 m/s). Collision now removes only
@@ -215,8 +228,10 @@ The architecture was split so the port is a mapping exercise, not a rewrite.
 
 Things this prototype does not answer, and should not pretend to:
 
-- **What is the meta?** One-shot runs need a reason to replay: time ghosts, async
-  leaderboards per seed, or a roguelite upgrade layer between runs.
+- **Is the meta enough?** Per-seed time ghosts now give one-shot runs a reason to
+  replay, and the seeded URL makes async comparison trivial. What is *not* built:
+  online leaderboards per seed, a vehicle roster, or a progression layer between
+  runs. Ghosts are the cheap 80%; the question is whether they carry retention.
 - **How much verticality is too much?** `gateVertical` at ±46 m feels good at
   460 km/h. At 620 km/h in surge it may read as noise. Needs a playtest sweep.
 - **Should a run ever end early?** Currently a miss never ends the run. A "three

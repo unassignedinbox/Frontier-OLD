@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { CFG } from '../config.js';
 import { Vehicle, yawFromDirection } from './vehicle.js';
 import { AiDriver } from './ai.js';
+import { GhostRecorder, GHOST_SAMPLE_INTERVAL } from './ghost.js';
 import { Rng, clamp, clamp01 } from '../core/mathx.js';
 
 const CRAFT_RADIUS = 4.0;
@@ -33,9 +34,20 @@ export class Race {
       onPosition: null, onSector: null, onStart: null
     };
 
+    this.recorder = new GhostRecorder();
+    this.ghostPlayback = null;
+    this.ghostVehicle = null;
+    this.ghostActive = false;
+    this.ghostFinished = false;
+    this.ghostTime = 0;
+
     this._buildSpatialHash();
     this._buildCraft();
     this.reset();
+    // reset() arms the countdown; the run must not start ticking until the
+    // player actually launches it, otherwise the grid goes green behind the
+    // title screen. The app moves us to 'countdown' via reset() on launch.
+    this.state = 'menu';
   }
 
   // -------------------------------------------------------------------------
@@ -95,6 +107,10 @@ export class Race {
     for (const g of course.gates) { g.claimed = false; g.missed = false; }
     for (const pad of course.boostPads) pad.used = false;
     this.skimmed = new Set();
+    this.recorder.reset();
+    this.ghostTime = 0;
+    this.ghostActive = !!(this.ghostPlayback && !this.ghostPlayback.empty);
+    this.ghostFinished = false;
     this.splits = [];
     this.bestCombo = 0;
     this.score = 0;
@@ -131,6 +147,54 @@ export class Race {
     this.combo = 1;
     this.updateStandings();
   }
+
+  /**
+   * Attach the stored best run for this seed so it flies alongside as a rival.
+   * The ghost is kinematic — it is a recording, so it takes no part in
+   * collision or standings.
+   */
+  setGhost(playback) {
+    this.ghostPlayback = playback && !playback.empty ? playback : null;
+    if (!this.ghostPlayback) { this.ghostVehicle = null; this.ghostActive = false; return; }
+    if (!this.ghostVehicle) {
+      this.ghostVehicle = new Vehicle(this.cfg, {
+        name: 'GHOST', color: 0xa8c8ff,
+        terrain: (x, z) => this.course.terrainHeight(x, z)
+      });
+      this.ghostVehicle.speedCapMul = 1;
+    }
+    // Deliberately not reset(): attaching a ghost must not re-arm the
+    // countdown on a race that is already running or still on the menu.
+    this.ghostTime = 0;
+    this.ghostFinished = false;
+    this.ghostActive = true;
+    this._sampleGhost();
+  }
+
+  _sampleGhost() {
+    if (!this.ghostActive || !this.ghostVehicle) return;
+    const g = this.ghostPlayback;
+    const s = g.sample(this.ghostTime);
+    if (!s) return;
+    const v = this.ghostVehicle;
+    const prev = v.position.clone();
+    v.position.set(s.x, s.y, s.z);
+    v.yaw = s.yaw;
+    v.pitch = s.pitch;
+    v.roll = 0;
+    // Give the view a plausible speed so its trail and engine read correctly.
+    const moved = v.position.distanceTo(prev);
+    if (moved > 0) v.speed = moved / GHOST_SAMPLE_INTERVAL;
+    if (this.ghostTime >= g.time) { this.ghostActive = false; this.ghostFinished = true; }
+  }
+
+  /** Seconds behind your ghost at equal progress. Positive = behind. */
+  get ghostDelta() {
+    if (!this.ghostPlayback) return null;
+    return this.ghostPlayback.deltaAt(this.player.arc, this.elapsed);
+  }
+
+  get ghostBestTime() { return this.ghostPlayback ? this.ghostPlayback.time : null; }
 
   start() {
     this.state = 'racing';
@@ -196,6 +260,10 @@ export class Race {
     this._gates();
     this._skimming();
     this.updateStandings();
+
+    this.recorder.record(this.elapsed, this.player, this.player.arc);
+    this.ghostTime += dt;
+    this._sampleGhost();
 
     if (this.player.finished && this.state === 'racing') {
       this.state = 'finished';
@@ -463,6 +531,7 @@ export class Race {
   stepCooldown(dt) {
     this.elapsed += dt;
     this.time += dt;
+    if (this.ghostActive) { this.ghostTime += dt; this._sampleGhost(); }
     let pending = 0;
     for (const d of this.drivers) {
       const v = d.vehicle;

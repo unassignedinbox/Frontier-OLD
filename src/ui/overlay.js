@@ -35,8 +35,11 @@ export class Overlay {
   hide() { this.el.classList.add('hidden'); this.kind = null; }
   show(kind) { this.el.classList.remove('hidden'); this.kind = kind; }
 
-  title(seed) {
+  title(seed, bestTime = null) {
     this.show('title');
+    const best = bestTime != null
+      ? `<div style="font-size:11px;letter-spacing:.24em;color:#7cffb2;margin-top:14px">YOUR BEST ON THIS CORRIDOR &nbsp; ${fmtTime(bestTime)}</div>`
+      : `<div style="font-size:11px;letter-spacing:.24em;color:#4c7288;margin-top:14px">NO TIME RECORDED ON THIS CORRIDOR</div>`;
     this.el.innerHTML = `
       <div>
         <h1>FRONTIER</h1>
@@ -56,6 +59,7 @@ export class Overlay {
           </div>
           <button data-act="start">LAUNCH RUN</button>
           <button class="ghost" data-act="reseed">NEW CORRIDOR</button>
+          ${best}
           <div id="seedLine">CORRIDOR SEED ${seed}</div>
         </div>
       </div>`;
@@ -91,6 +95,7 @@ export class Overlay {
     this.el.innerHTML = `
       <div>
         <h1 style="font-size:${won ? 62 : 52}px;color:${won ? '#7cffb2' : '#ffffff'}">${won ? 'RUN WON' : 'RUN COMPLETE'}</h1>
+        ${res.newBest ? '<div class="sub" style="color:#7cffb2;letter-spacing:.36em">NEW CORRIDOR RECORD — SAVED AS YOUR GHOST</div>' : ''}
         <div class="sub">YOU FINISHED ${medals[(res.rank || 1) - 1] || res.rank}</div>
         <div class="panel">
           <div id="results">
@@ -99,6 +104,7 @@ export class Overlay {
             <div class="row"><span>GATES</span><b>${res.gates} / ${res.total}</b></div>
             <div class="row"><span>BEST CHAIN</span><b>x${res.bestCombo}</b></div>
             <div class="row"><span>FLOW SCORE</span><b>${res.score.toLocaleString()}</b></div>
+            ${res.ghostBest != null ? `<div class="row"><span>GHOST TO BEAT</span><b>${fmtTime(res.ghostBest)}</b></div>` : ''}
             <hr/>
             ${splits}
             <hr/>

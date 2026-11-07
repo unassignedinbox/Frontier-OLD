@@ -58,7 +58,9 @@ export class World {
 
   // -------------------------------------------------------------------------
   _buildSky() {
-    this.scene.fog = new THREE.FogExp2(0x0a1424, 0.0016);
+    // Density is a gameplay value, not just atmosphere: the gate chain must
+    // still read at ~1500 m or you are flying blind into the next ring.
+    this.scene.fog = new THREE.FogExp2(0x0a1424, 0.00055);
     this.scene.background = new THREE.Color(0x05070f);
 
     const skyMat = new THREE.ShaderMaterial({
@@ -445,7 +447,7 @@ export class World {
     }
 
     // --- fog tightens with speed for a tunnel-vision rush --------------------
-    this.scene.fog.density = 0.0015 + player.speedNorm * 0.0006;
+    this.scene.fog.density = 0.00045 + player.speedNorm * 0.00025;
     void px; void pz;
   }
 }

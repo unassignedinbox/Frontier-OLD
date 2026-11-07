@@ -18,6 +18,7 @@ import { Input } from './core/input.js';
 import { AudioEngine } from './core/audio.js';
 import { createCourse } from './world/course.js';
 import { Race } from './sim/race.js';
+import { GhostStore } from './sim/ghost.js';
 import { World } from './render/scene.js';
 import { CraftView } from './render/craft.js';
 import { Hud } from './ui/hud.js';
@@ -153,7 +154,7 @@ class App {
     addEventListener('resize', () => this.onResize());
     addEventListener('keydown', (e) => this.onKey(e));
 
-    this.overlay.title(this.seed);
+    this.overlay.title(this.seed, this.race.ghostBestTime);
     this.loop = this.loop.bind(this);
     requestAnimationFrame(() => {
       const boot = document.getElementById('boot');
@@ -186,6 +187,9 @@ class App {
       this.craftViews.forEach((v) => v.dispose());
     }
 
+    // Attach this seed's stored best run, if we have one.
+    this.race.setGhost(GhostStore.load(this.seed));
+
     this.world = new World(this.scene, this.course, cfg);
     this.craftViews = [];
     for (const v of this.race.craft) {
@@ -194,6 +198,16 @@ class App {
       this.scene.add(view.groundGlow);
       if (view.trail) this.scene.add(view.trail);
       this.craftViews.push(view);
+    }
+    if (this.race.ghostVehicle) {
+      const gv = new CraftView(this.race.ghostVehicle, cfg, { ghost: true });
+      gv.group.visible = true;
+      this.scene.add(gv.group);
+      if (gv.trail) this.scene.add(gv.trail);
+      this.craftViews.push(gv);
+      this.ghostView = gv;
+    } else {
+      this.ghostView = null;
     }
 
     this.hud = new Hud(this.root, this.course);
@@ -280,8 +294,7 @@ class App {
     this.ensureAudio();
     switch (act) {
       case 'start':
-        this.overlay.hide();
-        this.input.requestLock();
+        this.beginRun();
         break;
       case 'resume':
         this.overlay.hide();
@@ -289,23 +302,31 @@ class App {
         this.input.requestLock();
         break;
       case 'restart':
-        this.overlay.hide();
-        this.race.reset();
-        this.rig.snap(this.race.player);
-        this.input.requestLock();
+        this.beginRun();
         break;
       case 'menu':
         this.race.state = 'menu';
-        this.overlay.title(this.seed);
+        this.overlay.title(this.seed, this.race.ghostBestTime);
         break;
       case 'reseed': {
         const s = (new Rng((Math.random() * 0xffffffff) >>> 0).int(1, 2 ** 31 - 1)) >>> 0;
         this.overlay.hide();
         this.buildRun(s);
-        this.overlay.title(this.seed);
+        this.overlay.title(this.seed, this.race.ghostBestTime);
         break;
       }
     }
+  }
+
+  /** Launch (or relaunch) a run: clears per-run state the loop depends on. */
+  beginRun() {
+    this.overlay.hide();
+    this.race.reset();          // -> 'countdown'
+    this.rig.snap(this.race.player);
+    this._resultsShown = false; // without this the second finish shows nothing
+    this._cooldown = 0;
+    this.acc = 0;
+    this.input.requestLock();
   }
 
   ensureAudio() {
@@ -331,8 +352,7 @@ class App {
       else if (this.overlay.kind === 'pause') { this.overlay.hide(); this.race.pause(false); }
     }
     if (e.code === 'KeyR' && !e.repeat) {
-      this.race.reset();
-      this.rig.snap(this.race.player);
+      this.beginRun();
       this.hud.toast('RUN RESET', 0.9);
     }
     if (e.code === 'KeyC' && !e.repeat) {
@@ -388,11 +408,21 @@ class App {
       if (!this._resultsShown && this._cooldown <= 0) {
         this._resultsShown = true;
         this.race.settleResults();
-        this.overlay.results(this.race.results());
+        const res = this.race.results();
+        // A completed run becomes next run's opponent, if it was faster.
+        const newBest = GhostStore.saveIfBest(this.seed, this.race.recorder);
+        if (newBest) this.race.setGhost(GhostStore.load(this.seed));
+        res.ghostBest = this.race.ghostBestTime;
+        res.newBest = newBest;
+        this.overlay.results(res);
       }
     }
 
     // --- present -------------------------------------------------------------
+    if (this.ghostView) {
+      this.ghostView.group.visible = this.race.state !== 'menu';
+      this.ghostView.trail.visible = this.ghostView.group.visible;
+    }
     for (let i = 0; i < this.craftViews.length; i++) {
       this.craftViews[i].update(dt, this.terrain);
     }

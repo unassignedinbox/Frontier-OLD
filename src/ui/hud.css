@@ -24,6 +24,13 @@
 #pos .of { font-size: 18px; color: #5f8ba3; margin-left: 6px; letter-spacing: .16em; }
 #clock { font-size: 22px; letter-spacing: .1em; color: #7fe3ff; margin-top: 4px; }
 #sector { font-size: 11px; letter-spacing: .28em; color: #4c7288; margin-top: 6px; }
+#ghostLine {
+  font-size: 13px; letter-spacing: .16em; margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+#ghostLine.none   { color: #4c7288; font-size: 10px; letter-spacing: .24em; }
+#ghostLine.ahead  { color: #7cffb2; text-shadow: 0 0 14px rgba(124,255,178,.55); }
+#ghostLine.behind { color: #ff6b7d; text-shadow: 0 0 14px rgba(255,107,125,.5); }
 
 /* ---- gate chain + combo ---- */
 #gates { font-size: 13px; letter-spacing: .3em; color: #7fe3ff; }

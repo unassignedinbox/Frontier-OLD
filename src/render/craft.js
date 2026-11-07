@@ -11,9 +11,10 @@ import { clamp01 } from '../core/mathx.js';
 const TRAIL_POINTS = 46;
 
 export class CraftView {
-  constructor(vehicle, cfg, { trail = true } = {}) {
+  constructor(vehicle, cfg, { trail = true, ghost = false } = {}) {
     this.vehicle = vehicle;
     this.cfg = cfg;
+    this.isGhost = ghost;
     this.group = new THREE.Group();
     this.group.matrixAutoUpdate = true;
 
@@ -101,6 +102,18 @@ export class CraftView {
     this.groundGlow.rotation.x = -Math.PI / 2;
     this.groundGlow.visible = false;
 
+    if (ghost) {
+      for (const m of Object.values(this.mats)) {
+        m.transparent = true;
+        m.opacity = 0.30;
+        m.depthWrite = false;
+        if (m.emissiveIntensity !== undefined) m.emissiveIntensity *= 0.7;
+      }
+      this.mats.tip.transparent = true;
+      this.mats.tip.opacity = 0.45;
+      this.mats.tip.depthWrite = false;
+    }
+
     // --- ribbon trail ---------------------------------------------------------
     if (trail) this._buildTrail(body);
 
@@ -164,15 +177,16 @@ export class CraftView {
     }
 
     // Ground cushion
+    if (this.isGhost) { this.groundGlow.visible = false; }
     const gh = terrain(v.position.x, v.position.z);
     const dy = v.position.y - gh;
-    if (dy < 60) {
+    if (!this.isGhost && dy < 60) {
       this.groundGlow.visible = true;
       this.groundGlow.position.set(v.position.x, gh + 0.6, v.position.z);
       const k = 1 - Math.min(1, dy / 60);
       this.groundMat.opacity = 0.05 + k * 0.35;
       this.groundGlow.scale.setScalar(0.7 + k * 0.9);
-    } else {
+    } else if (!this.isGhost) {
       this.groundGlow.visible = false;
     }
 
