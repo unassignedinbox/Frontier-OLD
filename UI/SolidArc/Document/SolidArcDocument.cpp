@@ -3257,6 +3257,10 @@ SolidArcEdgePath SolidArcEdgePathBetween(const SolidArcDocument& Document, const
     return Path;
 }
 
+#if defined(_MSC_VER)
+// MSVC's optimizer also trips while compiling the small public wrapper after type erasure; leave this infrequent command unoptimized.
+#pragma optimize("", off)
+#endif
 SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target, const std::vector<std::string>& Tools,
                                               FeatureCombination Combination)
 {
@@ -3280,6 +3284,9 @@ SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const s
     };
     return RunCommandErased(Document, Label, false, Apply);
 }
+#if defined(_MSC_VER)
+#pragma optimize("", on)
+#endif
 
 SolidArcCommandOutcome CutSolidArcBody(SolidArcDocument& Document, const SolidArcCutRequest& Request)
 {
