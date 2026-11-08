@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-07
 **Branch:** `arena/ff6cc303-frontier`
-**Baseline commit:** `7adaddf` (`Validate vehicle curve pack domains transactionally`, pushed on `arena/ff6cc303-frontier`)
+**Baseline commit:** `d5212e0` (current pushed baseline on `arena/ff6cc303-frontier`; native visual follow-up in progress)
 
 ## Goal and verification rules
 
@@ -58,7 +58,7 @@ Continue from the committed Fluid Editor / physics workspace work. Implement the
 1. Extracted the reusable bounded curve editor and migrated Vehicle response maps while preserving knot insertion, deletion, ordered X values, revision updates and existing curve persistence.
 2. Added version-1 TOML `.vcurves` export/import. Import validates the format/version, curve arrays, finite runtime-float knots, strict ordering and per-curve authored limits; partial overrides ignore unknown future names, preserve omitted curves and apply transactionally only after every recognized curve validates.
 3. Added the Vehicle Workbench for components, quick configuration, ABS/traction aids, telemetry, linked child Tyre inspectors, proving-ground flow and the existing reset request path. Added debounced Jolt hard-impact events for vehicle chassis contacts with metal/concrete geometry and routed them through editor/runtime viewport requests to an additive GI billboard pass.
-4. Verification: Everest runtime and editor C++ targets build; GlobalIllumination archives compile/store/verify at 50 entries / 65 shader sources / 0 failures; focused CTests pass for `VehicleCurvePackValidation`, `VehicleImpactEventValidation`, `PhysicsSpaceValidation`, `VehicleDynamicsValidation`, and `TyreCarcassValidation` (5/5). The curve-pack test was rerun after adding authored-range enforcement (1/1). Native UI interaction and the rendered spark appearance remain unverified. The derez-effect audit is still a separate VFX follow-up.
+4. Verification: Everest runtime and editor C++ targets build; GlobalIllumination archives compile/store/verify at 50 entries / 65 shader sources / 0 failures; focused CTests pass for `VehicleCurvePackValidation`, `VehicleImpactEventValidation`, `PhysicsSpaceValidation`, `VehicleDynamicsValidation`, and `TyreCarcassValidation` (5/5). The curve-pack test was rerun after adding authored-range enforcement (1/1). Native/offscreen `VehicleWorkspaceCapture --ui-only` now builds and runs with SwiftShader against a temporary Everest project; the engine-curve editor, four-corner Tyre bay, linked Tyre inspector and live telemetry were visually reviewed. The opt-in Vehicle Workbench itself was not opened in this capture, and mouse gestures/file-dialog interaction remain unverified. The separate impact-spark raster now captures synthetic metal and concrete inputs through the production additive GI pass; its 480 × 270 image shows both coloured bursts, and the baseline comparison reported 6,655 changed pixels (3,048 warm / 3,584 cool). `SceneViewportValidation` passed its 21 checks at low quality, 480 × 270, one refresh per scenario; this is a smoke run, not the full 12-refresh environment capture. The derez-effect audit remains a separate VFX follow-up.
 
 ### Batch 6 — Separate Editor and Vehicle cameras; camera components (new priority)
 
@@ -101,6 +101,8 @@ Continue from the committed Fluid Editor / physics workspace work. Implement the
 - [x] Host C++ builds for `Everest`, `EverestProjectEditor`, and focused validation targets completed. Headless configuration disabled GLFW X11/Wayland backends because system development packages are absent.
 - [x] Compiled and stored 50 GlobalIllumination SPIR-V archives from 65 Slang sources; archive/source/hash verification reports 0 failures.
 - [x] Focused physics/vehicle CTests passed 5/5 (`PhysicsSpaceValidation`, `VehicleImpactEventValidation`, `VehicleDynamicsValidation`, `TyreCarcassValidation`, `VehicleCurvePackValidation`); after authored-range hardening, `VehicleCurvePackValidation` passed again 1/1.
-- [ ] Review vehicle/tyre inspector interaction and the impact-spark raster in a native app capture; compile/archive validation does not prove visual output.
+- [x] Built and reviewed `VehicleWorkspaceCapture --ui-only` on SwiftShader in a temporary Everest project: the Vehicle engine curve editor, four-corner Tyre bay, linked Tyre inspector and live telemetry all render. Workbench opening, pointer editing and `.vcurves` file-dialog interaction remain unverified.
+- [x] Added and visually reviewed `Exhibits/SceneViewport/Images/ImpactSparkRaster.png`; `SceneViewportValidation` compares no-spark and synthetic metal/concrete raster frames (6,655 changed pixels, warm and cool channels present). This verifies presentation only; event generation remains covered separately by `VehicleImpactEventValidation`.
+- [x] `SceneViewportValidation` passes 21/21 checks at low quality, 480 × 270, one refresh per scenario; its low-sun case now includes an actual local fog scattering volume and a stable A/B/A sun-cascade test. The 12-refresh run was not repeated after this test correction.
 - [ ] Continue the pending Batch 3/4 validations and Batch 6 camera/post-processing work; keep the user's intended Particle-physics reference unresolved until its branch is identified. Preserve the accepted Fluid Editor behavior.
 - [!] Camera continuity gap from the prior handoff remains: the camera-component/motion-blur files referenced there are not present in this branch history. No camera code changed in Batch 5; resolve the source-of-truth gap during Batch 6 before claiming camera acceptance.

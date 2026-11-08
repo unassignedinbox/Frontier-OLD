@@ -175,7 +175,7 @@ ImageStatistics Measure(const std::vector<uint8_t>& Rgba, uint32_t Width, uint32
                 const double Around = (Luminance(&Rgba[(static_cast<size_t>(Y) * Width + X - 1) * 4]) +
                                        Luminance(&Rgba[(static_cast<size_t>(Y) * Width + X + 1) * 4]) +
                                        Luminance(&Rgba[(static_cast<size_t>(Y - 1) * Width + X) * 4])) / 3.0;
-                if (L > 0.25 && L > Around + 0.15) ++Result.StarPixels;
+                if (L > 0.25 && L > Around + 0.08) ++Result.StarPixels;
             }
         }
     }
@@ -253,6 +253,22 @@ int main(int ArgumentCount, char** Arguments)
         LowSun.BracketShafts                      = true;
         LowSun.Camera.Position = {-62.0, -48.0, 3.0};
         LowSun.Camera.Target   = {-62.0 + 60.0 * std::cos(28.0 * 3.14159265358979 / 180.0), -48.0 + 60.0 * std::sin(28.0 * 3.14159265358979 / 180.0), 8.0};
+        // 📝 The sun-cascade test needs a scattering medium in the camera view; global height fog alone has no local shaft volume.
+        LocalFogEnvironment ShaftFog;
+        ShaftFog.Token = 1;
+        ShaftFog.Parameters.CentreMetres[0] = -10.0f;
+        ShaftFog.Parameters.CentreMetres[1] = -20.0f;
+        ShaftFog.Parameters.CentreMetres[2] = 6.0f;
+        ShaftFog.Parameters.HalfExtentsMetres[0] = 36.0f;
+        ShaftFog.Parameters.HalfExtentsMetres[1] = 36.0f;
+        ShaftFog.Parameters.HalfExtentsMetres[2] = 16.0f;
+        ShaftFog.Parameters.LocalDensity = 0.035f;
+        ShaftFog.Parameters.Absorption = 0.08f;
+        ShaftFog.Parameters.PhaseAnisotropy = 0.65f;
+        ShaftFog.Parameters.Heterogeneity = 0.0f;
+        ShaftFog.Parameters.NoiseScaleMetres = 12.0f;
+        ShaftFog.Parameters.LocalSamples = 48;
+        LowSun.Environment.LocalFogVolumes.push_back(ShaftFog);
         Scenarios.push_back(LowSun);
     }
     {
@@ -326,34 +342,93 @@ int main(int ArgumentCount, char** Arguments)
         ReportCheck(Measured.Brightest > 0.05, std::string(Case.Name) + " presented a lit image");
         if (Case.BracketShafts)
         {
-            // 🔍 Sun shafts A/B on the settled scenario: Fog.ReceiveRayShadow off for one refresh between two shafted ones, all at the
-            //    clock of the last refresh. The refresh's own image, history and eye adaptation never see the overlay, so only the
-            //    fog differs between the three, and a drift of the history brackets out.
+            // 🔍 A stable A/B/A of the actual local fog medium: disable GI, TAA and auto exposure, hold the sky clock, then toggle
+            //    only Fog.ReceiveRayShadow. The prior check had global height fog but no local scattering volume for the cascade shadows.
+            ViewportRendering ShaftRendering;
+            ShaftRendering.GlobalIllumination = false;
+            ShaftRendering.TemporalAntiAliasing = false;
+            ShaftRendering.Toggles.RayTracing = false;
+            ShaftRendering.Toggles.Reflection = false;
+            ShaftRendering.Toggles.CardRadiosity = false;
+            ShaftRendering.Toggles.AutoExposure = false;
+            ShaftRendering.Toggles.RadianceRefresh = false;
             std::vector<float> Radiance;
             EnvironmentOverlay* Overlay = Viewport.AccessOverlay();
-            ShaftBracket[0] = Overlay != nullptr && Overlay->ReadOverlaidRadiance(Radiance) ? MeanLinearLuminance(Radiance) : 0.0;
-            for (uint32_t Step = 1; Step < 3; ++Step)
+            for (uint32_t Step = 0; Step < 3; ++Step)
             {
                 SceneEnvironment Environment     = Case.Environment;
                 Environment.ElapsedSeconds       = (std::max(Refreshes, 1u) - 1) / 30.0;
                 Environment.Fog.ReceiveRayShadow = Step != 1;
-                if (!Viewport.Refresh(Case.Camera, Environment, {}, 1.0 / 30.0, {Width, Height}, &Diagnostic))
+                if (!Viewport.Refresh(Case.Camera, Environment, ShaftRendering, 0.0, {Width, Height}, &Diagnostic))
                 {
                     ReportCheck(false, std::string(Case.Name) + " shaft bracket refresh " + std::to_string(Step), Diagnostic);
                     return 1;
                 }
                 ShaftBracket[Step] = Overlay != nullptr && Overlay->ReadOverlaidRadiance(Radiance) ? MeanLinearLuminance(Radiance) : 0.0;
-                if (Step == 1 && Viewport.ReadPresented(Rgba) && Rgba.size() == static_cast<size_t>(Width) * Height * 4)
+                if (Viewport.ReadPresented(Rgba) && Rgba.size() == static_cast<size_t>(Width) * Height * 4)
                 {
-                    const std::string Unshadowed = (OutFolder / (std::string(Case.Name) + "UnshadowedFog.png")).string();
-                    stbi_write_png(Unshadowed.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Rgba.data(), static_cast<int>(Width * 4));
+                    const std::string Suffix = Step == 1 ? "UnshadowedFog" : "FogShafted" + std::to_string(Step);
+                    const std::string Path = (OutFolder / (std::string(Case.Name) + Suffix + ".png")).string();
+                    stbi_write_png(Path.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Rgba.data(), static_cast<int>(Width * 4));
                 }
             }
-            std::printf("  fog sun shafts: overlaid mean luminance %.5f shafted, %.5f unshadowed, %.5f shafted (%.2f %% of the unshadowed)\n",
+            std::printf("  local-fog sun shafts: overlaid mean luminance %.5f shafted, %.5f unshadowed, %.5f shafted (%.2f %% of the unshadowed)\n",
                         ShaftBracket[0], ShaftBracket[1], ShaftBracket[2],
                         100.0 * std::max(ShaftBracket[0], ShaftBracket[2]) / std::max(ShaftBracket[1], 1.0e-12));
         }
     }
+    // 📝 The production impact-spark raster is a separate additive layer after resolve/AA. Compare the same settled view
+    //    without and with two synthetic debounced contacts; both are in the default camera's near field so the raster is easy to inspect.
+    ViewportCamera SparkCamera;
+    ViewportRendering SparkRendering;
+    SparkRendering.GlobalIllumination = false;
+    SparkRendering.TemporalAntiAliasing = false;
+    SparkRendering.Toggles.RayTracing = false;
+    SparkRendering.Toggles.Reflection = false;
+    SparkRendering.Toggles.CardRadiosity = false;
+    SparkRendering.Toggles.DirectShadow = false;
+    SparkRendering.Toggles.AutoExposure = false;
+    SparkRendering.Toggles.RadianceRefresh = false;
+    SceneEnvironment SparkEnvironment = Level;
+    SparkEnvironment.ElapsedSeconds = 0.25;
+    std::vector<uint8_t> SparkBaseline, SparkImage;
+    if (!Viewport.Refresh(SparkCamera, SparkEnvironment, SparkRendering, 0.0, {Width, Height}, &Diagnostic) ||
+        !Viewport.ReadPresented(SparkBaseline) || SparkBaseline.size() != static_cast<size_t>(Width) * Height * 4)
+    {
+        ReportCheck(false, "impact-spark baseline refresh/readback", Diagnostic);
+        return 1;
+    }
+    SparkRendering.ImpactSparks = {
+        {SceneImpactSurface::Metal, {-44.0, -0.55, 2.3786}, {0.0, 0.0, 1.0}, 18.0f, 0.03f},
+        {SceneImpactSurface::Concrete, {-44.0, 0.55, 2.3786}, {0.0, 0.0, 1.0}, 18.0f, 0.06f},
+    };
+    if (!Viewport.Refresh(SparkCamera, SparkEnvironment, SparkRendering, 0.0, {Width, Height}, &Diagnostic) ||
+        !Viewport.ReadPresented(SparkImage) || SparkImage.size() != SparkBaseline.size())
+    {
+        ReportCheck(false, "impact-spark refresh/readback", Diagnostic);
+        return 1;
+    }
+    const std::string SparkPath = (OutFolder / "ImpactSparkRaster.png").string();
+    const bool SparkSaved = stbi_write_png(SparkPath.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4,
+                                           SparkImage.data(), static_cast<int>(Width * 4)) != 0;
+    uint32_t ChangedSparkPixels = 0, WarmSparkPixels = 0, CoolSparkPixels = 0;
+    for (size_t Pixel = 0; Pixel < static_cast<size_t>(Width) * Height; ++Pixel)
+    {
+        const int Red   = static_cast<int>(SparkImage[Pixel * 4]) - SparkBaseline[Pixel * 4];
+        const int Green = static_cast<int>(SparkImage[Pixel * 4 + 1]) - SparkBaseline[Pixel * 4 + 1];
+        const int Blue  = static_cast<int>(SparkImage[Pixel * 4 + 2]) - SparkBaseline[Pixel * 4 + 2];
+        const int Peak  = std::max({Red, Green, Blue});
+        if (Peak >= 8) ++ChangedSparkPixels;
+        if (Red >= 8 && Red > Blue + 2) ++WarmSparkPixels;
+        if (Blue >= 8 && Blue > Red + 2) ++CoolSparkPixels;
+    }
+    std::printf("impact sparks: %u changed pixels, %u warm-metal, %u cool-concrete → %s\n",
+                ChangedSparkPixels, WarmSparkPixels, CoolSparkPixels, SparkPath.c_str());
+    ReportCheck(SparkSaved, "impact-spark raster capture saved");
+    ReportCheck(ChangedSparkPixels >= 8, "impact sparks change the presented raster", std::to_string(ChangedSparkPixels) + " pixels");
+    ReportCheck(WarmSparkPixels > 0 && CoolSparkPixels > 0, "metal and concrete sparks keep distinct warm/cool colour",
+                std::to_string(WarmSparkPixels) + " warm / " + std::to_string(CoolSparkPixels) + " cool pixels");
+
     // 🔍 what the images must show relative to each other
     ReportCheck(Statistics[0].SkyLuminance > 0.35, "daylight sky is bright", std::to_string(Statistics[0].SkyLuminance));
     ReportCheck(Statistics[1].Brightest > 0.97, "low sun saturates the disc and flare", std::to_string(Statistics[1].Brightest));

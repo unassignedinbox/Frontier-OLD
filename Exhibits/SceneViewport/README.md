@@ -30,10 +30,18 @@ being ported 1:1. Two regions are in:
 | **Dusk — fog lit by the street lamps** | **Night — Luna, Ember, Jupiter, Mars, stars** |
 | ![Dusk](Images/DuskFogLamps.png) | ![Night](Images/NightMoonsPlanetsStars.png) |
 
-The four images come from the same `SceneViewport` the editor uses, with the environment lighting the scene. They were
+The four environment images come from the same `SceneViewport` the editor uses, with the environment lighting the scene. They were
 rendered offscreen on SwiftShader at 480 × 270 (quality `low`, 12 refreshes each) from the stored SPIR-V in
-`EngineContent/ShaderArchives`. The cameras and records are listed in `Code/SceneViewportValidation.cpp`. What the
-environment fed each refresh:
+`EngineContent/ShaderArchives`. The cameras and records are listed in `Code/SceneViewportValidation.cpp`. The separate impact-spark
+capture below uses the same native viewport and the production additive raster pass:
+
+![Synthetic metal and concrete impact sparks in the native scene viewport](Images/ImpactSparkRaster.png)
+
+`ImpactSparkRaster.png` is deliberately synthetic: it checks the renderer with one warm metal and one cool concrete `SceneImpactSpark`,
+while `VehicleImpactEventValidation` separately checks that hard Jolt contacts produce those events. The capture compares the image
+against an otherwise identical no-spark frame and verifies a visible pixel delta and both colour signatures.
+
+The environment-fed inputs for each scenario:
 
 | Scenario | Key light (refresh units) | Sky view, zenith | Cloud shadow map | Image: sky / ground |
 |---|---|---|---|---|
@@ -636,8 +644,8 @@ in double precision:
 
 ## Checks
 
-`Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 18 checks, 0 failing) checks the
-following:
+`Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 21 checks, 0 failing in the low-quality
+480 × 270 / 1-refresh smoke run) checks the following:
 
 - the environment is overlaid on the illumination device;
 - the vehicle is deactivated;
@@ -646,8 +654,9 @@ following:
 - the daylight sky is bright;
 - the low sun saturates;
 - the night sky is darker than the day and shows stars;
-- the fog's sun shafts are shadowed by the scene's sun cascades: the unshadowed refresh carries more than 0.1 % more
-  light than both shafted refreshes around it;
+- the impact-spark raster changes the no-spark image and retains distinct warm-metal and cool-concrete signatures;
+- a local fog volume's sun shafts are shadowed by the scene's sun cascades: the unshadowed refresh carries more than 0.1 % more
+  light than both shafted refreshes around it, with GI/TAA/auto-exposure disabled for this stable A/B/A;
 - what the environment fed the refresh (read back from the port's own inputs):
   - the daylight sky view is the environment's blue sky;
   - the clouds shade the ground: more than 1 % of the projected cloud shadow map shaded (optical depth above 0.05),
