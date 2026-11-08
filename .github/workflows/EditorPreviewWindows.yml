@@ -1,20 +1,20 @@
-name: Windows build (Frontier + Everest)
+name: Windows binaries (Frontier + Project Everest)
 
 on:
   push:
-    branches: ['main']
+    branches: ['main', 'arena/ff6cc303-frontier']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-build-${{ github.ref }}
+  group: windows-binaries-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   WindowsBuild:
-    name: Build Frontier.exe and Everest.exe (Windows x64)
+    name: Build Frontier.exe and Everest.exe (Windows x64, one Release build)
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
@@ -29,10 +29,16 @@ jobs:
           python -m pip install --disable-pip-version-check -r Automation/FontRequirements.txt
           python Automation/PrepareUI.py
           python Automation/PrepareFonts.py
-      - name: Configure Windows x64
+      - name: Configure Windows x64 Release
         run: cmake -S . -B Build/Windows -A x64 -DBUILD_TESTING=OFF
-      - name: Build Frontier and Everest in one Windows build
+      - name: Build only Frontier and Project Everest
         run: cmake --build Build/Windows --config Release --target Frontier Everest --parallel
-      # Optional Linux equivalent, intentionally not run by this workflow:
-      # cmake -S . -B Build/Linux -G Ninja -DBUILD_TESTING=OFF
-      # cmake --build Build/Linux --target Frontier Everest --parallel
+      - name: Upload the two Windows executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frontier-Everest-Windows-x64
+          path: |
+            Build/Windows/Release/Frontier.exe
+            Build/Windows/Release/Everest.exe
+          if-no-files-found: error
+          retention-days: 30
