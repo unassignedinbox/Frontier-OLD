@@ -103,6 +103,11 @@ def Main():
     Parser.add_argument('--executable', type=Path, required=True, help='the built Frontier.exe')
     Parser.add_argument('--solidarc-executable', type=Path, help='override the CAD executable beside a SolidArc-enabled Frontier')
     Parser.add_argument('--texture-executable', type=Path, help='override TextureWorkspace.exe beside Frontier.exe')
+    Parser.add_argument('--omit-texture-workspace', action='store_true',
+                        help='exclude TextureWorkspace.exe even when Frontier.exe contains its optional launcher')
+    Parser.add_argument('--require-everest-executable', action='store_true',
+                        help='fail if the sibling Project Everest runtime executable is missing')
+    Parser.add_argument('--readme', type=Path, help='override the default Scene Viewport README for this package')
     Parser.add_argument('--toolchain', required=True, help='e.g. "Zig 0.13.0 x86_64-windows-gnu (Automation/WindowsToolchain.cmake)"')
     Parser.add_argument('--output', type=Path, default=RepositoryRoot / 'Binaries/FrontierSceneViewport-Windows-x64.zip')
     Parser.add_argument('--omit-material-archives', action='store_true',
@@ -112,10 +117,12 @@ def Main():
     Executable = Arguments.executable.resolve()
     VerifyExecutable(Executable)
     SolidArcExecutable = LocateSolidArcExecutable(Executable, Arguments.solidarc_executable)
-    TextureExecutable = LocateTextureExecutable(Executable, Arguments.texture_executable)
+    TextureExecutable = None if Arguments.omit_texture_workspace else LocateTextureExecutable(Executable, Arguments.texture_executable)
     EverestExecutable = Executable.with_name('Everest.exe')
     if EverestExecutable.is_file():
         VerifyExecutable(EverestExecutable)
+    elif Arguments.require_everest_executable:
+        raise RuntimeError('The Project Everest runtime executable is required but was not built beside Frontier.exe')
     else:
         EverestExecutable = None
     BuildContent = Executable.parent / 'EngineContent'
@@ -177,7 +184,10 @@ def Main():
         shutil.copytree(RepositoryRoot / 'ExternalPackages/vulkan-headers/LICENSES', Notices / 'Vulkan-Headers')
         shutil.copy2(RepositoryRoot / 'Engine/Interface/Lucide.NOTICE', Notices / 'Lucide.NOTICE')
         shutil.copy2(RepositoryRoot / 'Documentation/SourceNotices.md', Notices / 'SourceNotices.md')
-        shutil.copy2(RepositoryRoot / 'Exhibits/SceneViewport/WindowsPreviewReadme.md', Installation / 'README.md')
+        if Arguments.readme is not None:
+            shutil.copy2(Arguments.readme.resolve(), Installation / 'README.md')
+        else:
+            shutil.copy2(RepositoryRoot / 'Exhibits/SceneViewport/WindowsPreviewReadme.md', Installation / 'README.md')
         Revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=RepositoryRoot, text=True).strip()
         Metadata = {
             'format': 1, 'target': 'Windows x64', 'toolchain': Arguments.toolchain, 'revision': Revision,
@@ -187,7 +197,7 @@ def Main():
                          'executable_sha256': Digest(SolidArcExecutable) if SolidArcExecutable is not None else None},
             'texture_workspace': {'included': TextureExecutable is not None,
                                   'executable_sha256': Digest(TextureExecutable) if TextureExecutable is not None else None,
-                                  'material_presets': not Arguments.omit_material_archives},
+                                  'material_presets': TextureExecutable is not None and not Arguments.omit_material_archives},
             'scene_viewport': 'Project Everest > Scene Viewport: ported VehicleHMI ReSTIR GI + PlanetaryAtmosphere environment',
             'omitted': ['EngineContent/MaterialArchives', 'Projects/Everest/Content/MaterialArchives'] if Arguments.omit_material_archives else [],
             'shader_sets': ShaderCounts, 'startup_files_verified': StartupFiles + StartupFolders,

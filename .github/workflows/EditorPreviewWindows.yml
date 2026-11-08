@@ -80,18 +80,39 @@ jobs:
             }
             exit $BuildExit
           }
-      - name: Upload Frontier.exe
+      - name: Package Frontier, Everest and required runtime content
+        shell: pwsh
+        run: |
+          python Automation/PackageEditorPreviewWindows.py `
+            --executable Build/Windows/Release/Frontier.exe `
+            --toolchain 'ClangCL, Visual Studio 2022, Windows x64 Release (GitHub windows-2022)' `
+            --omit-texture-workspace `
+            --require-everest-executable `
+            --readme Automation/FrontierEverestWindowsReadme.md `
+            --output Binaries/Frontier-Everest-Windows-x64.zip
+          $ArtifactRoot = Join-Path $env:GITHUB_WORKSPACE 'WindowsArtifact'
+          New-Item -ItemType Directory -Path $ArtifactRoot -Force | Out-Null
+          Expand-Archive -LiteralPath 'Binaries/Frontier-Everest-Windows-x64.zip' -DestinationPath $ArtifactRoot -Force
+          $PackageRoot = Join-Path $ArtifactRoot 'Frontier-Everest-Windows-x64'
+          foreach ($Required in @(
+            'Frontier.exe',
+            'Everest.exe',
+            'EngineContent/FontArchives/FontCatalogue.json',
+            'EngineContent/ShaderArchives/Surface/BrowserPreviewVertex.spv',
+            'Projects/Everest/Everest.projectspace',
+            'Projects/Everest/Content/Levels/Lobby.levelspace',
+            'Package.json',
+            'README.md'
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot $Required))) {
+              throw "Incomplete Frontier + Everest bundle: missing $Required"
+            }
+          }
+      - name: Upload one complete Frontier + Everest ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Frontier-Windows-x64
-          path: Build/Windows/Release/Frontier.exe
-          if-no-files-found: error
-          retention-days: 30
-      - name: Upload Everest.exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: Everest-Windows-x64
-          path: Build/Windows/Release/Everest.exe
+          name: Frontier-Everest-Windows-x64
+          path: WindowsArtifact/Frontier-Everest-Windows-x64/**
           if-no-files-found: error
           retention-days: 30
       - name: Upload build log for diagnosis
