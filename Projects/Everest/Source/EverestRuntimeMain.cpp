@@ -317,7 +317,9 @@ int main(int, char**)
                                                                                        : Frontier::SceneImpactSurface::Concrete;
                 Spark.PointMetres = Event.PointMetres;
                 Spark.Normal = Event.Normal;
+                Spark.RelativeVelocityMps = Event.RelativeVelocityMps;
                 Spark.ClosingSpeedMps = Event.ClosingSpeedMps;
+                Spark.EventSeed = Event.EventSeed;
                 ImpactSparks.push_back(Spark);
             }
         }

@@ -70,8 +70,9 @@ int main()
 
     const auto Metal = Strike(PhysicsImpactSurface::Metal, 6.0);
     Passed &= Check(Metal.has_value() && Metal->VehicleRecord == 42u && Metal->SurfaceRecord == 77u &&
-                        Metal->Surface == PhysicsImpactSurface::Metal && Metal->ClosingSpeedMps >= 4.5f && Metal->Normal[2] > 0.7,
-                    "fast chassis-to-metal contact carries record IDs, closing speed and outward normal");
+                        Metal->Surface == PhysicsImpactSurface::Metal && Metal->ClosingSpeedMps >= 4.5f && Metal->Normal[2] > 0.7 &&
+                        Metal->RelativeVelocityMps[2] < -4.5 && Metal->EventSeed != 0,
+                    "fast chassis-to-metal contact carries point velocity, outward normal, IDs and a stable particle seed");
 
     const auto Concrete = Strike(PhysicsImpactSurface::Concrete, 6.0);
     Passed &= Check(Concrete.has_value() && Concrete->Surface == PhysicsImpactSurface::Concrete && Concrete->Normal[2] > 0.7,

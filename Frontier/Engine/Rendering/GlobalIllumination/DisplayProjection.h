@@ -49,7 +49,7 @@ class DisplayProjection
     //    adaptation meters the recombined image, so the overlay leaves the exposure where the demo puts it.
     void RecordRecombination(CommandSequence& Sequence);
     void RecordAntialias(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Source);
-    void RecordImpactSparks(CommandSequence& Sequence, uint32_t Parity);
+    void RecordImpactSparks(CommandSequence& Sequence, uint32_t Parity, uint32_t InstanceCount);
     void RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target);
 
     std::array<uint32_t, 2>                           ScreenExtent{0, 0};
@@ -68,7 +68,7 @@ class DisplayProjection
     std::shared_ptr<DeviceProgram>    RecombineProgram_{}, AntialiasProgram_{}, ExposureProgram_{}, PresentProgram_{}, InspectionProgram_{}, ImpactSparkProgram_{};
     std::shared_ptr<DescriptorGroup>  RecombineGroup_{}, RecombinedExposureGroup_{}, InspectionGroup_{};
     std::array<std::shared_ptr<DescriptorGroup>, 2> AntialiasGroups_{}, ExposureGroups_{}, PresentGroups_{}, SourceAntialiasGroups_{}, ImpactSparkGroups_{};
-    std::shared_ptr<DeviceTextureView>              AntialiasSource_{};
+    std::shared_ptr<DeviceTextureView>              AntialiasSource_{}, DepthView_{};
     std::shared_ptr<DeviceTexture>    FlareVisibilityTexture_{}, FlareImageTexture_{}, FlareTransmissionTexture_{}, IdleSmokeTexture_{};
 };
 

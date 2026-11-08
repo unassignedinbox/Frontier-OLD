@@ -26,14 +26,15 @@ enum class SceneImpactSurface : uint32_t
     Concrete,
 };
 
-// 📝 One debounced hard-impact spark transferred from Jolt; AgeSeconds advances in the renderer until its short afterglow ends.
+// 📝 One newly drained Jolt hard-impact event. The renderer emits a packet from its contact velocity; it is not itself a sprite.
 struct SceneImpactSpark
 {
-    SceneImpactSurface  Surface = SceneImpactSurface::Metal;
+    SceneImpactSurface    Surface = SceneImpactSurface::Metal;
     std::array<double, 3> PointMetres{};
-    std::array<double, 3> Normal{0.0, 0.0, 1.0};
+    std::array<double, 3> Normal{0.0, 0.0, 1.0};      // [-] outward from the hard surface toward the vehicle
+    std::array<double, 3> RelativeVelocityMps{};       // [m/s] vehicle contact-point velocity relative to the surface
     float                 ClosingSpeedMps = 0.0f;
-    float                 AgeSeconds = 0.0f;
+    uint32_t              EventSeed = 0;              // [-] stable seed from Jolt's debounced contact
 };
 
 // 📝 What the Scene Viewport asks the host application to render and present each interface tick; the host owns the device

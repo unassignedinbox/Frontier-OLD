@@ -10,6 +10,7 @@
 #include "Frontier/Engine/Interface/SceneViewportPresentation.h"
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
+#include "Frontier/Engine/Rendering/SceneViewport/ImpactSparkSequence.h"
 #include "Frontier/Engine/Scene/SolarPlacement.h"
 
 #include <array>
@@ -74,7 +75,7 @@ class RenderingExtension
     SceneGeometryOccupancy                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
     const Frontier::GlobalIllumination::SceneStructure*          GeometryScene_ = nullptr;    // [-] the scene Geometry_ was reset with
     SceneViewportPick                                            Pick_{};                     // [-] the answer to the last pick serial
-    std::vector<SceneImpactSpark>                                ActiveImpactSparks_{};       // [-] debounced sparks fading through the next few GI frames
+    ImpactSparkSequence                                           ImpactSparks_{};             // [-] ballistic particles emitted from newly drained Jolt contacts
     bool                                                         VehicleShown_       = false; // [-] occupants 0..4 currently active
     RecordToken                                                  ActiveVehicleToken_{};       // [-] shown vehicle record for viewport picking
     std::array<RecordToken, 4>                                   ActiveCornerTokens_{};       // [-] enclosed FL/FR/RL/RR tyre tokens

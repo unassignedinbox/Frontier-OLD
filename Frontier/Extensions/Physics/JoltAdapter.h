@@ -46,6 +46,7 @@ class JoltContactTally final : public JPH::ContactListener
     std::vector<BodyMetadata> Metadata;
     std::vector<PhysicsImpactEvent> PendingImpacts;
     std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> LastImpactByPair;
+    uint32_t NextImpactSeed = 1;
 };
 
 class JoltAdapter final : public PhysicsAdapter

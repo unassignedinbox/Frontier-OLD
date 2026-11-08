@@ -167,16 +167,7 @@ RenderingExtension::RenderingExtension(std::filesystem::path ProjectRoot, std::f
 SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Request, const Frontier::WorldSpace& World, double ElapsedSeconds)
 {
     SceneViewportRefresh Outcome;
-    const float SparkDelta = static_cast<float>(std::clamp(Request.DeltaSeconds, 0.0, 0.25));
-    for (SceneImpactSpark& Spark : ActiveImpactSparks_) Spark.AgeSeconds += SparkDelta;
-    std::erase_if(ActiveImpactSparks_, [](const SceneImpactSpark& Spark) { return Spark.AgeSeconds >= 0.75f; });
-    for (SceneImpactSpark Spark : Request.ImpactSparks)
-    {
-        Spark.AgeSeconds = 0.0f;
-        ActiveImpactSparks_.push_back(Spark);
-    }
-    if (ActiveImpactSparks_.size() > 32u)
-        ActiveImpactSparks_.erase(ActiveImpactSparks_.begin(), ActiveImpactSparks_.begin() + static_cast<std::ptrdiff_t>(ActiveImpactSparks_.size() - 32u));
+    ImpactSparks_.Advance(Request.DeltaSeconds, Request.ImpactSparks);
 
     Frontier::RenderPipelineConfiguration Pipeline;
     if (const auto* Entry = FindEntry<Frontier::RenderPipelineRecord>(World, "RenderPipeline")) Pipeline = Entry->QueryConfiguration();
@@ -385,7 +376,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     };
     Rendering.DiffuseFilter = Filter(Pipeline.DiffuseWaveletLevels, Pipeline.DiffuseTallyLimit, Pipeline.DiffuseMinimumWeight, Pipeline.DiffuseColourSigma);
     Rendering.GlossyFilter  = Filter(Pipeline.GlossyWaveletLevels, Pipeline.GlossyTallyLimit, Pipeline.GlossyMinimumWeight, Pipeline.GlossyColourSigma);
-    Rendering.ImpactSparks  = ActiveImpactSparks_;
+    Rendering.ImpactSparks  = ImpactSparks_.BuildGpuRecords();
     // 📝 Screen targets follow the panel once its size held still for six interface ticks (a dragged splitter would rebuild
     //    them on every tick); meanwhile the last extent stretches over the panel.
     const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality,

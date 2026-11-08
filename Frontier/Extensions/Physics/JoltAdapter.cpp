@@ -67,6 +67,7 @@ void JoltContactTally::ClearImpactEvents()
     std::lock_guard Lock(Mutex);
     PendingImpacts.clear();
     LastImpactByPair.clear();
+    NextImpactSeed = 1;
 }
 
 std::vector<PhysicsImpactEvent> JoltContactTally::DrainImpactEvents()
@@ -83,16 +84,17 @@ void JoltContactTally::OnContactAdded(const JPH::Body& Body1, const JPH::Body& B
     Added.fetch_add(1, std::memory_order_relaxed);
     (void)Settings;
 
-    const float ClosingSpeed = std::abs((Body1.GetLinearVelocity() - Body2.GetLinearVelocity()).Dot(Manifold.mWorldSpaceNormal));
-    constexpr float ImpactSpeedThresholdMps = 4.5f;
-    if (!(ClosingSpeed >= ImpactSpeedThresholdMps)) return;
-
-    if (Manifold.mRelativeContactPointsOn1.size() == 0 || Manifold.mRelativeContactPointsOn2.size() == 0) return;
+    if (Manifold.mRelativeContactPointsOn1.empty() || Manifold.mRelativeContactPointsOn2.empty()) return;
     const uint32_t Index1 = Body1.GetID().GetIndex();
     const uint32_t Index2 = Body2.GetID().GetIndex();
     const JPH::Vec3 Normal12 = Manifold.mWorldSpaceNormal;
     const JPH::Vec3 RelativePoint = 0.5f * (Manifold.mRelativeContactPointsOn1[0] + Manifold.mRelativeContactPointsOn2[0]);
     const JPH::RVec3 Point = Manifold.mBaseOffset + RelativePoint;
+    // 📝 Include angular motion at the actual contact point: a spinning wheel/rim can strike hard while its centre barely moves.
+    const JPH::Vec3 RelativeVelocity12 = Body1.GetPointVelocity(Point) - Body2.GetPointVelocity(Point);
+    const float ClosingSpeed = std::abs(RelativeVelocity12.Dot(Normal12));
+    constexpr float ImpactSpeedThresholdMps = 4.5f;
+    if (!(ClosingSpeed >= ImpactSpeedThresholdMps)) return;
     const auto Now = std::chrono::steady_clock::now();
 
     std::lock_guard Lock(Mutex);
@@ -121,10 +123,23 @@ void JoltContactTally::OnContactAdded(const JPH::Body& Body1, const JPH::Body& B
     Event.SurfaceRecord = SurfaceRecord;
     Event.Surface = Surface;
     Event.PointMetres = { static_cast<double>(Point.GetX()), static_cast<double>(Point.GetY()), static_cast<double>(Point.GetZ()) };
-    const float Direction = VehicleFirst ? -1.0f : 1.0f;
-    Event.Normal = { Direction * static_cast<double>(Normal12.GetX()), Direction * static_cast<double>(Normal12.GetY()),
-                     Direction * static_cast<double>(Normal12.GetZ()) };
+    const float NormalDirection = VehicleFirst ? -1.0f : 1.0f;
+    const float VelocityDirection = VehicleFirst ? 1.0f : -1.0f;
+    Event.Normal = { NormalDirection * static_cast<double>(Normal12.GetX()), NormalDirection * static_cast<double>(Normal12.GetY()),
+                     NormalDirection * static_cast<double>(Normal12.GetZ()) };
+    Event.RelativeVelocityMps = { VelocityDirection * static_cast<double>(RelativeVelocity12.GetX()),
+                                  VelocityDirection * static_cast<double>(RelativeVelocity12.GetY()),
+                                  VelocityDirection * static_cast<double>(RelativeVelocity12.GetZ()) };
     Event.ClosingSpeedMps = ClosingSpeed;
+    uint32_t Seed = static_cast<uint32_t>(VehicleRecord) ^ static_cast<uint32_t>(VehicleRecord >> 32u) ^
+                    (static_cast<uint32_t>(SurfaceRecord) * 0x9E3779B9u) ^ static_cast<uint32_t>(SurfaceRecord >> 32u) ^ NextImpactSeed++;
+    if (NextImpactSeed == 0) NextImpactSeed = 1;
+    Seed ^= Seed >> 16u;
+    Seed *= 0x7FEB352Du;
+    Seed ^= Seed >> 15u;
+    Seed *= 0x846CA68Bu;
+    Seed ^= Seed >> 16u;
+    Event.EventSeed = Seed != 0 ? Seed : 1u;
     PendingImpacts.push_back(Event);
 
     if (LastImpactByPair.size() > 512u)

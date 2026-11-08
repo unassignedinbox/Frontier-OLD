@@ -1,31 +1,33 @@
 //============================================================================================================================================
 //                                                            IMPACTSPARK.SLANG
 //============================================================================================================================================
-// 🧩 Jolt's debounced chassis-to-metal/concrete contact events become short-lived, emissive spark sprites in the GI presentation pass.
+// 🧩 Jolt hard contacts emit ballistic filings; this post-AA raster draws their camera-observed motion as hot, depth-tested streaks.
 
 #pragma once
 #include "IntrinsicParity.slang"
 #include "RefreshDescriptor.slang"
 #include "ImpactSparkLayouts.slang"
 
-  [[vk::binding(1, 0)]] ConstantBuffer<ImpactSparkProfile> Impact;
+  [[vk::binding(1, 0)]] ConstantBuffer<ImpactSparkHeader> Impact;
+  [[vk::binding(2, 0)]] StructuredBuffer<ImpactSparkRecord> ImpactSparks;
 
 struct ImpactSparkVarying
 {
     float4 Position : SV_Position;
-    [[vk::location(0)]] float2 Local : LOCATION0;
+    [[vk::location(0)]] float2 Profile : LOCATION0;             // x across [-1,1], y tail→head [0,1]
     [[vk::location(1)]] nointerpolation uint SparkIndex : LOCATION1;
-    [[vk::location(2)]] float2 Axis : LOCATION2;
+    [[vk::location(2)]] float3 Radiance : LOCATION2;
+    [[vk::location(3)]] float2 Shape : LOCATION3;               // pixel width factor, shutter fraction
 };
 
 float2 ImpactSparkCorner(uint Vertex)
 {
-    if (Vertex == 0u) return float2(-1.0, -1.0);
-    if (Vertex == 1u) return float2( 1.0, -1.0);
-    if (Vertex == 2u) return float2( 1.0,  1.0);
-    if (Vertex == 3u) return float2(-1.0, -1.0);
-    if (Vertex == 4u) return float2( 1.0,  1.0);
-    return float2(-1.0,  1.0);
+    if (Vertex == 0u) return float2(0.0, -1.0);
+    if (Vertex == 1u) return float2(1.0, -1.0);
+    if (Vertex == 2u) return float2(1.0,  1.0);
+    if (Vertex == 3u) return float2(0.0, -1.0);
+    if (Vertex == 4u) return float2(1.0,  1.0);
+    return float2(0.0,  1.0);
 }
 
 float2 ImpactSparkScreen(float4 Clip)
@@ -39,39 +41,66 @@ ImpactSparkVarying ImpactSparkVertex(uint Vertex : SV_VulkanVertexID, uint Insta
 {
     var Varying : ImpactSparkVarying = {};
     Varying.SparkIndex = Instance;
-    Varying.Local = ImpactSparkCorner(Vertex);
-    Varying.Axis = float2(1.0, 0.0);
+    let Corner = ImpactSparkCorner(Vertex);
+    Varying.Profile = float2(Corner.y, Corner.x);
+    Varying.Radiance = 0.0;
+    Varying.Shape = float2(1.0, 1.0);
     if (Instance >= min(Impact.Header.x, ImpactSparkCapacity))
     {
         Varying.Position = float4(2.0, 2.0, 0.0, 1.0);
         return Varying;
     }
 
-    let Spark = Impact.Sparks[Instance];
-    let Point = Spark.PositionAge.xyz;
-    let Clip = mul(float4(Point, 1.0), Refresh.UnjitteredViewProjection);
-    let ViewDepth = -(mul(float4(Point, 1.0), Refresh.View)).z;
-    if (Clip.w <= 1.0e-4 || ViewDepth <= 0.05 || Spark.PositionAge.w >= 0.75)
+    let Spark = ImpactSparks[Instance];
+    let Head = Spark.HeadWidth.xyz;
+    let HeadClip = mul(float4(Head, 1.0), Refresh.UnjitteredViewProjection);
+    let ViewDepth = -(mul(float4(Head, 1.0), Refresh.View)).z;
+    if (HeadClip.w <= 1.0e-4 || ViewDepth <= 0.05)
     {
         Varying.Position = float4(2.0, 2.0, 0.0, 1.0);
         return Varying;
     }
 
-    let RadiusWorld = clamp(Spark.ColourSize.w, 0.08, 0.8);
-    let RadiusPixels = clamp(RadiusWorld * Refresh.ScreenExtent.y / max(ViewDepth, 0.1), 2.0, 42.0);
-    let Corner = Varying.Local;
-    let PixelOffset = Corner * RadiusPixels;
-    Varying.Position = Clip;
-    Varying.Position.xy += float2(2.0 * PixelOffset.x * Refresh.InverseScreenExtent.x,
-                                  -2.0 * PixelOffset.y * Refresh.InverseScreenExtent.y) * Clip.w;
+    var TailClip = mul(float4(Spark.TailPixelWidth.xyz, 1.0), Refresh.PreviousUnjitteredViewProjection);
+    if (TailClip.w <= 1.0e-4) TailClip = HeadClip;
+    let HeadPixels = ImpactSparkScreen(HeadClip);
+    var TailPixels = ImpactSparkScreen(TailClip);
 
-    let NormalPoint = Point + normalize(Spark.NormalSpeed.xyz) * RadiusWorld;
-    let NormalClip = mul(float4(NormalPoint, 1.0), Refresh.UnjitteredViewProjection);
-    if (NormalClip.w > 1.0e-4)
+    // 📝 Bound the raster footprint: even a near-camera filing stays hair-thin; distant ones keep a subpixel glint.
+    let CameraUp = float3(Refresh.View[0].y, Refresh.View[1].y, Refresh.View[2].y);
+    let WidthClip = mul(float4(Head + CameraUp * Spark.HeadWidth.w, 1.0), Refresh.UnjitteredViewProjection);
+    let Width = WidthClip.w > 1.0e-4
+        ? clamp(length(ImpactSparkScreen(WidthClip) - HeadPixels), 0.65, 1.35)
+        : 0.65;
+    let PixelWidth = clamp(Spark.TailPixelWidth.w, 0.35, 1.0);
+    let Shutter = clamp(Spark.RadianceShutter.w, 0.15, 1.0);
+    TailPixels = lerp(HeadPixels, TailPixels, Shutter);
+
+    var Along = HeadPixels - TailPixels;
+    let Longest = 0.2 * Refresh.ScreenExtent.y;
+    let LengthBeforeClamp = length(Along);
+    if (LengthBeforeClamp > Longest)
     {
-        let Axis = ImpactSparkScreen(NormalClip) - ImpactSparkScreen(Clip);
-        Varying.Axis = dot(Axis, Axis) > 1.0e-5 ? normalize(Axis) : float2(1.0, 0.0);
+        TailPixels = HeadPixels - Along * (Longest / LengthBeforeClamp);
+        Along = HeadPixels - TailPixels;
     }
+    let Length = length(Along);
+    Along = Length > 1.0e-3 ? Along / Length : float2(1.0, 0.0);
+    let Across = float2(-Along.y, Along.x);
+
+    // 📝 Both ends use the head's reversed-Z depth; streaks are short, and the opaque scene still occludes them.
+    let BasePixels = Corner.x > 0.5 ? HeadPixels : TailPixels;
+    let Offset = Across * Corner.y * Width * PixelWidth * lerp(0.22, 1.0, Corner.x) * 0.5 +
+                 Along * (Corner.x - 0.5) * Width * PixelWidth;
+    let Pixels = BasePixels + Offset;
+    let Ndc = float2(Pixels.x * Refresh.InverseScreenExtent.x * 2.0 - 1.0,
+                     1.0 - Pixels.y * Refresh.InverseScreenExtent.y * 2.0);
+    Varying.Position = float4(Ndc * HeadClip.w, HeadClip.z, HeadClip.w);
+
+    // 📝 The finite radiance is spread over the streak's screen footprint, as on the VehicleHMI wheel-scrape raster.
+    let Spread = Width / max(Length + Width, Width);
+    Varying.Radiance = Spark.RadianceShutter.rgb * lerp(0.35, 1.0, Spread) * Refresh.IncandescenceScale;
+    Varying.Shape = float2(PixelWidth, Shutter);
     return Varying;
 }
 
@@ -79,23 +108,8 @@ ImpactSparkVarying ImpactSparkVertex(uint Vertex : SV_VulkanVertexID, uint Insta
 float4 ImpactSparkFragment(ImpactSparkVarying Varying) : SV_Target0
 {
     if (Varying.SparkIndex >= min(Impact.Header.x, ImpactSparkCapacity)) discard;
-    let Spark = Impact.Sparks[Varying.SparkIndex];
-    let Radius = length(Varying.Local);
-    if (Radius > 1.0) discard;
-
-    let Age = max(0.0, Spark.PositionAge.w);
-    let Fade = saturate((0.75 - Age) / 0.75);
-    let Flash = exp(-Age * 11.0);
-    let Axis = normalize(Varying.Axis);
-    let Perpendicular = float2(-Axis.y, Axis.x);
-    let Along = abs(dot(Varying.Local, Axis));
-    let Across = abs(dot(Varying.Local, Perpendicular));
-    let Needle = exp(-Across * 30.0) * (1.0 - smoothstep(0.05, 1.0, Along));
-    let Angle = atan2(Varying.Local.y, Varying.Local.x);
-    let Rays = pow(saturate(abs(cos(Angle * 5.0 + float(Varying.SparkIndex) * 1.71))), 28.0) * exp(-Radius * 1.55);
-    let Core = exp(-Radius * Radius * 70.0);
-    let Halo = exp(-Radius * Radius * 5.5) * 0.16;
-    let SpeedGain = clamp((Spark.NormalSpeed.w - 4.5) * 0.16, 0.45, 1.5);
-    let Brightness = Fade * SpeedGain * (3.5 * Flash * Core + (0.5 + 1.8 * Flash) * (0.55 * Rays + 0.7 * Needle + Halo));
-    return float4(Spark.ColourSize.rgb * Brightness, 0.0);
+    let Across = pow(max(0.0, 1.0 - Varying.Profile.x * Varying.Profile.x), 2.0);
+    let Head = lerp(lerp(0.08, 0.35, Varying.Shape.y), 1.0,
+                    pow(Varying.Profile.y, lerp(0.7, 1.8, Varying.Shape.x)));
+    return float4(Varying.Radiance * Across * Head, 0.0);
 }

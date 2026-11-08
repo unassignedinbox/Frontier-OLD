@@ -265,25 +265,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         PresentedView_ = Exchange_->ConstructView(Host_->CaptureTexture);
     }
     ElapsedSeconds_ += std::max(0.0, DeltaSeconds);
-    if (Host_)
-    {
-        std::array<ImpactSparkGpuRecord, 32> Sparks{};
-        const size_t Count = std::min(Sparks.size(), Rendering.ImpactSparks.size());
-        for (size_t Index = 0; Index < Count; ++Index)
-        {
-            const SceneImpactSpark& Spark = Rendering.ImpactSparks[Index];
-            ImpactSparkGpuRecord& Packed = Sparks[Index];
-            Packed.PositionAge = {static_cast<float>(Spark.PointMetres[0]), static_cast<float>(Spark.PointMetres[1]),
-                                  static_cast<float>(Spark.PointMetres[2]), std::max(0.0f, Spark.AgeSeconds)};
-            Packed.NormalSpeed = {static_cast<float>(Spark.Normal[0]), static_cast<float>(Spark.Normal[1]), static_cast<float>(Spark.Normal[2]),
-                                  std::max(0.0f, Spark.ClosingSpeedMps)};
-            const bool Metal = Spark.Surface == SceneImpactSurface::Metal;
-            Packed.ColourSize = Metal ? std::array<float, 4>{1.0f, 0.42f, 0.10f, 0.28f}
-                                      : std::array<float, 4>{0.72f, 0.86f, 1.0f, 0.32f};
-            Packed.ColourSize[3] += std::clamp((Spark.ClosingSpeedMps - 4.5f) * 0.012f, 0.0f, 0.24f);
-        }
-        Host_->AssignImpactSparks(std::span<const ImpactSparkGpuRecord>(Sparks.data(), Count));
-    }
+    if (Host_) Host_->AssignImpactSparks(Rendering.ImpactSparks);
     if (Rendering.AnalyticIllumination)
     {
         // 📝 The analytic illumination draws the loaded scene into the same presented image; the global illumination rests.

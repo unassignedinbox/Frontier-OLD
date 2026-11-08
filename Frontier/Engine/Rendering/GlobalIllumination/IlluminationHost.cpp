@@ -20,7 +20,6 @@ namespace
 constexpr uint32_t RefreshConstantsBytes = 1072;    // [B] RefreshConstants (268 floats)
 constexpr uint32_t VehicleProfileBytes    = 10448;   // [B] VehicleProfile
 constexpr uint32_t EffectProfileBytes     = 1120;    // [B] EffectProfile
-constexpr uint32_t ImpactSparkCapacity    = 32;
 constexpr uint32_t ImpactSparkProfileBytes = 16 + ImpactSparkCapacity * 48;
 constexpr double   Pi                     = 3.141592653589793;
 
@@ -375,6 +374,7 @@ bool IlluminationHost::WriteMaterialBlock(uint32_t Block, const std::vector<uint
 
 void IlluminationHost::AssignImpactSparks(std::span<const ImpactSparkGpuRecord> Sparks)
 {
+    ImpactSparkInstanceCount = 0;
     if (!ImpactSparkRegion) return;
     struct alignas(16) ImpactSparkProfile
     {
@@ -386,6 +386,7 @@ void IlluminationHost::AssignImpactSparks(std::span<const ImpactSparkGpuRecord> 
     const size_t Count = std::min<size_t>(Sparks.size(), ImpactSparkCapacity);
     Profile.Header[0] = static_cast<uint32_t>(Count);
     std::copy_n(Sparks.begin(), Count, Profile.Sparks.begin());
+    ImpactSparkInstanceCount = static_cast<uint32_t>(Count);
     Exchange.WriteRegion(ImpactSparkRegion, 0, &Profile, sizeof(Profile));
 }
 
@@ -558,7 +559,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     if (Interlude == nullptr)
     {
         Display->RecordResolve(Begin("resolve"), Parity);
-        Display->RecordImpactSparks(Begin("impact sparks"), Parity);
+        Display->RecordImpactSparks(Begin("impact sparks"), Parity, ImpactSparkInstanceCount);
         Display->RecordPresent(Begin("present"), Parity, CaptureView);
         if (!SubmitSeries()) return false;
     }
@@ -578,7 +579,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         CommandSequence& Presentation = Begin("antialias and present");
         if (Interlude->BeforeAntialias) Interlude->BeforeAntialias(Presentation, Parity);
         Display->RecordAntialias(Presentation, Parity, Interlude->AntialiasSource);
-        Display->RecordImpactSparks(Presentation, Parity);
+        Display->RecordImpactSparks(Presentation, Parity, ImpactSparkInstanceCount);
         Display->RecordPresent(Presentation, Parity, CaptureView);
         Presentation.OrderAfterEarlierWork();
         if (!SubmitSeries()) return false;

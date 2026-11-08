@@ -18,6 +18,7 @@
 #include "UI/Editor/ControlCentrePanel.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <stb_image_write.h>
 
 #include <cfloat>
@@ -58,6 +59,7 @@ int main(int ArgumentCount, char** Arguments)
         const std::filesystem::path ShaderRoot  = std::filesystem::absolute(Arguments[3]);
         const std::filesystem::path OutputDir   = std::filesystem::absolute(Arguments[4]);
         const std::string           Only        = ArgumentCount > 5 ? Arguments[5] : "";
+        const bool                  WorkbenchOnly = Only == "ForceFieldWorkbench";
         const auto                  Wanted      = [&](const std::string& Name) { return Only.empty() || Name.find(Only) != std::string::npos; };
         std::filesystem::create_directories(OutputDir);
 
@@ -83,22 +85,25 @@ int main(int ArgumentCount, char** Arguments)
         std::vector<uint8_t>          ViewportPixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};
         std::string                   LastStatus;
-        Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest& Request) {
-            const auto                          Start   = std::chrono::steady_clock::now();
-            const Frontier::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QueryWorldSpace(), Workspace.QueryElapsedSeconds());
-            Frontier::SceneViewportImage         Image;
-            Image.Status  = Outcome.Status;
-            Image.Readout = Outcome.Readout;
-            LastStatus    = Outcome.Status;
-            if (Outcome.View != VK_NULL_HANDLE && Bridge.AccessViewport()->ReadPresented(ViewportPixels))
-            {
-                ViewportExtent = Outcome.Extent;
-                Image.Texture  = ViewportTag;
-            }
-            std::printf("  viewport image %u x %u in %.1f s - %s\n", Outcome.Extent[0], Outcome.Extent[1],
-                        std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count(), Outcome.Status.c_str());
-            return Image;
-        };
+        if (!WorkbenchOnly)
+        {
+            Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest& Request) {
+                const auto                          Start   = std::chrono::steady_clock::now();
+                const Frontier::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QueryWorldSpace(), Workspace.QueryElapsedSeconds());
+                Frontier::SceneViewportImage         Image;
+                Image.Status  = Outcome.Status;
+                Image.Readout = Outcome.Readout;
+                LastStatus    = Outcome.Status;
+                if (Outcome.View != VK_NULL_HANDLE && Bridge.AccessViewport()->ReadPresented(ViewportPixels))
+                {
+                    ViewportExtent = Outcome.Extent;
+                    Image.Texture  = ViewportTag;
+                }
+                std::printf("  viewport image %u x %u in %.1f s - %s\n", Outcome.Extent[0], Outcome.Extent[1],
+                            std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count(), Outcome.Status.c_str());
+                return Image;
+            };
+        }
 
         WorldSpace& World  = Workspace.QueryWorldSpace();
         auto*       Forces = dynamic_cast<ForceFieldRecord*>(World.FindFirstByType("ForceField"));
@@ -417,6 +422,11 @@ int main(int ArgumentCount, char** Arguments)
             InspectorRuntime::Instance().RequestWorkspaceAction("field-workspace:on");
             Settle();
             Require(Workspace.QueryDockspace().QueryOpen("ForceFieldWorkspace"), "Workspace: the Force Field / Wind dockable panel did not open");
+            Require(Workspace.QueryDockspace().QueryPresented("ForceFieldWorkspace"),
+                    "Workspace: the Force Field / Wind panel is open but its dock tab is not visible");
+            ImGuiWindow* WorkbenchWindow = ImGui::FindWindowByName("Force Field / Wind###FrontierPanel-ForceFieldWorkspace");
+            Require(WorkbenchWindow != nullptr && WorkbenchWindow->DockNode != nullptr && WorkbenchWindow->DockTabIsVisible,
+                    "Workspace: the Force Field / Wind window was not the visible dock tab");
             Require(!Workspace.AccessFieldViewport().Shown && Workspace.AccessFieldViewport().Slice != nullptr,
                     "Workspace: the dockable workbench did not host the field canvas");
             Require(InspectorRuntime::Instance().FindInspector(Tornado->QueryToken()) != nullptr,

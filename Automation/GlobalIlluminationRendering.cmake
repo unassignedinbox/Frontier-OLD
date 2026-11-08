@@ -139,6 +139,7 @@ endif()
 add_library(FrontierSceneViewport STATIC
     Frontier/Engine/Geometry/ShapeArchive.cpp
     Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
+    Frontier/Engine/Rendering/SceneViewport/ImpactSparkSequence.cpp
     Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
 target_include_directories(FrontierSceneViewport PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering FrontierAnalyticIllumination)
@@ -173,7 +174,13 @@ if(BUILD_TESTING)
         Exhibits/SceneViewport/Code/SceneViewportValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)
     target_include_directories(SceneViewportValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-    target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport)
+    target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport FrontierPhysicsExtension)
+
+    # 📝 Replays real Jolt contact events through the bounded ballistic particle sequence.
+    add_executable(ImpactSparkValidation Exhibits/SceneViewport/Code/ImpactSparkValidation.cpp)
+    target_link_libraries(ImpactSparkValidation PRIVATE FrontierSceneViewport FrontierPhysicsExtension)
+    add_test(NAME ImpactSparkValidation COMMAND ImpactSparkValidation)
+    set_tests_properties(ImpactSparkValidation PROPERTIES TIMEOUT 60)
 
     # 📝 The fifteen inspection views of one settled daylight view: the Render settings inspector's debug-view thumbnails.
     add_executable(InspectionViewCapture

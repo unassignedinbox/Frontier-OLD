@@ -45,15 +45,17 @@ enum class PhysicsImpactSurface : uint8_t
     Concrete,
 };
 
-// 📝 A new high-speed hard-surface contact involving a vehicle chassis, with a world-space point and a normal toward the vehicle.
+// 📝 A new high-speed hard-surface contact involving a vehicle chassis, with its point velocity for physically launched debris.
 struct PhysicsImpactEvent
 {
     uint64_t              VehicleRecord = 0;
     uint64_t              SurfaceRecord = 0;
     PhysicsImpactSurface  Surface = PhysicsImpactSurface::Other;
     std::array<double, 3> PointMetres{};
-    std::array<double, 3> Normal{};
+    std::array<double, 3> Normal{};                    // [-] outward from the hard surface toward the vehicle
+    std::array<double, 3> RelativeVelocityMps{};        // [m/s] vehicle point velocity relative to the surface
     float                 ClosingSpeedMps = 0.0f;
+    uint32_t              EventSeed = 0;                // [-] stable per-contact emission seed
 };
 
 inline constexpr uint32_t PhysicsNoBody = std::numeric_limits<uint32_t>::max();

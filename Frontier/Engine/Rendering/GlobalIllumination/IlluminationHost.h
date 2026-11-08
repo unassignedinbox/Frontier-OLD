@@ -9,6 +9,7 @@
 #include "DisplayProjection.h"
 #include "EnvironmentEncoding.h"
 #include "IlluminationConstants.h"
+#include "ImpactSparkGpuRecord.h"
 #include "LuminaireRegister.h"
 #include "OccupantDistanceSpace.h"
 #include "PlumeSpace.h"
@@ -89,13 +90,6 @@ constexpr uint32_t MaterialStride        = 48;   // [B] MaterialSpecification
 // 📝 Per-refresh writes not produced by the ported host modules (camera-, physics- and effect-driven buffers); a replay
 //    supplies them from a capture, the editor from its own scene.
 using RefreshWriteSupplier = std::function<void(uint32_t RefreshIndex)>;
-
-struct ImpactSparkGpuRecord
-{
-    std::array<float, 4> PositionAge{};
-    std::array<float, 4> NormalSpeed{};
-    std::array<float, 4> ColourSize{};
-};
 
 // 📝 Live inputs of one refresh: the camera the editor (or a capture) resolved, its cascade focus, and the inputs owned
 //    by systems outside the port. Without them the refresh is a pure device replay of supplied writes.
@@ -207,6 +201,7 @@ class IlluminationHost
     CelestialSolution                   LastCelestial{};
     std::optional<std::pair<Vector3, double>> PriorLight{};   // [-] direction, summed illuminance of the previous refresh
     uint32_t                            MaterialFamilyCount = 0;   // [-] Materials.bin's families and the engine shapes'
+    uint32_t                            ImpactSparkInstanceCount = 0;
     uint32_t                            RefreshIndex = 0;
     uint32_t                            ScreenGeneration = 0;   // [-] advances whenever the screen targets are rebuilt
     bool                                PriorValid   = false;

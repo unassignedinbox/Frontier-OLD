@@ -5,6 +5,8 @@
 //    environment records at day, low sun, dusk fog and night, and checks what each image must show.
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
+#include "Frontier/Engine/Rendering/SceneViewport/ImpactSparkSequence.h"
+#include "ImpactSparkFixture.h"
 
 #include "stb_image_write.h"
 
@@ -377,9 +379,12 @@ int main(int ArgumentCount, char** Arguments)
                         100.0 * std::max(ShaftBracket[0], ShaftBracket[2]) / std::max(ShaftBracket[1], 1.0e-12));
         }
     }
-    // 📝 The production impact-spark raster is a separate additive layer after resolve/AA. Compare the same settled view
-    //    without and with two synthetic debounced contacts; both are in the default camera's near field so the raster is easy to inspect.
+    // 📝 The production impact-particle raster is a separate depth-tested additive layer after resolve/AA. Replay two real Jolt
+    //    chassis contacts in a focused near-field view, then compare the same settled view with their moving streaks.
     ViewportCamera SparkCamera;
+    SparkCamera.Position = {-44.80, 0.0, 2.80};
+    SparkCamera.Target = {-44.0, 0.0, 2.3786};
+    SparkCamera.VerticalFieldOfView = 0.7853981633974483;
     ViewportRendering SparkRendering;
     SparkRendering.GlobalIllumination = false;
     SparkRendering.TemporalAntiAliasing = false;
@@ -398,10 +403,14 @@ int main(int ArgumentCount, char** Arguments)
         ReportCheck(false, "impact-spark baseline refresh/readback", Diagnostic);
         return 1;
     }
-    SparkRendering.ImpactSparks = {
-        {SceneImpactSurface::Metal, {-44.0, -0.55, 2.3786}, {0.0, 0.0, 1.0}, 18.0f, 0.03f},
-        {SceneImpactSurface::Concrete, {-44.0, 0.55, 2.3786}, {0.0, 0.0, 1.0}, 18.0f, 0.06f},
-    };
+    const std::vector<SceneImpactSpark> ReplayImpacts = FrontierExhibit::ConstructImpactReplay();
+    ReportCheck(ReplayImpacts.size() == 2, "impact raster is driven by real Jolt metal and concrete contacts",
+                std::to_string(ReplayImpacts.size()) + " contact events");
+    ImpactSparkSequence SparkSequence;
+    SparkSequence.Advance(1.0 / 60.0, ReplayImpacts);
+    SparkRendering.ImpactSparks = SparkSequence.BuildGpuRecords();
+    ReportCheck(SparkRendering.ImpactSparks.size() >= 12, "contact replay emitted ballistic GPU streak records",
+                std::to_string(SparkRendering.ImpactSparks.size()) + " live filings");
     if (!Viewport.Refresh(SparkCamera, SparkEnvironment, SparkRendering, 0.0, {Width, Height}, &Diagnostic) ||
         !Viewport.ReadPresented(SparkImage) || SparkImage.size() != SparkBaseline.size())
     {
@@ -411,7 +420,7 @@ int main(int ArgumentCount, char** Arguments)
     const std::string SparkPath = (OutFolder / "ImpactSparkRaster.png").string();
     const bool SparkSaved = stbi_write_png(SparkPath.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4,
                                            SparkImage.data(), static_cast<int>(Width * 4)) != 0;
-    uint32_t ChangedSparkPixels = 0, WarmSparkPixels = 0, CoolSparkPixels = 0;
+    uint32_t ChangedSparkPixels = 0, HotSparkPixels = 0;
     for (size_t Pixel = 0; Pixel < static_cast<size_t>(Width) * Height; ++Pixel)
     {
         const int Red   = static_cast<int>(SparkImage[Pixel * 4]) - SparkBaseline[Pixel * 4];
@@ -419,15 +428,14 @@ int main(int ArgumentCount, char** Arguments)
         const int Blue  = static_cast<int>(SparkImage[Pixel * 4 + 2]) - SparkBaseline[Pixel * 4 + 2];
         const int Peak  = std::max({Red, Green, Blue});
         if (Peak >= 8) ++ChangedSparkPixels;
-        if (Red >= 8 && Red > Blue + 2) ++WarmSparkPixels;
-        if (Blue >= 8 && Blue > Red + 2) ++CoolSparkPixels;
+        if (Red >= 8 && Red > Green + 2) ++HotSparkPixels;
     }
-    std::printf("impact sparks: %u changed pixels, %u warm-metal, %u cool-concrete → %s\n",
-                ChangedSparkPixels, WarmSparkPixels, CoolSparkPixels, SparkPath.c_str());
-    ReportCheck(SparkSaved, "impact-spark raster capture saved");
-    ReportCheck(ChangedSparkPixels >= 8, "impact sparks change the presented raster", std::to_string(ChangedSparkPixels) + " pixels");
-    ReportCheck(WarmSparkPixels > 0 && CoolSparkPixels > 0, "metal and concrete sparks keep distinct warm/cool colour",
-                std::to_string(WarmSparkPixels) + " warm / " + std::to_string(CoolSparkPixels) + " cool pixels");
+    std::printf("impact particles: %u changed pixels, %u incandescent pixels → %s\n",
+                ChangedSparkPixels, HotSparkPixels, SparkPath.c_str());
+    ReportCheck(SparkSaved, "impact-particle raster capture saved");
+    ReportCheck(ChangedSparkPixels >= 8, "moving impact streaks change the presented raster", std::to_string(ChangedSparkPixels) + " pixels");
+    ReportCheck(HotSparkPixels > 0, "particle streaks preserve incandescent blackbody colour",
+                std::to_string(HotSparkPixels) + " hot pixels");
 
     // 🔍 what the images must show relative to each other
     ReportCheck(Statistics[0].SkyLuminance > 0.35, "daylight sky is bright", std::to_string(Statistics[0].SkyLuminance));

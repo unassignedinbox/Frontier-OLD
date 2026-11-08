@@ -64,7 +64,9 @@ void AppendVehicleImpactSparks(Frontier::PhysicsExtension& Physics, std::vector<
                                                                                : Frontier::SceneImpactSurface::Concrete;
         Spark.PointMetres = Event.PointMetres;
         Spark.Normal = Event.Normal;
+        Spark.RelativeVelocityMps = Event.RelativeVelocityMps;
         Spark.ClosingSpeedMps = Event.ClosingSpeedMps;
+        Spark.EventSeed = Event.EventSeed;
         Pending.push_back(Spark);
     }
     if (Pending.size() > 32u) Pending.erase(Pending.begin(), Pending.begin() + static_cast<std::ptrdiff_t>(Pending.size() - 32u));

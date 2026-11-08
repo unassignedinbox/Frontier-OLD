@@ -4,6 +4,7 @@
 // 🧩 Recombination, temporal antialiasing, eye adaptation and the present raster (DisplayProjection.js).
 
 #include "DisplayProjection.h"
+#include "ImpactSparkGpuRecord.h"
 
 #include "ResamplingSequence.h"
 #include "SurfaceCardDepot.h"
@@ -44,7 +45,7 @@ void DisplayProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     AntialiasLayout_ = Exchange_.ConstructDescriptorLayout(AntialiasSlots, "Display antialias");
     ExposureLayout_  = Exchange_.ConstructDescriptorLayout(ExposureSlots, "Display exposure");
     PresentLayout_   = Exchange_.ConstructDescriptorLayout(PresentSlots, "Display present");
-    const std::vector<DescriptorSlot> ImpactSparkSlots = {{D::Uniform}, {D::Uniform}};
+    const std::vector<DescriptorSlot> ImpactSparkSlots = {{D::Uniform}, {D::Uniform}, {D::StorageRead}};
     ImpactSparkLayout_ = Exchange_.ConstructDescriptorLayout(ImpactSparkSlots, "Impact spark effect");
     RecombineProgram_ = Shaders_.ConstructComputeProgram("DisplayRecombination", "ResolveRecombination", {RecombineLayout_});
     AntialiasProgram_ = Shaders_.ConstructComputeProgram("DisplayAntialias", "IntegrateAntialias", {AntialiasLayout_});
@@ -60,6 +61,10 @@ void DisplayProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     SparkRaster.VertexEntry   = "ImpactSparkVertex";
     SparkRaster.FragmentEntry = "ImpactSparkFragment";
     SparkRaster.Layouts       = {ImpactSparkLayout_};
+    SparkRaster.DepthEnabled  = true;
+    SparkRaster.DepthFormat   = TextureFormat::Depth32Float;
+    SparkRaster.DepthWrite    = false;
+    SparkRaster.DepthCompare  = CompareFunction::Greater;
     ColorTarget SparkTarget;
     SparkTarget.Format       = TextureFormat::Rgba16Float;
     SparkTarget.BlendEnabled = true;
@@ -79,6 +84,7 @@ void DisplayProjection::ConstructTargets(std::array<uint32_t, 2> Extent, const S
                                          const DisplayNeutralResources& Neutral)
 {
     ScreenExtent = Extent;
+    DepthView_ = Surface.DepthView;
     auto Construct = [&](const std::string& Label, std::array<uint32_t, 2> Size, TextureFormat Format, uint32_t Usage) {
         TextureSpecification Specification;
         Specification.Label  = Label;
@@ -121,15 +127,17 @@ void DisplayProjection::ConstructTargets(std::array<uint32_t, 2> Extent, const S
         PresentGroups_[Parity]  = Exchange_.ConstructDescriptorGroup(PresentLayout_, {RefreshRegion_, ResolvedViews[Parity], AdaptationRegion, FlareVisibility,
                                                                                       FlareImage, LinearClamp, Neutral.CloudColour, Neutral.CloudGuide, Surface.DepthView,
                                                                                       FlareTransmission, Neutral.CloudParams, Neutral.Lightning});
-        ImpactSparkGroups_[Parity] = Exchange_.ConstructDescriptorGroup(ImpactSparkLayout_, {RefreshRegion_, ImpactSparkRegion_, ResolvedViews[Parity]},
-                                                                         "Jolt impact sparks");
+        ImpactSparkGroups_[Parity] = Exchange_.ConstructDescriptorGroup(
+            ImpactSparkLayout_, {RefreshRegion_, DescriptorResource(ImpactSparkRegion_, 0, 16),
+                                 DescriptorResource(ImpactSparkRegion_, 16, static_cast<VkDeviceSize>(ImpactSparkCapacity) * sizeof(ImpactSparkGpuRecord))},
+            "Jolt impact particles");
     }
     RecombinedExposureGroup_ = Exchange_.ConstructDescriptorGroup(ExposureLayout_, {RefreshRegion_, RecombinedView, AdaptationRegion});
     SourceAntialiasGroups_   = {};
     AntialiasSource_.reset();
 }
 
-// 📝 Recombination, temporal antialiasing and eye adaptation; the additive Jolt spark sprites are a separate post-AA layer.
+// 📝 Recombination, temporal antialiasing and eye adaptation; additive, depth-tested Jolt particle streaks are a separate post-AA layer.
 void DisplayProjection::RecordResolve(CommandSequence& Sequence, uint32_t Parity)
 {
     const uint32_t GroupsX = (ScreenExtent[0] + 7) / 8, GroupsY = (ScreenExtent[1] + 7) / 8;
@@ -194,14 +202,16 @@ void DisplayProjection::RecordAntialias(CommandSequence& Sequence, uint32_t Pari
     Sequence.Dispatch(1);
 }
 
-void DisplayProjection::RecordImpactSparks(CommandSequence& Sequence, uint32_t Parity)
+void DisplayProjection::RecordImpactSparks(CommandSequence& Sequence, uint32_t Parity, uint32_t InstanceCount)
 {
-    if (!ImpactSparkProgram_ || Parity >= ImpactSparkGroups_.size() || !ResolvedViews[Parity]) return;
+    const uint32_t Count = std::min(InstanceCount, ImpactSparkCapacity);
+    if (Count == 0 || !ImpactSparkProgram_ || !DepthView_ || Parity >= ImpactSparkGroups_.size() || !ResolvedViews[Parity]) return;
     const std::array<ColorAttachment, 1> Colours = {{{ResolvedViews[Parity], LoadOperation::Load, {0.0f, 0.0f, 0.0f, 0.0f}}}};
-    Sequence.BeginRaster(Colours, nullptr, "Jolt impact sparks");
+    const DepthAttachment Depth{DepthView_, LoadOperation::Load, 0.0f};
+    Sequence.BeginRaster(Colours, &Depth, "Jolt impact particles");
     Sequence.BindProgram(ImpactSparkProgram_);
     Sequence.BindGroup(0, ImpactSparkGroups_[Parity]);
-    Sequence.Draw(6, 32);
+    Sequence.Draw(6, Count);
     Sequence.EndRaster();
 }
 

@@ -32,14 +32,17 @@ being ported 1:1. Two regions are in:
 
 The four environment images come from the same `SceneViewport` the editor uses, with the environment lighting the scene. They were
 rendered offscreen on SwiftShader at 480 × 270 (quality `low`, 12 refreshes each) from the stored SPIR-V in
-`EngineContent/ShaderArchives`. The cameras and records are listed in `Code/SceneViewportValidation.cpp`. The separate impact-spark
-capture below uses the same native viewport and the production additive raster pass:
+`EngineContent/ShaderArchives`. The cameras and records are listed in `Code/SceneViewportValidation.cpp`. The separate impact-particle
+capture below uses the same native viewport and the production depth-tested streak raster:
 
-![Synthetic metal and concrete impact sparks in the native scene viewport](Images/ImpactSparkRaster.png)
+![Jolt-driven metal and concrete moving spark streaks in the native scene viewport](Images/ImpactSparkRaster.png)
 
-`ImpactSparkRaster.png` is deliberately synthetic: it checks the renderer with one warm metal and one cool concrete `SceneImpactSpark`,
-while `VehicleImpactEventValidation` separately checks that hard Jolt contacts produce those events. The capture compares the image
-against an otherwise identical no-spark frame and verifies a visible pixel delta and both colour signatures.
+`ImpactSparkRaster.png` replays actual fast Jolt chassis contacts against metal and concrete; each event supplies the world-space contact
+velocity, outward normal and deterministic emission seed. `ImpactSparkSequence` emits and integrates a bounded packet of ballistic
+filings, with drag, gravity, cooling and finite blackbody radiance, before the viewport rasterizes their current-head/prior-head streaks.
+The capture compares the result with an otherwise identical no-particle frame. The SwiftShader 480 × 270 smoke run submitted 66 filings,
+changing 60 presented pixels (50 incandescent). `ImpactSparkValidation` checks deterministic replay, particle motion/cooling, real contact
+inputs and the 1024-instance limit; `VehicleImpactEventValidation` checks the underlying physics event.
 
 The environment-fed inputs for each scenario:
 
@@ -644,8 +647,9 @@ in double precision:
 
 ## Checks
 
-`Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 21 checks, 0 failing in the low-quality
-480 × 270 / 1-refresh smoke run) checks the following:
+`Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 23 checks, 0 failing in the low-quality
+480 × 270 / 1-refresh smoke run) checks the following. The new `ImpactSparkValidation` CTest independently verifies the CPU particle
+sequence against deterministic Jolt metal/concrete contacts, including motion, cooling, repeatability and the 1024-record bound.
 
 - the environment is overlaid on the illumination device;
 - the vehicle is deactivated;
@@ -654,7 +658,7 @@ in double precision:
 - the daylight sky is bright;
 - the low sun saturates;
 - the night sky is darker than the day and shows stars;
-- the impact-spark raster changes the no-spark image and retains distinct warm-metal and cool-concrete signatures;
+- real Jolt contacts emit ballistic particles whose depth-tested streak raster changes the no-particle image and retains incandescent radiance;
 - a local fog volume's sun shafts are shadowed by the scene's sun cascades: the unshadowed refresh carries more than 0.1 % more
   light than both shafted refreshes around it, with GI/TAA/auto-exposure disabled for this stable A/B/A;
 - what the environment fed the refresh (read back from the port's own inputs):
@@ -731,6 +735,8 @@ python3 Exhibits/SceneViewport/Code/ExportProvingGround.py <capture> EngineConte
 # Offscreen images (SwiftShader: FRONTIER_VULKAN_DRIVER / VK_ICD_FILENAMES as in the parity README)
 build/SceneViewportValidation EngineContent/ShaderArchives/GlobalIllumination EngineContent/ShaderArchives/Environment \
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out low 480 270 12
+# Physics-backed ballistic particle replay (CTest: ImpactSparkValidation)
+build/ImpactSparkValidation
 # Everest workspace with the live viewport
 build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/EverestLiveSceneViewport.png 12
 # The fifteen inspection views (then 1 10 14 at the end for the virtualized cluster views; view 6 on the GTX path:
