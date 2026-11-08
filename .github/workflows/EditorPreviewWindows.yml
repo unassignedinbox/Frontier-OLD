@@ -32,7 +32,23 @@ jobs:
       - name: Configure Windows x64 Release
         run: cmake -S . -B Build/Windows -A x64 -DBUILD_TESTING=OFF
       - name: Build only Frontier and Project Everest
-        run: cmake --build Build/Windows --config Release --target Frontier Everest --parallel 2
+        shell: pwsh
+        run: |
+          $BuildLog = "Frontier-Everest-build.log"
+          cmake --build Build/Windows --config Release --target Frontier Everest --parallel 2 2>&1 |
+            Tee-Object -FilePath $BuildLog
+          $BuildExit = $LASTEXITCODE
+          if ($BuildExit -ne 0) {
+            $BuildErrors = Select-String -Path $BuildLog -Pattern '(?i)(fatal error|error C[0-9]+|error LNK[0-9]+|error MSB[0-9]+|CMake Error|FAILED:|error:)' |
+              Select-Object -First 25
+            if ($BuildErrors.Count -eq 0) { $BuildErrors = Get-Content $BuildLog -Tail 40 }
+            foreach ($Line in $BuildErrors) {
+              if ($Line -is [Microsoft.PowerShell.Commands.MatchInfo]) { $LineText = $Line.Line } else { $LineText = [string]$Line }
+              $Message = $LineText.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+              Write-Output "::error::$Message"
+            }
+            exit $BuildExit
+          }
       - name: Upload the two Windows executables
         uses: actions/upload-artifact@v4
         with:
@@ -42,3 +58,10 @@ jobs:
             Build/Windows/Release/Everest.exe
           if-no-files-found: error
           retention-days: 30
+      - name: Upload build log for diagnosis
+        if: failure() && hashFiles('Frontier-Everest-build.log') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frontier-Everest-Windows-build-log
+          path: Frontier-Everest-build.log
+          retention-days: 7
