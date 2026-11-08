@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "UI/SolidArc/Document/SolidArcDocument.h"
+#include "UI/SolidArc/Document/SolidArcBodyCombineInternal.h"
 
 #include "Engine/GeometryProcessing/Surfacing/CurveFitting.h"
 #include "Engine/GeometryProcessing/Surfacing/SurfaceAlgebra.h"
@@ -3220,52 +3221,6 @@ SolidArcEdgePath SolidArcEdgePathBetween(const SolidArcDocument& Document, const
     return Path;
 }
 
-namespace
-{
-#if defined(_MSC_VER)
-// MSVC's optimizer hits C1001 in this validation-heavy command inside the large document translation unit.
-#pragma optimize("", off)
-#endif
-[[nodiscard]] std::string ApplyCombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target,
-                                                      const std::vector<std::string>& Tools, FeatureCombination Combination)
-{
-    if (Combination != FeatureCombination::Union && Combination != FeatureCombination::Difference && Combination != FeatureCombination::Intersection)
-        return "choose Union, Difference or Intersection";
-    if (Tools.empty()) return "select two or more bodies (the first is the target)";
-    if (!FindRegeneratedBody(Document, Target)) return "no body named " + Target;
-
-    std::set<std::string> Seen{ Target };
-    for (const std::string& Tool : Tools)
-    {
-        if (!FindRegeneratedBody(Document, Tool)) return "no body named " + Tool;
-        if (!Seen.insert(Tool).second)
-        {
-            std::string Refusal = SolidArcBodyCaption(Document, Tool);
-            Refusal += " is picked twice (the target cannot be a tool)";
-            return Refusal;
-        }
-    }
-
-    const std::string Caption = NextCaption(Document, "Combine");
-    for (const std::string& Tool : Tools)
-    {
-        FeatureStep Step;
-        Step.Kind        = FeatureStepKind::Combine;
-        Step.Label       = "Combine#" + std::to_string(NextStepOrdinal(Document.Tree));
-        Step.Combination = Combination;
-        Step.Target      = Target;
-        Step.Tool        = Tool;
-        Document.Captions[Step.Label] = Caption;
-        Document.Tree.Steps.push_back(std::move(Step));
-    }
-    Document.Selection = {};
-    return {};
-}
-#if defined(_MSC_VER)
-#pragma optimize("", on)
-#endif
-} // namespace
-
 SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target, const std::vector<std::string>& Tools,
                                               FeatureCombination Combination)
 {
@@ -3282,8 +3237,11 @@ SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const s
     Label += " (";
     Label += Operands;
     Label += ')';
-    return RunCommand(Document, Label, false,
-                      [&]() { return ApplyCombineSolidArcBodies(Document, Target, Tools, Combination); });
+    const std::string Caption = NextCaption(Document, "Combine");
+    const int FirstStepOrdinal = NextStepOrdinal(Document.Tree);
+    return RunCommand(Document, Label, false, [&]() {
+        return Internal::ApplyCombineSolidArcBodies(Document, Target, Tools, Combination, Caption, FirstStepOrdinal);
+    });
 }
 
 SolidArcCommandOutcome CutSolidArcBody(SolidArcDocument& Document, const SolidArcCutRequest& Request)

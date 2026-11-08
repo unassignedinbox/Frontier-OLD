@@ -106,6 +106,7 @@ add_custom_target(SolidArcShaderArchive DEPENDS "${SOLIDARC_SHADER_ARCHIVE}")
 # 📝 Document layer without Vulkan / ImGui: the project browser host links it (with the browser link) next to its own backend.
 add_library(FrontierSolidArcDocument STATIC
     ${SOLIDARC_UI}/Document/SolidArcDocument.cpp
+    ${SOLIDARC_UI}/Document/SolidArcBodyCombineInternal.cpp
     ${SOLIDARC_UI}/Document/SolidArcDocumentCodec.cpp
     ${SOLIDARC_UI}/Document/VehicleCurveImport.cpp
     ${SOLIDARC_UI}/Document/SolidArcImagePlane.cpp
