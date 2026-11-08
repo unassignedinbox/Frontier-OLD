@@ -69,7 +69,7 @@ constexpr uint32_t MirrorReference = 128u;   // [-] measurement only: every refl
 struct RefreshExternalInputs
 {
     double                 ElapsedSeconds  = 0.0;    // [s]
-    uint32_t               PresentationControl         = 0;      // [-] scalar 119: brightness << 8 | scale << 20
+    uint32_t               PresentationControl         = 0;      // [-] scalar 119: camera blur bits 0–7, brightness << 8 | scale << 20
     std::array<float, 8>   FireBlock{};              // [-] scalars 120..127
     std::vector<float>     EnvironmentBlock{};       // [-] scalars 128..267 (EncodeEnvironment)
     bool                   SmokeResident   = false;

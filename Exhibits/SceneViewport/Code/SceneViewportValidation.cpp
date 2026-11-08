@@ -437,6 +437,82 @@ int main(int ArgumentCount, char** Arguments)
     ReportCheck(HotSparkPixels > 0, "particle streaks preserve incandescent blackbody colour",
                 std::to_string(HotSparkPixels) + " hot pixels");
 
+    // 📝 Camera-only and full-scene motion blur use the same camera move and current radiance, with history/jitter disabled so
+    //    the A/B compares the actual bounded post-process rather than a changing temporal history.
+    ViewportCamera BlurPrevious = SparkCamera;
+    ViewportCamera BlurCurrent = SparkCamera;
+    BlurCurrent.Position[1] += 0.45;
+    BlurCurrent.Target[1] += 0.45;
+    ViewportRendering BlurRendering;
+    BlurRendering.GlobalIllumination = false;
+    BlurRendering.TemporalAntiAliasing = false;
+    BlurRendering.Toggles.RayTracing = false;
+    BlurRendering.Toggles.Reflection = false;
+    BlurRendering.Toggles.CardRadiosity = false;
+    BlurRendering.Toggles.AutoExposure = false;
+    BlurRendering.Toggles.RadianceRefresh = false;
+    BlurRendering.Toggles.TemporalReuse = false;
+    BlurRendering.Toggles.SpatialReuse = false;
+    BlurRendering.Toggles.VisibilityReuse = false;
+    BlurRendering.Toggles.VarianceFilter = false;
+    const Transform BlurPreviousProjection = SceneViewport::ResolveViewProjection(BlurPrevious, {Width, Height});
+    const uint32_t BlurRefreshIndex = Host.RefreshIndex;
+    std::vector<uint8_t> BlurNoMotion, BlurCameraImage, BlurSceneImage;
+    Host.Encoder.PreviousUnjittered = BlurPreviousProjection;
+    if (!Viewport.Refresh(BlurCurrent, SparkEnvironment, BlurRendering, 0.0, {Width, Height}, &Diagnostic) ||
+        !Viewport.ReadPresented(BlurNoMotion) || BlurNoMotion.size() != static_cast<size_t>(Width) * Height * 4)
+    {
+        ReportCheck(false, "motion-blur Off baseline refresh/readback", Diagnostic);
+        return 1;
+    }
+    BlurRendering.CameraMotionBlur.Mode = CameraMotionBlurMode::Camera;
+    BlurRendering.CameraMotionBlur.Strength = 1.0f;
+    Host.RefreshIndex = BlurRefreshIndex;
+    Host.Encoder.PreviousUnjittered = BlurPreviousProjection;
+    if (!Viewport.Refresh(BlurCurrent, SparkEnvironment, BlurRendering, 0.0, {Width, Height}, &Diagnostic) ||
+        !Viewport.ReadPresented(BlurCameraImage) || BlurCameraImage.size() != BlurNoMotion.size())
+    {
+        ReportCheck(false, "camera-only motion-blur refresh/readback", Diagnostic);
+        return 1;
+    }
+    const std::vector<float> MotionVectors = ReadHalfTexture(Host.Exchange, Host.Surface->MotionTexture);
+    uint32_t CameraMotionPixels = 0;
+    for (size_t Texel = 0; Texel + 3 < MotionVectors.size(); Texel += 4)
+        if (std::hypot(MotionVectors[Texel + 2], MotionVectors[Texel + 3]) > 0.5f) ++CameraMotionPixels;
+
+    BlurRendering.CameraMotionBlur.Mode = CameraMotionBlurMode::Scene;
+    Host.RefreshIndex = BlurRefreshIndex;
+    Host.Encoder.PreviousUnjittered = BlurPreviousProjection;
+    if (!Viewport.Refresh(BlurCurrent, SparkEnvironment, BlurRendering, 0.0, {Width, Height}, &Diagnostic) ||
+        !Viewport.ReadPresented(BlurSceneImage) || BlurSceneImage.size() != BlurNoMotion.size())
+    {
+        ReportCheck(false, "full-scene motion-blur refresh/readback", Diagnostic);
+        return 1;
+    }
+    const auto SaveBlurImage = [&](const char* Name, const std::vector<uint8_t>& Image) {
+        const std::string Path = (OutFolder / Name).string();
+        return stbi_write_png(Path.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Image.data(), static_cast<int>(Width * 4)) != 0;
+    };
+    const auto ChangedPixels = [](const std::vector<uint8_t>& A, const std::vector<uint8_t>& B) {
+        uint32_t Changed = 0;
+        for (size_t Pixel = 0; Pixel < A.size() / 4; ++Pixel)
+        {
+            const int Red = std::abs(static_cast<int>(A[Pixel * 4]) - static_cast<int>(B[Pixel * 4]));
+            const int Green = std::abs(static_cast<int>(A[Pixel * 4 + 1]) - static_cast<int>(B[Pixel * 4 + 1]));
+            const int Blue = std::abs(static_cast<int>(A[Pixel * 4 + 2]) - static_cast<int>(B[Pixel * 4 + 2]));
+            if (std::max({Red, Green, Blue}) >= 2) ++Changed;
+        }
+        return Changed;
+    };
+    const uint32_t CameraBlurChanged = ChangedPixels(BlurNoMotion, BlurCameraImage);
+    const uint32_t SceneBlurChanged = ChangedPixels(BlurNoMotion, BlurSceneImage);
+    ReportCheck(CameraMotionPixels > 8, "surface pass emits camera-only motion vectors", std::to_string(CameraMotionPixels) + " moving pixels");
+    ReportCheck(CameraBlurChanged > 4, "camera-only mode changes the current-frame raster", std::to_string(CameraBlurChanged) + " pixels");
+    ReportCheck(SceneBlurChanged > 4, "full-scene mode changes the current-frame raster", std::to_string(SceneBlurChanged) + " pixels");
+    ReportCheck(SaveBlurImage("MotionBlurOff.png", BlurNoMotion) && SaveBlurImage("MotionBlurCamera.png", BlurCameraImage) &&
+                    SaveBlurImage("MotionBlurScene.png", BlurSceneImage),
+                "motion-blur A/B captures saved");
+
     // 🔍 what the images must show relative to each other
     ReportCheck(Statistics[0].SkyLuminance > 0.35, "daylight sky is bright", std::to_string(Statistics[0].SkyLuminance));
     ReportCheck(Statistics[1].Brightest > 0.97, "low sun saturates the disc and flare", std::to_string(Statistics[1].Brightest));

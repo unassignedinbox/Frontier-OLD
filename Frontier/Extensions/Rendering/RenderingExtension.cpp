@@ -336,6 +336,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
     Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
+    Rendering.CameraMotionBlur       = Request.CameraMotionBlur;
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |

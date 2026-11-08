@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "CameraEffects.h"
+
 #include <array>
 #include <cstdint>
 #include <string_view>
@@ -91,6 +93,10 @@ public:
     [[nodiscard]] bool                         QueryLobbyStudio() const noexcept { return LobbyStudio; }
     [[nodiscard]] VehicleCameraRig            QueryRig() const noexcept { return Rig; }
     [[nodiscard]] const VehicleCameraSolution& QueryLastSolution() const noexcept { return LastSolution; }
+    [[nodiscard]] CameraShakeComponent& AccessCameraShake() noexcept { return CameraShake; }
+    [[nodiscard]] const CameraShakeComponent& QueryCameraShake() const noexcept { return CameraShake; }
+    [[nodiscard]] CameraMotionBlurComponent& AccessMotionBlur() noexcept { return MotionBlur; }
+    [[nodiscard]] const CameraMotionBlurComponent& QueryMotionBlur() const noexcept { return MotionBlur; }
 
 private:
     enum class CinematicPhase : uint8_t
@@ -161,10 +167,8 @@ private:
     double                ChaseOrbitYawRad            = 0.0;
     double                ChaseOrbitPitchRad          = 0.22;
     double                ChaseDistanceScale          = 1.0;
-    bool                  PriorVelocityValid          = false;
-    std::array<double, 3> PriorVelocityMps            = {0.0, 0.0, 0.0};
-    double                ShakeEnvelope               = 0.0;
-    double                ShakeClockSeconds           = 0.0;
+    CameraShakeComponent  CameraShake{};
+    CameraMotionBlurComponent MotionBlur{};
     double                HeadYawRadians              = 0.0;
     double                HeadPitchRadians            = 0.0;
     double                InteriorFovDegrees          = 70.0;

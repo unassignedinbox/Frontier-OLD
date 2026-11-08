@@ -66,6 +66,7 @@ struct ViewportRendering
     uint32_t VirtualizedStreamSlots = 0;     // [-] arena slots the pages stream through (0: one per page)
     bool     AnalyticIllumination = false;   // [-] the fast closed-form renderer (AnalyticIllumination) instead of the GI
     uint32_t Refinements          = 0;       // [-] RefinementBit mask of options beyond the demo (0: the demo)
+    CameraMotionBlurComponent CameraMotionBlur{}; // [-] Off, camera-only, or camera + object motion
     // 📝 The rest of the Render settings record. Every default is the demo's, so a caller that sets only the fields above refreshes
     //    exactly as before; the fields above overwrite Toggles' Indirect, Antialias, ExposureCompensation, Inspection and Refinements,
     //    and Toggles.RayTracing applies only on a viewport built with ray tracing (SceneViewportConfiguration::RayTracing).

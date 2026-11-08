@@ -1805,6 +1805,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.CameraNear          = ActiveNearClipMetres;
         Request.DeltaSeconds        = ViewportDeltaSeconds;
         Request.CameraUp = Navigation.Up;
+        Request.CameraMotionBlur = StudioCameraEngaged ? VehicleCamera.QueryMotionBlur() : EditorCameraMotionBlur;
         Request.PickSerial          = PickSerial;
         Request.PickPoint           = PickPoint;
         Request.ImpactSparks        = std::exchange(PendingImpactSparks, {});
@@ -2023,6 +2024,49 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         }
         if (HasGameCamera) X += Button + Gap;
     }
+    // 📝 Camera effects stay attached to the active camera: exactly Off / Camera / Full-scene blur choices plus a bounded seeded
+    //    millimetre-scale shake component on the driven vehicle rigs.
+    const float EffectsRightReserve = 12.0f * Scale + 3.0f * Button + 4.0f * Gap + 132.0f * Scale;
+    if (X + Button + Gap < Max.x - EffectsRightReserve &&
+        ViewportChromeControls::ConstructIconButton("##CameraEffects", {X, Min.y + (Height - Button) * .5f}, Button, "SlidersHorizontal", false, true,
+                                                     "Camera effects: motion blur and subtle vehicle shake"))
+    {
+        ImGui::OpenPopup("##CameraEffectsPopup");
+    }
+    if (X + Button + Gap < Max.x - EffectsRightReserve) X += Button + Gap;
+    if (ImGui::BeginPopup("##CameraEffectsPopup"))
+    {
+        Frontier::CameraMotionBlurComponent& Blur = StudioCameraEngaged ? VehicleCamera.AccessMotionBlur() : EditorCameraMotionBlur;
+        static constexpr const char* BlurModes[] = {"Off", "Camera only", "Full scene (camera + objects)"};
+        int BlurMode = std::clamp(static_cast<int>(Blur.Mode), 0, 2);
+        if (ImGui::Combo("Motion blur", &BlurMode, BlurModes, 3)) Blur.Mode = static_cast<Frontier::CameraMotionBlurMode>(BlurMode);
+        float BlurStrength = Blur.Strength;
+        if (ImGui::SliderFloat("Blur strength", &BlurStrength, 0.0f, 1.0f, "%.2f")) Blur.Strength = BlurStrength;
+        ImGui::TextDisabled("Blur applies in the normal GI view; inspection and analytic views stay clean.");
+
+        ImGui::Separator();
+        if (HasGameCamera)
+        {
+            ImGui::TextUnformatted("Vehicle camera shake");
+            Frontier::CameraShakeSettings& Shake = VehicleCamera.AccessCameraShake().AccessSettings();
+            ImGui::Checkbox("Enabled##VehicleCameraShake", &Shake.Enabled);
+            ImGui::BeginDisabled(!Shake.Enabled);
+            float AmplitudeMillimetres = Shake.AmplitudeMetres * 1000.0f;
+            if (ImGui::SliderFloat("Amplitude", &AmplitudeMillimetres, 0.0f, 6.0f, "%.1f mm"))
+                Shake.AmplitudeMetres = AmplitudeMillimetres * 0.001f;
+            ImGui::SliderFloat("Frequency", &Shake.FrequencyHz, 2.0f, 30.0f, "%.1f Hz");
+            ImGui::SliderFloat("Attack", &Shake.AttackSeconds, 0.01f, 0.25f, "%.2f s");
+            ImGui::SliderFloat("Release", &Shake.ReleaseSeconds, 0.05f, 0.75f, "%.2f s");
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("Seeded response; default offset is capped at 6 mm.");
+        }
+        else
+        {
+            ImGui::TextDisabled("Vehicle shake appears when a vehicle camera is available.");
+        }
+        ImGui::EndPopup();
+    }
+
     // 📝 Debug views (Render settings › Debug views): the demo's inspection views and the analytic illumination as a view of its own.
     if (auto* Pipeline=dynamic_cast<Frontier::RenderPipelineRecord*>(QueryWorldSpace().FindFirstByType("RenderPipeline")))
     {

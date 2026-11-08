@@ -387,6 +387,7 @@ int main(int, char**)
             Request.VerticalFieldOfView = Solution.VerticalFieldOfViewRadians;
             Request.CameraNear          = Solution.NearClipMetres;
             Request.DeltaSeconds        = DeltaSeconds;
+            Request.CameraMotionBlur    = Workspace->QueryVehicleCamera().QueryMotionBlur();
             Request.ImpactSparks        = std::move(ImpactSparks);
             RenderResult = SceneRenderer->Render(Request, World, Workspace->QueryElapsedSeconds());
             TextureHandle = SceneTexture.Resolve(RenderResult.View);

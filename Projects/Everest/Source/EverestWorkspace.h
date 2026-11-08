@@ -278,7 +278,8 @@ class EverestWorkspace
     Frontier::LogStreamPanel      LogPanel;
     uint64_t                      ObservedLayoutRevision = 0;
     SceneViewportFlight           Flight{};
-    SceneViewportNavigation Navigation{};
+    SceneViewportNavigation       Navigation{};
+    Frontier::CameraMotionBlurComponent EditorCameraMotionBlur{};
     // The editor flight/navigation state is independent of VehicleCameraSolver and is restored on mode changes.
     SceneViewportFlight           SavedEditorFlight{};
     SceneViewportNavigation       SavedEditorNavigation{};

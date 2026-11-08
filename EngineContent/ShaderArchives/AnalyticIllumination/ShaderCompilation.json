@@ -1,7 +1,7 @@
 {
   "format": 1,
   "set": "AnalyticIllumination",
-  "compiler": "unrecorded",
+  "compiler": "slangc 2026.14.1",
   "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets AnalyticIllumination",
   "entries": [
     {
@@ -48,7 +48,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "773d4e1b24f6c4256334c63c5cfa7fb77a733a28c0d5926be7e1b27aaaf560e2"
+      "sha256": "547887f714a9db65f628273ae2331e76b21eb2d82f7c19aa414877d373f5955c"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/VehicleVisual.slang",

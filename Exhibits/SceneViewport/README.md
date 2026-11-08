@@ -707,6 +707,25 @@ synthetic input and reads directions from the renderer's own view basis:
 - Alt orbits and dollies about a fixed pivot and tracks camera and pivot together;
 - Z widens the view and it recoils after release, and F frames the starting view and keeps the speed.
 
+## Camera effects
+
+`Frontier/Engine/Rendering/SceneViewport/CameraEffects.h` defines the native camera components. The `VehicleCameraSolver`
+owns a `CameraShakeComponent`: its seeded phase is deterministic, velocity changes feed a smoothed attack/release envelope, and the
+subtle default is a 1.5 mm high-speed baseline with a hard 6 mm displacement cap. The viewport's Camera FX popup exposes enable,
+amplitude, frequency, attack and release. Shake applies to the driven Chase, Cockpit, Passenger and Hood rigs; it does not shake the
+Editor, Lobby orbit, HMI tablet or tyre inspection views. These settings currently live in the workspace/session, not a persisted camera record.
+
+`CameraMotionBlurComponent` is attached to the active Editor or Vehicle camera. The popup dropdown deliberately has exactly three choices:
+**Off**, **Camera only**, and **Full scene (camera + objects)**. It is Off by default; strength defaults to 0.35. The surface pass stores total
+camera-plus-object motion in RG and camera-only motion in BA; temporal AA still reads RG unchanged. The display pass takes five current-frame
+samples along the selected vector, clamped to 24 px before strength scaling. Motion blur runs in the normal GI display path; inspection and
+analytic views stay clean. Camera settings remain session-only until the planned `CameraRecord`/codec exists.
+
+`CameraEffectsValidation` (CTest) checks deterministic seeding, transient release, the 6 mm cap, solver integration and three-mode encoding.
+The GPU `SceneViewportValidation` A/B renders Off, Camera-only and Full-scene at the same moved camera on SwiftShader (low, 480 × 270): at
+strength 1, the two enabled modes changed 55,963 and 61,028 pixels respectively from the no-blur image. It writes the three A/B PNGs under
+the build output's `motion-blur-validation` directory.
+
 ## Build and run it yourself (Windows)
 
 1. Fonts, once: `python -m pip install -r Automation/FontRequirements.txt`, then `python Automation/PrepareFonts.py`.

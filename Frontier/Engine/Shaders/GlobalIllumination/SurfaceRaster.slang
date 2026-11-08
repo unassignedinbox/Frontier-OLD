@@ -30,12 +30,13 @@ struct SurfaceVarying
     [[vk::location(4)]] float3 WorldPosition : LOCATION4;              
     [[vk::location(5)]] nointerpolation uint Vehicle : LOCATION5; 
     [[vk::location(6)]] float3 BodyLocal : LOCATION6;                     // car-body refresh, for the derez mask
+    [[vk::location(7)]] float4 CameraPreviousClip : LOCATION7;            // same current surface, previous camera projection
 };
 
 struct SurfaceTargets
 {
     [[vk::location(0)]] float4 Attributes : LOCATION0;    // xy octahedral shading normal, z material family, w 1 + glow (× albedo, as incandescence)
-    [[vk::location(1)]] float2 Motion : LOCATION1;        // [px] current minus previous screen position
+    [[vk::location(1)]] float4 Motion : LOCATION1;        // [px] xy camera + object motion; zw camera-only motion
 };
 
 // 📝 The vehicle's own motion in the vertex step: shredded rubber is hidden; rigid wheel meshes keep their authored form, the cabin's
@@ -73,6 +74,7 @@ SurfaceVarying SurfaceVertex([[vk::location(0)]] float3 Position : LOCATION0, [[
     Varying.Position      = mul(World, Refresh.ViewProjection);
     Varying.CurrentClip   = mul(World, Refresh.UnjitteredViewProjection);
     Varying.PreviousClip  = mul(Previous, Refresh.PreviousUnjitteredViewProjection);
+    Varying.CameraPreviousClip = mul(World, Refresh.PreviousUnjitteredViewProjection);
     Varying.Normal        = (mul(float4(Moved.Normal, 0.0), Occupant.LocalToWorld)).xyz;
     Varying.Family        = ResolveSurfaceFamily(Family, Occupant.MaterialOverride);
     Varying.WorldPosition = World.xyz;
@@ -239,6 +241,8 @@ SurfaceTargets SurfaceFragment(SurfaceVarying Varying)
     }
     var Targets : SurfaceTargets = {};
     Targets.Attributes = float4(EncodeOctahedral(Normal), float(Family), 1.0 + Glow);
-    Targets.Motion     = ProjectScreenPixel(Varying.CurrentClip) - ProjectScreenPixel(Varying.PreviousClip);
+    let CurrentScreen = ProjectScreenPixel(Varying.CurrentClip);
+    Targets.Motion = float4(CurrentScreen - ProjectScreenPixel(Varying.PreviousClip),
+                            CurrentScreen - ProjectScreenPixel(Varying.CameraPreviousClip));
     return Targets;
 }

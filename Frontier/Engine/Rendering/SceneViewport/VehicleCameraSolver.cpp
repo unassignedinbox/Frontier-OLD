@@ -178,9 +178,7 @@ void VehicleCameraSolver::ConfigureEnvironment(bool InLobbyStudio, const Vehicle
     TourShotIndex         = 0u;
     TourPhaseSeconds      = 0.0;
     RigBlend              = {};
-    PriorVelocityValid    = false;
-    ShakeEnvelope         = 0.0;
-    ShakeClockSeconds     = 0.0;
+    CameraShake.Reset();
     HeadYawRadians        = 0.0;
     HeadPitchRadians      = 0.0;
     InteriorFovDegrees    = 70.0;
@@ -214,6 +212,7 @@ void VehicleCameraSolver::ConfigureRigImmediate(VehicleCameraRig NextRig, const 
     EntranceDollyActive = false;
     TourPhase           = CinematicPhase::Inactive;
     RigBlend            = {};
+    CameraShake.Reset();
     HeadYawRadians      = 0.0;
     HeadPitchRadians    = 0.0;
     ChaseOrbitYawRad    = 0.0;
@@ -238,6 +237,7 @@ void VehicleCameraSolver::TransitionToRig(VehicleCameraRig NextRig)
     EntranceDollyActive         = false;
     TourPhase                   = CinematicPhase::Inactive;
     IdleElapsedSeconds          = 0.0;
+    CameraShake.Reset();
     HeadYawRadians              = 0.0;
     HeadPitchRadians            = 0.0;
     if (NextRig == VehicleCameraRig::Chase)
@@ -569,30 +569,12 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         TourPhase = CinematicPhase::Inactive;
     }
 
-    double ShakeRight      = 0.0;
-    double ShakeUp         = 0.0;
     double SpeedFovRadians = 0.0;
     if (!LobbyStudio)
     {
         const double SpeedFraction = std::clamp(Subject.SpeedMetresPerSecond / 55.0, 0.0, 1.0);
         const double SmoothSpeed   = SpeedFraction * SpeedFraction * (3.0 - 2.0 * SpeedFraction);
         SpeedFovRadians            = (14.0 * DegreesToRadians) * SmoothSpeed;
-
-        if (PriorVelocityValid && Δτ > 1.0e-4)
-        {
-            const std::array<double, 3> DeltaV = Subtract3(Subject.VelocityMetresPerSec, PriorVelocityMps);
-            const double AccelShock = std::sqrt(DeltaV[0] * DeltaV[0] + DeltaV[1] * DeltaV[1] + DeltaV[2] * DeltaV[2]) / Δτ;
-            if (AccelShock > 5.0)
-            {
-                ShakeEnvelope = std::min(1.0, ShakeEnvelope + (AccelShock - 5.0) * 0.014);
-            }
-        }
-        PriorVelocityMps   = Subject.VelocityMetresPerSec;
-        PriorVelocityValid = true;
-        ShakeEnvelope     *= std::exp(-7.5 * Δτ);
-        ShakeClockSeconds += Δτ;
-        ShakeRight         = ShakeEnvelope * 0.045 * (std::sin(ShakeClockSeconds * 29.0) + 0.6 * std::sin(ShakeClockSeconds * 43.0 + 1.3));
-        ShakeUp            = ShakeEnvelope * 0.055 * (std::sin(ShakeClockSeconds * 37.0 + 0.7) + 0.5 * std::sin(ShakeClockSeconds * 53.0));
     }
 
     std::array<double, 3> DesiredEye    = {0.0, 0.0, 1.8};
@@ -638,8 +620,7 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
             ChaseEyeMetres     = Lerp3(ChaseEyeMetres, GoalEye, Alpha);
             ChaseTargetMetres  = Lerp3(ChaseTargetMetres, GoalTarget, std::min(1.0, Alpha * 1.45));
         }
-        const std::array<double, 3> RightUnit = Scale3(Subject.LeftUnit, -1.0);
-        DesiredEye    = Add3(ChaseEyeMetres, Add3(Scale3(RightUnit, ShakeRight), Scale3(Subject.UpUnit, ShakeUp)));
+        DesiredEye    = ChaseEyeMetres;
         DesiredTarget = ChaseTargetMetres;
         DesiredFovRad = 60.0 * DegreesToRadians + SpeedFovRadians;
     }
@@ -775,6 +756,22 @@ VehicleCameraSolution VehicleCameraSolver::Advance(const VehicleSubjectKinematic
         {
             Resolved.TransitionActive = true;
         }
+    }
+
+    const bool ShakeRig = !LobbyStudio && Subject.Available &&
+                          (Rig == VehicleCameraRig::Chase || Rig == VehicleCameraRig::Cockpit ||
+                           Rig == VehicleCameraRig::Passenger || Rig == VehicleCameraRig::Hood);
+    if (ShakeRig)
+    {
+        const CameraShakeOffset Shake = CameraShake.Advance(Subject.VelocityMetresPerSec,
+                                                             Subtract3(Resolved.TargetMetres, Resolved.PositionMetres),
+                                                             Resolved.UpUnit, Δτ);
+        Resolved.PositionMetres = Add3(Resolved.PositionMetres, Shake.EyeMetres);
+        Resolved.TargetMetres   = Add3(Resolved.TargetMetres, Shake.TargetMetres);
+    }
+    else
+    {
+        CameraShake.Reset();
     }
 
     Resolved.VeilOpacity = std::clamp(Veil, 0.0, 1.0);

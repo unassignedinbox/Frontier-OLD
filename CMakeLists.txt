@@ -282,6 +282,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/ViewportChromeControls.cpp)
 add_library(FrontierSession STATIC
     Frontier/Engine/Session/SessionSpace.cpp
+    Frontier/Engine/Rendering/SceneViewport/CameraEffects.cpp
     Frontier/Engine/Rendering/SceneViewport/VehicleCameraSolver.cpp)
 target_include_directories(FrontierSession PUBLIC
     "${CMAKE_SOURCE_DIR}"

@@ -246,7 +246,7 @@ void SurfaceProjection::ConstructTargets(uint32_t Width, uint32_t Height, const 
     const uint32_t Attachment = TextureUsage::RenderAttachment | TextureUsage::Sampled;
     DepthTexture     = Construct("Surface depth", TextureFormat::Depth32Float, Attachment);
     AttributeTexture = Construct("Surface attributes", TextureFormat::Rgba16Float, Attachment);
-    MotionTexture    = Construct("Surface motion", TextureFormat::Rg16Float, Attachment);
+    MotionTexture    = Construct("Surface motion (camera + scene)", TextureFormat::Rgba16Float, Attachment);
     DirectTexture    = Construct("Direct radiance", TextureFormat::Rgba16Float, TextureUsage::Storage | TextureUsage::Sampled);
     PenumbraTexture  = Construct("Penumbra signal", TextureFormat::Rgba16Float, TextureUsage::Storage | TextureUsage::Sampled);
     DepthView     = Exchange_.ConstructView(DepthTexture);

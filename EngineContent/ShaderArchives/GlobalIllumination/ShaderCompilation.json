@@ -42,7 +42,7 @@
     },
     {
       "file": "DisplayAntialias.IntegrateAntialias.spv",
-      "spirv_sha256": "77717e11d95cf71450c87cdd9fd9eb3122f90f46fa6212e4e6dd113a4e67db66"
+      "spirv_sha256": "2db7893f3e1a4402af715cbddf4f0dd77f8f66d202891d07063211f3eeb4e2d6"
     },
     {
       "file": "DisplayExposure.IntegrateExposure.spv",
@@ -94,11 +94,11 @@
     },
     {
       "file": "ImpactSpark.ImpactSparkFragment.spv",
-      "spirv_sha256": "5e0b8b1615d3f28823e073f595da97f5dab7790cc0a2306f652762d0584ef1c8"
+      "spirv_sha256": "308dc904d6f809c23d756aa17173ed7632e2eb232feae14608d173c023d4e48c"
     },
     {
       "file": "ImpactSpark.ImpactSparkVertex.spv",
-      "spirv_sha256": "19c6689777b13c9d88ee4f83a826cae90b2b2c3b427281609db2d9db6f23a9ce"
+      "spirv_sha256": "6386648d81f0440fb4549a5a94c75593b8cf33d1561ba3812a71e6a85f7840d0"
     },
     {
       "file": "InspectionMarch.MarchInspection.spv",
@@ -186,11 +186,11 @@
     },
     {
       "file": "SurfaceRaster.SurfaceFragment.spv",
-      "spirv_sha256": "064323d0426578aef63b66068d654470daec620f95fced1fa295543cb65ded83"
+      "spirv_sha256": "3bda2573a0a74c53dfd2f949669c3ace72375581b1dcb5033397e01c46af818a"
     },
     {
       "file": "SurfaceRaster.SurfaceVertex.spv",
-      "spirv_sha256": "ae12067111d3ec9cbff467838ada652a426abd93a0bfa6f0eef28056cb3c322c"
+      "spirv_sha256": "964774532af03445463247b6f42c17b649ecdee08839feb3d7e909702d81f49d"
     },
     {
       "file": "VarianceTemporal.IntegrateTemporal.spv",
@@ -288,7 +288,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayAntialias.slang",
-      "sha256": "e7746019213a913de2f8e0f96eff5f819c5db4d133c06913a3e473712d2dc4bb"
+      "sha256": "90d02b1bd7e47f5a10bae843d9488922d0dcc91a3068a242a9a18f02568608b1"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayExposure.slang",
@@ -352,11 +352,11 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ImpactSpark.slang",
-      "sha256": "b748120c6203787fb45d6f9c00d92389e3c8723480f2584aa4c8928f8651007d"
+      "sha256": "5dc231b1451de1a753cbed11ac6573d832b363d355c315db163adee43bf447ee"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ImpactSparkLayouts.slang",
-      "sha256": "a34790224a021b91f861d118e66cafc835a04c367382820ab4460c754b370263"
+      "sha256": "4ca31f2f882c9a50faef61ef0dea776b859af5c528f105bb8f67dd22fa680764"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/InspectionMarch.slang",
@@ -432,7 +432,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "773d4e1b24f6c4256334c63c5cfa7fb77a733a28c0d5926be7e1b27aaaf560e2"
+      "sha256": "547887f714a9db65f628273ae2331e76b21eb2d82f7c19aa414877d373f5955c"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ShadowRaster.slang",
@@ -444,7 +444,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SurfaceRaster.slang",
-      "sha256": "310b7f92ddf23ab4a5b9074c4d3686cd45d83e049446200a424fceb55220978e"
+      "sha256": "49b882061e5505429d7fa9734d147223cf347278e6cef71dc410fc9e346124ff"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SurfaceReflectance.slang",

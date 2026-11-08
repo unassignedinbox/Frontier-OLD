@@ -169,6 +169,11 @@ if(TARGET Frontier)
 endif()
 
 if(BUILD_TESTING)
+    # 📝 Deterministic seeded shake, bounded motion and compact motion-blur control encoding.
+    add_executable(CameraEffectsValidation Exhibits/SceneViewport/Code/CameraEffectsValidation.cpp)
+    target_link_libraries(CameraEffectsValidation PRIVATE FrontierSession)
+    add_test(NAME CameraEffectsValidation COMMAND CameraEffectsValidation)
+
     # 📝 Offscreen scene viewport frames (own device, same code path as the editor) — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportValidation
         Exhibits/SceneViewport/Code/SceneViewportValidation.cpp

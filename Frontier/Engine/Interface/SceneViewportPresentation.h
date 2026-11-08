@@ -8,6 +8,7 @@
 
 #include "Engine/Scene/EngineConfigurations.h"
 #include "Engine/Scene/EnvironmentDiagnostics.h"
+#include "Engine/Rendering/SceneViewport/CameraEffects.h"
 
 #include <array>
 #include <cstdint>
@@ -50,6 +51,7 @@ struct SceneViewportRequest
     double                CameraNear          = 0.05;                 // [m] near clip distance (0.01 m in HMI rig, 0.02 m cockpit)
     double                DeltaSeconds        = 0.0;                  // [s]
     std::array<double,3> CameraUp = {0,0,1};
+    CameraMotionBlurComponent CameraMotionBlur{}; // [-] camera-owned; Off by default
     // 📝 GPU picking: a click on the stage asks for the record drawn under it in the image the click was made on; the readout's
     //    Pick answers the serial one interface tick later.
     uint64_t              PickSerial          = 0;                    // [-] advances with every click; 0 = nothing asked

@@ -340,7 +340,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     }
     // 📝 World-grid plume transport & raymarch + live fire illumination feeding DirectRadiance, CardDirect & RayIntersection.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.PresentationControl = (1u << 8) | (1000u << 20);
+    Inputs.External.PresentationControl = (1u << 8) | (1000u << 20) | EncodeCameraMotionBlurControl(Rendering.CameraMotionBlur);
     const std::array<float, 3> PlumeFocus = PlumeFocusOverride_.value_or(
         std::array<float, 3>{ static_cast<float>(Inputs.Focus[0]), static_cast<float>(Inputs.Focus[1]), static_cast<float>(Inputs.Focus[2]) });
     const bool SmokeActive = Host_->Plume && Host_->Plume->PrepareRefresh(
