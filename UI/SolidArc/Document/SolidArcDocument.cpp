@@ -41,6 +41,7 @@
 #include <functional>
 #include <numbers>
 #include <limits>
+#include <utility>
 #include <map>
 #include <queue>
 #include <set>
@@ -539,9 +540,9 @@ SolidArcCommandOutcome RunAppearanceCommand(SolidArcDocument& Document, const st
 
 // ① snapshot ② change (the callback returns a refusal or "") ③ regenerate ④ roll back when a new step refused, or (edits
 //    of existing steps: WatchFrom) a step at or after WatchFrom that regenerated before now refuses.
-template <typename Change>
-SolidArcCommandOutcome RunCommand(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition, Change&& Apply,
-                                  size_t WatchFrom = std::numeric_limits<size_t>::max())
+SolidArcCommandOutcome RunCommandErased(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition,
+                                        const std::function<std::string()>& Apply,
+                                        size_t WatchFrom = std::numeric_limits<size_t>::max())
 {
     FRONTIER_TRACE_SCOPE("Command", Label);
     const auto                  Start         = std::chrono::steady_clock::now();
@@ -575,39 +576,13 @@ SolidArcCommandOutcome RunCommand(SolidArcDocument& Document, const std::string&
     return Outcome;
 }
 
-// 📝 Type-erased counterpart for the combine command: its callback is split across translation units to keep MSVC's compiler stable.
-SolidArcCommandOutcome RunCommandErased(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition,
-                                        const std::function<std::string()>& Apply,
-                                        size_t WatchFrom = std::numeric_limits<size_t>::max())
+// 📝 Keep each command lambda small at the call site; the shared transaction body is compiled once for MSVC.
+template <typename Change>
+SolidArcCommandOutcome RunCommand(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition, Change&& Apply,
+                                  size_t WatchFrom = std::numeric_limits<size_t>::max())
 {
-    FRONTIER_TRACE_SCOPE("Command", Label);
-    const auto                  Start         = std::chrono::steady_clock::now();
-    SolidArcHistoryEntry        Before        = Snapshot(Document, Label);
-    const size_t                FirstNew      = std::min(Document.Tree.Steps.size(), WatchFrom);
-    const std::set<std::string> RefusedBefore = RefusedLabels(Document);
-    SolidArcCommandOutcome Outcome;
-    Outcome.Label = Label;
-    Outcome.Refusal = Apply();
-    if (Outcome.Refusal.empty())
-    {
-        RegenerateSolidArcDocumentDeferred(Document, CaptureCondition);
-        Outcome.Refusal = RefusalFrom(Document, FirstNew, RefusedBefore);
-        if (Outcome.Refusal.empty()) SummarizeSolidArcDocument(Document);
-    }
-    if (!Outcome.Refusal.empty())
-    {
-        FRONTIER_TRACE("Command", "refused, rolled back: " + Outcome.Refusal);
-        Restore(Document, std::move(Before));
-        Outcome.Milliseconds = ElapsedMs(Start);
-        return Outcome;
-    }
-    FRONTIER_TRACE("Command", "accepted · " + std::to_string(Document.Tree.Steps.size()) + " step(s) · " + std::to_string(Document.Regeneration.Bodies.size()) + " body(ies)");
-    Document.UndoEntries.push_back(std::move(Before));
-    Document.RedoEntries.clear();
-    TrimHistoryReplay(Document);
-    Outcome.AcceptedCondition = true;
-    Outcome.Milliseconds      = ElapsedMs(Start);
-    return Outcome;
+    const std::function<std::string()> Erased = std::forward<Change>(Apply);
+    return RunCommandErased(Document, Label, CaptureCondition, Erased, WatchFrom);
 }
 
 [[nodiscard]] std::string FormatAmount(double Value)
