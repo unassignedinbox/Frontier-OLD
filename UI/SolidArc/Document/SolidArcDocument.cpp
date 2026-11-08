@@ -663,6 +663,12 @@ void KeepResolvedNames(std::vector<std::string>& Names, const std::vector<Regene
 
 } // namespace
 
+SolidArcCommandOutcome Internal::RunCombineCommand(SolidArcDocument& Document, const std::string& Label,
+                                                    const std::function<std::string()>& Apply)
+{
+    return RunCommandErased(Document, Label, false, Apply);
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PUBLIC FUNCTIONS
 //------------------------------------------------------------------------------------------------------------------------
@@ -3256,37 +3262,6 @@ SolidArcEdgePath SolidArcEdgePathBetween(const SolidArcDocument& Document, const
     if (Path.Edges.empty()) Path.Refusal = From + " and " + To + " lie on one loop but no side of it joins them";
     return Path;
 }
-
-#if defined(_MSC_VER)
-// MSVC's optimizer also trips while compiling the small public wrapper after type erasure; leave this infrequent command unoptimized.
-#pragma optimize("", off)
-#endif
-SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target, const std::vector<std::string>& Tools,
-                                              FeatureCombination Combination)
-{
-    std::string Operands = SolidArcBodyCaption(Document, Target);
-    const char* Sign = Combination == FeatureCombination::Difference ? " − " : Combination == FeatureCombination::Intersection ? " ∩ " : " ∪ ";
-    for (const std::string& Tool : Tools)
-    {
-        Operands += Sign;
-        Operands += SolidArcBodyCaption(Document, Tool);
-    }
-
-    std::string Label = "Combine · ";
-    Label += FeatureCombinationLabel(Combination);
-    Label += " (";
-    Label += Operands;
-    Label += ')';
-    const std::string Caption = NextCaption(Document, "Combine");
-    const int FirstStepOrdinal = NextStepOrdinal(Document.Tree);
-    const std::function<std::string()> Apply = [&]() {
-        return Internal::ApplyCombineSolidArcBodies(Document, Target, Tools, Combination, Caption, FirstStepOrdinal);
-    };
-    return RunCommandErased(Document, Label, false, Apply);
-}
-#if defined(_MSC_VER)
-#pragma optimize("", on)
-#endif
 
 SolidArcCommandOutcome CutSolidArcBody(SolidArcDocument& Document, const SolidArcCutRequest& Request)
 {
