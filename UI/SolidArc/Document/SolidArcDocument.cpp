@@ -3222,6 +3222,10 @@ SolidArcEdgePath SolidArcEdgePathBetween(const SolidArcDocument& Document, const
 
 namespace
 {
+#if defined(_MSC_VER)
+// MSVC's optimizer hits C1001 in this validation-heavy command inside the large document translation unit.
+#pragma optimize("", off)
+#endif
 [[nodiscard]] std::string ApplyCombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target,
                                                       const std::vector<std::string>& Tools, FeatureCombination Combination)
 {
@@ -3257,6 +3261,9 @@ namespace
     Document.Selection = {};
     return {};
 }
+#if defined(_MSC_VER)
+#pragma optimize("", on)
+#endif
 } // namespace
 
 SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target, const std::vector<std::string>& Tools,
