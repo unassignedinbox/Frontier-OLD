@@ -38,6 +38,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <numbers>
 #include <limits>
 #include <map>
@@ -554,6 +555,41 @@ SolidArcCommandOutcome RunCommand(SolidArcDocument& Document, const std::string&
     {
         // 📝 The figures (audit, volume) are measured only once the command stands: a refused command rolls back to
         //    the snapshot, whose figures are reused, so measuring the refused body was wasted work.
+        RegenerateSolidArcDocumentDeferred(Document, CaptureCondition);
+        Outcome.Refusal = RefusalFrom(Document, FirstNew, RefusedBefore);
+        if (Outcome.Refusal.empty()) SummarizeSolidArcDocument(Document);
+    }
+    if (!Outcome.Refusal.empty())
+    {
+        FRONTIER_TRACE("Command", "refused, rolled back: " + Outcome.Refusal);
+        Restore(Document, std::move(Before));
+        Outcome.Milliseconds = ElapsedMs(Start);
+        return Outcome;
+    }
+    FRONTIER_TRACE("Command", "accepted · " + std::to_string(Document.Tree.Steps.size()) + " step(s) · " + std::to_string(Document.Regeneration.Bodies.size()) + " body(ies)");
+    Document.UndoEntries.push_back(std::move(Before));
+    Document.RedoEntries.clear();
+    TrimHistoryReplay(Document);
+    Outcome.AcceptedCondition = true;
+    Outcome.Milliseconds      = ElapsedMs(Start);
+    return Outcome;
+}
+
+// 📝 Type-erased counterpart for the combine command: its callback is split across translation units to keep MSVC's compiler stable.
+SolidArcCommandOutcome RunCommandErased(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition,
+                                        const std::function<std::string()>& Apply,
+                                        size_t WatchFrom = std::numeric_limits<size_t>::max())
+{
+    FRONTIER_TRACE_SCOPE("Command", Label);
+    const auto                  Start         = std::chrono::steady_clock::now();
+    SolidArcHistoryEntry        Before        = Snapshot(Document, Label);
+    const size_t                FirstNew      = std::min(Document.Tree.Steps.size(), WatchFrom);
+    const std::set<std::string> RefusedBefore = RefusedLabels(Document);
+    SolidArcCommandOutcome Outcome;
+    Outcome.Label = Label;
+    Outcome.Refusal = Apply();
+    if (Outcome.Refusal.empty())
+    {
         RegenerateSolidArcDocumentDeferred(Document, CaptureCondition);
         Outcome.Refusal = RefusalFrom(Document, FirstNew, RefusedBefore);
         if (Outcome.Refusal.empty()) SummarizeSolidArcDocument(Document);
@@ -3239,9 +3275,10 @@ SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const s
     Label += ')';
     const std::string Caption = NextCaption(Document, "Combine");
     const int FirstStepOrdinal = NextStepOrdinal(Document.Tree);
-    return RunCommand(Document, Label, false, [&]() {
+    const std::function<std::string()> Apply = [&]() {
         return Internal::ApplyCombineSolidArcBodies(Document, Target, Tools, Combination, Caption, FirstStepOrdinal);
-    });
+    };
+    return RunCommandErased(Document, Label, false, Apply);
 }
 
 SolidArcCommandOutcome CutSolidArcBody(SolidArcDocument& Document, const SolidArcCutRequest& Request)
