@@ -8,7 +8,6 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "UI/SolidArc/Document/SolidArcDocument.h"
-#include "UI/SolidArc/Document/SolidArcBodyCombineInternal.h"
 
 #include "Engine/GeometryProcessing/Surfacing/CurveFitting.h"
 #include "Engine/GeometryProcessing/Surfacing/SurfaceAlgebra.h"
@@ -38,10 +37,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <functional>
 #include <numbers>
 #include <limits>
-#include <utility>
 #include <map>
 #include <queue>
 #include <set>
@@ -540,9 +537,9 @@ SolidArcCommandOutcome RunAppearanceCommand(SolidArcDocument& Document, const st
 
 // ① snapshot ② change (the callback returns a refusal or "") ③ regenerate ④ roll back when a new step refused, or (edits
 //    of existing steps: WatchFrom) a step at or after WatchFrom that regenerated before now refuses.
-SolidArcCommandOutcome RunCommandErased(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition,
-                                        const std::function<std::string()>& Apply,
-                                        size_t WatchFrom = std::numeric_limits<size_t>::max())
+template <typename Change>
+SolidArcCommandOutcome RunCommand(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition, Change&& Apply,
+                                  size_t WatchFrom = std::numeric_limits<size_t>::max())
 {
     FRONTIER_TRACE_SCOPE("Command", Label);
     const auto                  Start         = std::chrono::steady_clock::now();
@@ -574,15 +571,6 @@ SolidArcCommandOutcome RunCommandErased(SolidArcDocument& Document, const std::s
     Outcome.AcceptedCondition = true;
     Outcome.Milliseconds      = ElapsedMs(Start);
     return Outcome;
-}
-
-// 📝 Keep each command lambda small at the call site; the shared transaction body is compiled once for MSVC.
-template <typename Change>
-SolidArcCommandOutcome RunCommand(SolidArcDocument& Document, const std::string& Label, bool CaptureCondition, Change&& Apply,
-                                  size_t WatchFrom = std::numeric_limits<size_t>::max())
-{
-    const std::function<std::string()> Erased = std::forward<Change>(Apply);
-    return RunCommandErased(Document, Label, CaptureCondition, Erased, WatchFrom);
 }
 
 [[nodiscard]] std::string FormatAmount(double Value)
@@ -637,12 +625,6 @@ void KeepResolvedNames(std::vector<std::string>& Names, const std::vector<Regene
 }
 
 } // namespace
-
-SolidArcCommandOutcome Internal::RunCombineCommand(SolidArcDocument& Document, const std::string& Label,
-                                                    const std::function<std::string()>& Apply)
-{
-    return RunCommandErased(Document, Label, false, Apply);
-}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PUBLIC FUNCTIONS
@@ -3236,6 +3218,41 @@ SolidArcEdgePath SolidArcEdgePathBetween(const SolidArcDocument& Document, const
     }
     if (Path.Edges.empty()) Path.Refusal = From + " and " + To + " lie on one loop but no side of it joins them";
     return Path;
+}
+
+SolidArcCommandOutcome CombineSolidArcBodies(SolidArcDocument& Document, const std::string& Target, const std::vector<std::string>& Tools, FeatureCombination Combination)
+{
+    std::string Operands = SolidArcBodyCaption(Document, Target);
+    const char* Sign = Combination == FeatureCombination::Difference ? " − " : Combination == FeatureCombination::Intersection ? " ∩ " : " ∪ ";
+    for (const std::string& Tool : Tools) Operands += Sign + SolidArcBodyCaption(Document, Tool);
+    const std::string Label = std::string("Combine · ") + FeatureCombinationLabel(Combination) + " (" + Operands + ")";
+    return RunCommand(Document, Label, false, [&]() -> std::string
+    {
+        if (Combination != FeatureCombination::Union && Combination != FeatureCombination::Difference && Combination != FeatureCombination::Intersection)
+            return "choose Union, Difference or Intersection";
+        if (Tools.empty()) return "select two or more bodies (the first is the target)";
+        if (!FindRegeneratedBody(Document, Target)) return "no body named " + Target;
+        std::set<std::string> Seen{ Target };
+        for (const std::string& Tool : Tools)
+        {
+            if (!FindRegeneratedBody(Document, Tool)) return "no body named " + Tool;
+            if (!Seen.insert(Tool).second) return SolidArcBodyCaption(Document, Tool) + " is picked twice (the target cannot be a tool)";
+        }
+        const std::string Caption = NextCaption(Document, "Combine");
+        for (const std::string& Tool : Tools)
+        {
+            FeatureStep Step;
+            Step.Kind        = FeatureStepKind::Combine;
+            Step.Label       = "Combine#" + std::to_string(NextStepOrdinal(Document.Tree));
+            Step.Combination = Combination;
+            Step.Target      = Target;
+            Step.Tool        = Tool;
+            Document.Captions[Step.Label] = Caption;
+            Document.Tree.Steps.push_back(std::move(Step));
+        }
+        Document.Selection = {};
+        return {};
+    });
 }
 
 SolidArcCommandOutcome CutSolidArcBody(SolidArcDocument& Document, const SolidArcCutRequest& Request)

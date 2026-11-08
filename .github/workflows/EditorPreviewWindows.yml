@@ -29,8 +29,8 @@ jobs:
           python -m pip install --disable-pip-version-check -r Automation/FontRequirements.txt
           python Automation/PrepareUI.py
           python Automation/PrepareFonts.py
-      - name: Configure Windows x64 Release
-        run: cmake -S . -B Build/Windows -A x64 -DBUILD_TESTING=OFF
+      - name: Configure Windows x64 Release with ClangCL
+        run: cmake -S . -B Build/Windows -A x64 -T ClangCL -DBUILD_TESTING=OFF
       - name: Build only Frontier and Project Everest
         shell: pwsh
         run: |
