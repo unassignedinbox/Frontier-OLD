@@ -32,7 +32,7 @@ jobs:
       - name: Configure Windows x64 Release
         run: cmake -S . -B Build/Windows -A x64 -DBUILD_TESTING=OFF
       - name: Build only Frontier and Project Everest
-        run: cmake --build Build/Windows --config Release --target Frontier Everest --parallel
+        run: cmake --build Build/Windows --config Release --target Frontier Everest --parallel 2
       - name: Upload the two Windows executables
         uses: actions/upload-artifact@v4
         with:
