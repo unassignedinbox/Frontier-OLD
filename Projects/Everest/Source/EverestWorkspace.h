@@ -224,6 +224,8 @@ class EverestWorkspace
     void ApplyVehicleCameraSolution(const Frontier::VehicleCameraSolution& Solution);
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+    void CaptureEditorCameraState() noexcept;
+    void RestoreEditorCameraState() noexcept;
     void ServiceDynamicSceneRequests();
     void SaveActiveLevel();
     // 📝 Scene objects (the Project Zero editor's tools): the Construct dialog's catalogue and orders, duplicates, renames, the
@@ -277,6 +279,10 @@ class EverestWorkspace
     uint64_t                      ObservedLayoutRevision = 0;
     SceneViewportFlight           Flight{};
     SceneViewportNavigation Navigation{};
+    // The editor flight/navigation state is independent of VehicleCameraSolver and is restored on mode changes.
+    SceneViewportFlight           SavedEditorFlight{};
+    SceneViewportNavigation       SavedEditorNavigation{};
+    bool                          SavedEditorCameraReady = false;
     double                        ViewportDeltaSeconds   = 0.0;
     void*                         ConstrainedWindow      = nullptr;   // [-] platform window holding the pointer, or null
     int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock

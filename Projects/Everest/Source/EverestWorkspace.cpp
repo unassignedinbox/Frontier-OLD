@@ -719,8 +719,39 @@ void EverestWorkspace::ApplyVehicleCameraSolution(const Frontier::VehicleCameraS
 #endif
 }
 
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+void EverestWorkspace::CaptureEditorCameraState() noexcept
+{
+    if (StudioCameraEngaged)
+    {
+        return;
+    }
+
+    SavedEditorFlight           = Flight;
+    SavedEditorNavigation       = Navigation;
+    SavedEditorCameraReady      = true;
+}
+
+void EverestWorkspace::RestoreEditorCameraState() noexcept
+{
+    if (!SavedEditorCameraReady)
+    {
+        return;
+    }
+
+    Flight                     = SavedEditorFlight;
+    Navigation                 = SavedEditorNavigation;
+    SavedEditorCameraReady     = false;
+}
+#endif
+
 void EverestWorkspace::ConfigureGameCameraMode(bool Enabled)
 {
+    if (Enabled == StudioCameraEngaged)
+    {
+        return;
+    }
+
     if (Enabled)
     {
         double Aspect = 16.0 / 9.0;
@@ -735,22 +766,20 @@ void EverestWorkspace::ConfigureGameCameraMode(bool Enabled)
         {
             return;
         }
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+        CaptureEditorCameraState();
+#endif
         StudioCameraEngaged = true;
         const auto Solution = VehicleCamera.Advance(Subject, Frontier::VehicleCameraInput{}, 0.0);
         ApplyVehicleCameraSolution(Solution);
     }
     else
     {
-        if (StudioCameraEngaged)
-        {
-            ApplyVehicleCameraSolution(VehicleCamera.QueryLastSolution());
-        }
         StudioCameraEngaged  = false;
         ActiveNearClipMetres = 0.05;
+        ActiveVeilOpacity    = 0.0;
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
-        Flight.Velocity      = {0.0, 0.0, 0.0};
-        Navigation.Mode      = SceneCameraMode::Free;
-        Navigation.Up        = {0.0, 0.0, 1.0};
+        RestoreEditorCameraState();
 #endif
     }
 }
@@ -762,6 +791,12 @@ void EverestWorkspace::SynchronizeActiveLevelState(bool ResetOutdoorEditorCamera
     {
         (void)Lobby.SynchronizeWorldVisibility(QueryWorldSpace());
         VehicleCamera.ConfigureEnvironment(true, ResolveVehicleKinematics());
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+        if (!StudioCameraEngaged)
+        {
+            CaptureEditorCameraState();
+        }
+#endif
         StudioCameraEngaged = true;
         ApplyVehicleCameraSolution(VehicleCamera.QueryLastSolution());
     }
@@ -769,7 +804,15 @@ void EverestWorkspace::SynchronizeActiveLevelState(bool ResetOutdoorEditorCamera
     {
         const auto InitialSubject = ResolveVehicleKinematics();
         VehicleCamera.ConfigureEnvironment(false, InitialSubject);
-        StudioCameraEngaged  = StartDrivingSimulation && InitialSubject.Available;
+        const bool EnterVehicleCamera = StartDrivingSimulation && InitialSubject.Available;
+#if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+        const bool LeavingVehicleCamera = StudioCameraEngaged && !EnterVehicleCamera;
+        if (EnterVehicleCamera && !StudioCameraEngaged)
+        {
+            CaptureEditorCameraState();
+        }
+#endif
+        StudioCameraEngaged  = EnterVehicleCamera;
         ActiveNearClipMetres = StudioCameraEngaged ? VehicleCamera.QueryLastSolution().NearClipMetres : 0.05;
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
         if (StudioCameraEngaged)
@@ -778,8 +821,14 @@ void EverestWorkspace::SynchronizeActiveLevelState(bool ResetOutdoorEditorCamera
         }
         else if (ResetOutdoorEditorCamera)
         {
-            Flight     = SceneViewportFlight{};
-            Navigation = SceneViewportNavigation{};
+            Flight                     = SceneViewportFlight{};
+            Navigation                 = SceneViewportNavigation{};
+            SavedEditorCameraReady     = false;
+        }
+        else if (LeavingVehicleCamera)
+        {
+            // A level reload may stage a custom editor pose; do not restore a stale pre-transition snapshot.
+            SavedEditorCameraReady = false;
         }
         if (StartDrivingSimulation && (!Physics || !Physics->QueryRunning()))
         {
@@ -1566,9 +1615,9 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
     {
         ConfigureGameCameraMode(!StudioCameraEngaged);
         AnnounceViewportNotice(StudioCameraEngaged
-                                   ? ("Game camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) +
+                                   ? ("Vehicle camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) +
                                       " (F8 Editor \xC2\xB7 C cycle \xC2\xB7 M HMI)")
-                                   : "Editor camera (F8 Game camera)");
+                                   : "Editor camera (F8 Vehicle camera)");
     }
 
     if (KeysAvailable && HasGameCamera)
@@ -1580,7 +1629,7 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
                                        : Frontier::VehicleCameraRig::Hmi;
             if (!StudioCameraEngaged) ConfigureGameCameraMode(true);
             VehicleCamera.TransitionToRig(TargetRig);
-            AnnounceViewportNotice("Game camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(TargetRig)) + " (M)");
+            AnnounceViewportNotice("Vehicle camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(TargetRig)) + " (M)");
         }
         else if (ImGui::IsKeyPressed(ImGuiKey_C, false))
         {
@@ -1592,7 +1641,7 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
             {
                 VehicleCamera.CycleRig(IO.KeyShift);
             }
-            AnnounceViewportNotice((QueryLobbyActive() ? "Studio camera: " : "Game camera: ") +
+            AnnounceViewportNotice((QueryLobbyActive() ? "Studio vehicle camera: " : "Vehicle camera: ") +
                                    std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) + " (C)");
         }
     }
@@ -1617,7 +1666,7 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
     if (StudioCameraEngaged && Active && Pointer.RightDown)
     {
         ConfigureGameCameraMode(false);
-        AnnounceViewportNotice("Editor camera (F8 Game camera)");
+        AnnounceViewportNotice("Editor camera (F8 Vehicle camera)");
     }
 
     if (StudioCameraEngaged && HasGameCamera)
@@ -1878,16 +1927,16 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
     const bool HasGameCamera = QueryLobbyActive() || ResolveVehicleKinematics().Available;
     if (HasGameCamera)
     {
-        static constexpr const char* CameraDomainLabels[] = {"Editor", "Game"};
+        static constexpr const char* CameraDomainLabels[] = {"Editor", "Vehicle"};
         int DomainIndex = StudioCameraEngaged ? 1 : 0;
-        if (ViewportChromeControls::ConstructSegmentedSwitch("##CameraDomain", Faces, {X, Min.y + (Height - Button) * .5f},
+        if (ViewportChromeControls::ConstructSegmentedSwitch("##CameraSource", Faces, {X, Min.y + (Height - Button) * .5f},
                                                              {124 * Scale, Button}, CameraDomainLabels, 2, DomainIndex, nullptr, nullptr, Scale))
         {
             ConfigureGameCameraMode(DomainIndex == 1);
             AnnounceViewportNotice(StudioCameraEngaged
-                                       ? ("Game camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) +
+                                       ? ("Vehicle camera: " + std::string(Frontier::QueryVehicleCameraRigLabel(VehicleCamera.QueryRig())) +
                                           " (F8 Editor \xC2\xB7 C cycle \xC2\xB7 M HMI)")
-                                       : "Editor camera (F8 Game camera)");
+                                       : "Editor camera (F8 Vehicle camera)");
         }
         X += 124 * Scale + Gap;
     }
@@ -1930,7 +1979,7 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         }
         X += Button + Gap;
         if (ViewportChromeControls::ConstructIconButton("##ResetGameRig", {X, Min.y + (Height - Button) * .5f}, Button, "RotateCcw", false, true,
-                                                        "Reset active Game camera rig"))
+                                                        "Reset active Vehicle camera rig"))
         {
             VehicleCamera.ConfigureRigImmediate(
                 QueryLobbyActive() ? Frontier::VehicleCameraRig::Orbit : VehicleCamera.QueryRig(), ResolveVehicleKinematics());
@@ -2129,7 +2178,7 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
             BeginLevelTransition(ProjectRoot / "Content" / "Levels" / "Lobby.levelspace", false);
         }
         ImGui::SameLine(0.0f, 6.0f * Scale);
-        const std::string ModeLabel = StudioCameraEngaged ? "Game Cam (F8)##ToggleCamMode" : "Editor Cam (F8)##ToggleCamMode";
+        const std::string ModeLabel = StudioCameraEngaged ? "Vehicle Cam (F8)##ToggleCamMode" : "Editor Cam (F8)##ToggleCamMode";
         if (ImGui::Button(ModeLabel.c_str()))
         {
             ConfigureGameCameraMode(!StudioCameraEngaged);
@@ -2271,7 +2320,10 @@ void EverestWorkspace::ConstructSessionViewportOverlay(const ImVec2& StageMin, c
         if (SelectedRig) ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(52, 92, 138, 245));
         if (ImGui::Button(StudioRigs[RigIdx].second))
         {
-            StudioCameraEngaged = true;
+            if (!StudioCameraEngaged)
+            {
+                ConfigureGameCameraMode(true);
+            }
             VehicleCamera.TransitionToRig(StudioRigs[RigIdx].first);
         }
         if (SelectedRig) ImGui::PopStyleColor();

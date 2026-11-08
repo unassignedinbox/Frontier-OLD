@@ -165,6 +165,77 @@ int main(int ArgumentCount, char** Arguments)
         WorldSpace&               World = Workspace.QueryWorldSpace();
         Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
         Require(World.QueryRecordCount() == 26, "Expected 26 records in the Simulation fixture (one Render settings record).");
+
+        // Camera source switching keeps the editor's complete navigation state while the vehicle solver retains its own rig.
+        {
+            if (Workspace.QueryGameCameraMode())
+            {
+                Workspace.ConfigureGameCameraMode(false);
+            }
+            const Everest::SceneViewportFlight InitialFlight = Workspace.AccessViewportFlight();
+            const Everest::SceneViewportNavigation InitialNavigation = Workspace.AccessViewportNavigation();
+            const RecordToken CameraTestVehicle = World.ConstructRecord("Vehicle", "Camera Switch Test Vehicle");
+            Require(CameraTestVehicle.IsValid(), "Camera switch validation needs a visible Vehicle record.");
+
+            auto& EditorFlight = Workspace.AccessViewportFlight();
+            EditorFlight.Position = {31.25, -15.75, 8.5};
+            EditorFlight.Heading = 211.5;
+            EditorFlight.Elevation = 22.25;
+            EditorFlight.PivotDistance = 17.75;
+            EditorFlight.VerticalFieldOfView = 0.793;
+            EditorFlight.FieldOfViewOffset = -2.25;
+            EditorFlight.FieldOfViewRate = 3.5;
+            EditorFlight.Velocity = {0.25, -0.5, 0.75};
+            EditorFlight.SpeedSetting = 7;
+            EditorFlight.WheelRemainder = 0.625;
+
+            auto& EditorNavigation = Workspace.AccessViewportNavigation();
+            EditorNavigation.Mode = Everest::SceneCameraMode::Top;
+            EditorNavigation.Anchor = {6.25, 7.5, 8.75};
+            EditorNavigation.ChaseOffset = {-3.25, 2.5, 1.75};
+            EditorNavigation.Up = {0.0, 1.0, 0.0};
+            EditorNavigation.ScenePose.Position = {1.0, 2.0, 3.0};
+            EditorNavigation.ScenePose.Heading = 45.25;
+            EditorNavigation.ScenePose.Elevation = -12.5;
+            EditorNavigation.ScenePose.PivotDistance = 9.75;
+            EditorNavigation.ScenePose.VerticalFieldOfView = 0.91;
+            EditorNavigation.ScenePose.SpeedSetting = 6;
+            EditorNavigation.ScenePoseReady = true;
+            EditorNavigation.Selected = 17u;
+
+            const auto ExpectedFlight = EditorFlight;
+            const auto ExpectedNavigation = EditorNavigation;
+            const auto VehicleRig = Workspace.QueryVehicleCamera().QueryRig();
+            const auto SameFlight = [](const Everest::SceneViewportFlight& First, const Everest::SceneViewportFlight& Second)
+            {
+                return First.Position == Second.Position && First.Heading == Second.Heading && First.Elevation == Second.Elevation &&
+                       First.PivotDistance == Second.PivotDistance && First.VerticalFieldOfView == Second.VerticalFieldOfView &&
+                       First.FieldOfViewOffset == Second.FieldOfViewOffset && First.FieldOfViewRate == Second.FieldOfViewRate &&
+                       First.Velocity == Second.Velocity && First.SpeedSetting == Second.SpeedSetting &&
+                       First.WheelRemainder == Second.WheelRemainder;
+            };
+            const auto SameNavigation = [&](const Everest::SceneViewportNavigation& First, const Everest::SceneViewportNavigation& Second)
+            {
+                return First.Mode == Second.Mode && First.Anchor == Second.Anchor && First.ChaseOffset == Second.ChaseOffset &&
+                       First.Up == Second.Up && SameFlight(First.ScenePose, Second.ScenePose) &&
+                       First.ScenePoseReady == Second.ScenePoseReady && First.Selected == Second.Selected;
+            };
+
+            Workspace.ConfigureGameCameraMode(true);
+            Require(Workspace.QueryGameCameraMode(), "Editor-to-Vehicle camera selection did not engage the vehicle camera.");
+            Require(Workspace.QueryVehicleCamera().QueryRig() == VehicleRig, "Switching camera sources changed the vehicle rig.");
+            Workspace.ConfigureGameCameraMode(false);
+            Require(!Workspace.QueryGameCameraMode(), "Vehicle-to-Editor camera selection did not return to the editor camera.");
+            Require(SameFlight(Workspace.AccessViewportFlight(), ExpectedFlight),
+                    "Returning to the editor camera must restore its full flight pose and motion state.");
+            Require(SameNavigation(Workspace.AccessViewportNavigation(), ExpectedNavigation),
+                    "Returning to the editor camera must restore its navigation mode, target, up axis and Space bookmark.");
+            Require(Workspace.QueryVehicleCamera().QueryRig() == VehicleRig, "Returning to the editor camera changed the vehicle rig.");
+            Require(World.DestroyRecord(CameraTestVehicle), "Camera switch validation could not remove its temporary Vehicle record.");
+            Workspace.AccessViewportFlight() = InitialFlight;
+            Workspace.AccessViewportNavigation() = InitialNavigation;
+        }
+
         // 📝 Each planet of the sky is its own Scene Directory entry (Venus, Jupiter, Mars, Saturn), beside the starfield and moons.
         Require(World.FindAllByType("Planet").size() == 4 && World.FindFirstByType("Stars") && World.FindFirstByType("Moons"),
                 "Expected four Planet entries beside the Stars and Moons entries.");
