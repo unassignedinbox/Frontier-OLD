@@ -80,13 +80,18 @@ jobs:
             }
             exit $BuildExit
           }
-      - name: Upload the two Windows executables
+      - name: Upload Frontier.exe
         uses: actions/upload-artifact@v4
         with:
-          name: Frontier-Everest-Windows-x64
-          path: |
-            Build/Windows/Release/Frontier.exe
-            Build/Windows/Release/Everest.exe
+          name: Frontier-Windows-x64
+          path: Build/Windows/Release/Frontier.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Everest.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Everest-Windows-x64
+          path: Build/Windows/Release/Everest.exe
           if-no-files-found: error
           retention-days: 30
       - name: Upload build log for diagnosis
