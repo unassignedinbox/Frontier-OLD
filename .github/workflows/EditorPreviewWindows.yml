@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: windows-binaries-${{ github.ref }}
@@ -33,19 +34,49 @@ jobs:
         run: cmake -S . -B Build/Windows -A x64 -T ClangCL -DBUILD_TESTING=OFF
       - name: Build only Frontier and Project Everest
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $BuildLog = "Frontier-Everest-build.log"
           cmake --build Build/Windows --config Release --target Frontier Everest --parallel 2 2>&1 |
             Tee-Object -FilePath $BuildLog
           $BuildExit = $LASTEXITCODE
           if ($BuildExit -ne 0) {
-            $BuildErrors = Select-String -Path $BuildLog -Pattern '(?i)(fatal error|error C[0-9]+|error LNK[0-9]+|error MSB[0-9]+|CMake Error|FAILED:|error:)' |
-              Select-Object -First 25
-            if ($BuildErrors.Count -eq 0) { $BuildErrors = Get-Content $BuildLog -Tail 40 }
-            foreach ($Line in $BuildErrors) {
-              if ($Line -is [Microsoft.PowerShell.Commands.MatchInfo]) { $LineText = $Line.Line } else { $LineText = [string]$Line }
-              $Message = $LineText.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Output "Windows build command exit code: $BuildExit"
+            $BuildErrors = @(
+              Select-String -Path $BuildLog -Pattern '(?i)(fatal error|error C[0-9]+|error LNK[0-9]+|error MSB[0-9]+|CMake Error|FAILED:|error:)' |
+                Select-Object -First 25 |
+                ForEach-Object { $_.Line }
+            )
+            if ($BuildErrors.Count -eq 0) { $BuildErrors = @(Get-Content $BuildLog -Tail 100) }
+            $DiagnosticText = $BuildErrors -join "`n"
+            if ($DiagnosticText.Length -gt 40000) { $DiagnosticText = $DiagnosticText.Substring($DiagnosticText.Length - 40000) }
+            $SummaryText = "cmake --build exited with code $BuildExit.`n`n````text`n$DiagnosticText`n````"
+            Set-Content -Path $env:GITHUB_STEP_SUMMARY -Value $SummaryText -Encoding utf8
+            foreach ($LineText in $BuildErrors) {
+              $Message = ([string]$LineText).Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
               Write-Output "::error::$Message"
+            }
+            try {
+              $Headers = @{
+                Authorization = "Bearer $env:GH_TOKEN"
+                Accept = 'application/vnd.github+json'
+                'X-GitHub-Api-Version' = '2022-11-28'
+              }
+              $ChecksUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/$env:GITHUB_SHA/check-runs?per_page=100"
+              $CheckRuns = Invoke-RestMethod -Uri $ChecksUri -Headers $Headers
+              $CheckRun = $CheckRuns.check_runs |
+                Where-Object { $_.name -eq 'Build Frontier.exe and Everest.exe (Windows x64, one Release build)' } |
+                Sort-Object started_at |
+                Select-Object -Last 1
+              if ($null -ne $CheckRun) {
+                $Body = @{ output = @{ title = 'Windows build failure diagnostics'; summary = $SummaryText } } | ConvertTo-Json -Depth 5
+                Invoke-RestMethod -Method Patch -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/check-runs/$($CheckRun.id)" -Headers $Headers -ContentType 'application/json' -Body $Body | Out-Null
+              } else {
+                Write-Output '::warning::Could not find the current Windows build check run to attach diagnostic summary.'
+              }
+            } catch {
+              Write-Output "::warning::Could not attach diagnostic summary to the check run: $($_.Exception.Message)"
             }
             exit $BuildExit
           }
