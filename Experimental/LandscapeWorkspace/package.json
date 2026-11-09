@@ -1,0 +1,21 @@
+{
+  "name": "frontier-landscape-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test Tests/*.test.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "vite": "^7.1.0"
+  },
+  "dependencies": {
+    "lucide": "1.66.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

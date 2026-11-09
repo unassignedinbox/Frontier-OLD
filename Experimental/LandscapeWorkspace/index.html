@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Frontier · Global 3D SDF Landscape Authoring</title>
+    <link rel="stylesheet" href="./Workspace.css" />
+</head>
+<body>
+    <!-- ========================================== APPLICATION HEADER ========================================== -->
+    <header class="application-heading">
+        <a class="brand" href="#" onclick="return false;" aria-label="Frontier Landscape Editor">
+            <span data-glyph="mountain"></span>
+            Frontier<span class="brand-dot">.</span>
+        </a>
+
+        <div class="project-breadcrumb">
+            <strong>Authoring World</strong>
+            <span>/</span>
+            <span id="HeaderActiveLayerName">Desert mesas &amp; dunes</span>
+        </div>
+
+        <nav class="workspace-tabs" aria-label="Authoring workspace mode">
+            <button type="button" id="MaskWorkspaceTab" data-workspace="mask">
+                <span data-glyph="mask"></span>
+                Mask Paint <kbd>1</kbd>
+            </button>
+            <button type="button" id="LandscapeWorkspaceTab" data-workspace="landscape" class="active">
+                <span data-glyph="layers"></span>
+                Global 3D SDF <kbd>2</kbd>
+            </button>
+        </nav>
+
+        <div class="document-controls">
+            <span class="save-status" id="SaveStatus">Global SDF · Zero LOD</span>
+            <button type="button" class="icon-button" id="Undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+                <span data-glyph="undo"></span>
+            </button>
+            <button type="button" class="icon-button" id="Redo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>
+                <span data-glyph="redo"></span>
+            </button>
+            <span class="vertical-divider"></span>
+            <input type="file" id="ImportFile" accept=".json,application/json" hidden />
+            <button type="button" class="quiet-button" id="Import" title="Load world JSON">
+                Load JSON
+            </button>
+            <button type="button" class="border-button" id="Export" title="Save world JSON">
+                <span data-glyph="download"></span>
+                Save World
+            </button>
+            <button type="button" class="primary-button" id="ExportGsdf" title="Export active layer sparse 3D SDF (.gsdf)">
+                <span data-glyph="box"></span>
+                Export .gsdf
+            </button>
+        </div>
+    </header>
+
+    <!-- ========================================== THREE-COLUMN WORKSPACE ========================================== -->
+    <main class="workspace-layout">
+
+        <!-- 1. LEFT OUTLINER: PER-LAYER SDF DIRECTORY & PROCEDURAL LANDFORM STACK -->
+        <aside class="outliner" aria-label="Landscape layers and landform stack">
+            <div class="outliner-project">
+                <span class="eyebrow">GLOBAL DISTANCE FIELD</span>
+                <div>
+                    <span>SDF Layers</span>
+                    <span class="count-pill" id="LayerCount">3</span>
+                </div>
+                <p>Independent per-layer 3D SDF lattices (512³–2048³ horizontal) composited in unified ray space.</p>
+            </div>
+
+            <section class="mask-directory">
+                <div class="section-heading">
+                    <h2><span class="muted-glyph" data-glyph="layers"></span>Landscape Layers</h2>
+                    <div style="display:flex;gap:4px;">
+                        <button type="button" class="icon-button" id="DuplicateLayer" title="Duplicate active SDF layer" aria-label="Duplicate active SDF layer">
+                            <span data-glyph="copy"></span>
+                        </button>
+                        <button type="button" class="icon-button" id="DeleteLayer" title="Delete active SDF layer" aria-label="Delete active SDF layer">
+                            <span data-glyph="trash"></span>
+                        </button>
+                        <button type="button" class="icon-button" id="AddLayer" title="Add new SDF layer" aria-label="Add new SDF layer">
+                            <span data-glyph="plus"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="mask-list" id="MaskRows" role="listbox" aria-label="SDF Landscape Layers"></div>
+                <p class="selection-note" id="SelectionNote">Shift-click layers to batch-apply generators across masks.</p>
+            </section>
+
+            <!-- 2D Mask Paint Controls (shown when Mask Paint workspace is active) -->
+            <section class="mask-instructions" id="MaskInstructions" hidden>
+                <span data-glyph="brush"></span>
+                <strong>Vector Shoreline Mask</strong>
+                <p>Paint or erase 2D shoreline strokes in world metres. Releasing updates the layer's 3D SDF domain automatically.</p>
+                <div class="control-group">
+                    <label class="field-caption">Brush Radius <output id="MaskBrushReadout">85 m</output></label>
+                    <input type="range" id="MaskBrushRadius" min="20" max="260" step="5" value="85" />
+                </div>
+                <label class="check-row">
+                    <span>Erase shoreline mask</span>
+                    <span class="switch">
+                        <input type="checkbox" id="MaskErase" />
+                        <span></span>
+                    </span>
+                </label>
+                <div class="mask-edit-actions">
+                    <button type="button" class="border-button full-width" id="FitRegions">Rebuild Bounds from Strokes</button>
+                </div>
+            </section>
+
+            <!-- 3D Landform Stack Panel (managed by LayerStackPanel.js) -->
+            <section class="terrain-stack-panel" id="TerrainStackPanel">
+                <div class="section-heading">
+                    <h2>
+                        <span class="muted-glyph" data-glyph="sliders"></span>
+                        Landform Stack
+                        <span class="count-pill" id="OperationCount">0</span>
+                    </h2>
+                </div>
+
+                <div class="stack-owner">
+                    <span id="StackOwnerColour"></span>
+                    <strong id="StackOwner">Desert mesas &amp; dunes</strong>
+                </div>
+
+                <label class="scope-selector">
+                    <span>Scope</span>
+                    <select id="StackScope" aria-label="Generator stack scope"></select>
+                </label>
+
+                <label class="search-field">
+                    <span data-glyph="search"></span>
+                    <input type="text" id="LayerSearch" placeholder="Filter generators…" aria-label="Filter generators" />
+                </label>
+
+                <div class="landform-list" id="LandformRows" role="listbox" aria-label="Ordered landform operations"></div>
+
+                <button type="button" class="add-generator" id="AddGenerator" aria-expanded="false">
+                    <span data-glyph="plus"></span>
+                    Add generator…
+                    <kbd>G</kbd>
+                </button>
+                <button type="button" class="batch-button" id="BatchLandform" aria-expanded="false" hidden>
+                    Add to selected masks…
+                </button>
+
+                <div class="stack-order">
+                    <span data-glyph="arrow-up"></span>
+                    Evaluated bottom to top
+                </div>
+            </section>
+
+            <div class="outliner-bottom">
+                <button type="button" class="environment-button" id="EnvironmentButton">
+                    <span class="world-icon" data-glyph="waves"></span>
+                    <span>
+                        <strong>Open Water · Spectral Ocean</strong>
+                        <small id="OutlinerOceanNote">24-wave world-space · exact ray intersection</small>
+                    </span>
+                    <span data-glyph="chevron-right"></span>
+                </button>
+
+                <div class="project-actions">
+                    <button type="button" id="LoadDefaultWorld">Reset Default World</button>
+                    <span>·</span>
+                    <button type="button" id="LoadShowcaseWorld">5-Layer Showcase</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 2. CENTER VIEWPORT: UNIFIED RAY-SPACE 3D GLOBAL SDF + SPECTRAL OCEAN -->
+        <section class="viewport-panel" aria-label="3D Global SDF Viewport">
+            <div class="viewport-heading">
+                <div class="viewport-title">
+                    <span data-glyph="mountain"></span>
+                    <strong id="ViewTitle">3D Global Distance Field</strong>
+                    <span id="ViewSubtitle">Hardware Trilinear R16F Sparse Bricks · Analytic Ray-Ocean</span>
+                </div>
+                <div class="viewport-actions">
+                    <span id="GeometryQuality">1024×1024×256 + 2× 512×512×128 · No LOD</span>
+                    <span class="vertical-divider"></span>
+                    <button type="button" class="quiet-button" id="Fit" title="Frame active SDF layer (Home)">
+                        <span data-glyph="focus"></span>
+                        Frame Layer
+                    </button>
+                    <button type="button" class="quiet-button" id="FrameWorld" title="Frame entire world">
+                        World
+                    </button>
+                </div>
+            </div>
+
+            <div id="Viewport" tabindex="0">
+                <canvas id="Preview"></canvas>
+                <canvas id="Paint" hidden></canvas>
+
+                <div class="viewport-caption">
+                    <span>AUTHOR-TIME GLOBAL SDF</span>
+                    <span class="viewport-badge" id="ViewportBadge">ZERO LOD · ZERO CLIPPING</span>
+                    <span class="build-pill" id="BuildStatusBadge" hidden>BUILDING SDF…</span>
+                </div>
+
+                <!-- Left Viewport Tool Rail: Camera Orbit/Pan + 4 Interactive 3D SDF Sculpt Brushes -->
+                <div class="viewport-tools" id="LandscapeTools" role="toolbar" aria-label="Camera and 3D SDF sculpting tools">
+                    <button type="button" id="OrbitCamera" class="active" title="Orbit Camera (Alt+Drag / Right-Drag)">
+                        <span data-glyph="orbit"></span>
+                        <kbd>O</kbd>
+                    </button>
+                    <button type="button" id="PanCamera" title="Pan Camera (Middle-Drag / Shift+Right-Drag)">
+                        <span data-glyph="hand"></span>
+                        <kbd>P</kbd>
+                    </button>
+                    <div class="tool-divider"></div>
+                    <button type="button" data-sculpt-tool="clay" title="3D Sculpt Clay — Add volume (B)">
+                        <span data-glyph="brush"></span>
+                        <kbd>B</kbd>
+                    </button>
+                    <button type="button" data-sculpt-tool="carve" title="3D Sculpt Carve — Subtract tunnels/caves/arches (V)">
+                        <span data-glyph="eraser"></span>
+                        <kbd>V</kbd>
+                    </button>
+                    <button type="button" data-sculpt-tool="smooth" title="3D Sculpt Smooth — Relax 3D SDF surface (K)">
+                        <span data-glyph="waves"></span>
+                        <kbd>K</kbd>
+                    </button>
+                    <button type="button" data-sculpt-tool="flatten" title="3D Sculpt Flatten — Grade to tangent plane (F)">
+                        <span data-glyph="cliff"></span>
+                        <kbd>F</kbd>
+                    </button>
+                </div>
+
+                <!-- Floating 3D Sculpt Brush Quick-HUD (shown whenever a 3D sculpt tool is active) -->
+                <div class="sculpt-hud" id="SculptHud" hidden>
+                    <div class="sculpt-hud-header">
+                        <span id="SculptHudTitle">3D Sculpt · Clay (+)</span>
+                        <button type="button" class="quiet-button" id="ExitSculptHud" style="padding:2px 6px;font-size:9px;">Orbit (Esc)</button>
+                    </div>
+                    <div class="sculpt-mode-pills">
+                        <button type="button" data-sculpt-pill="clay" class="active">Clay +</button>
+                        <button type="button" data-sculpt-pill="carve">Carve −</button>
+                        <button type="button" data-sculpt-pill="smooth">Smooth</button>
+                        <button type="button" data-sculpt-pill="flatten">Flatten</button>
+                    </div>
+                    <div class="control-group">
+                        <label class="field-caption">Brush Radius <output id="HudBrushRadiusOut">18 m</output></label>
+                        <input type="range" id="HudBrushRadius" min="6" max="80" step="1" value="18" />
+                    </div>
+                    <div class="control-group">
+                        <label class="field-caption">Strength <output id="HudBrushStrengthOut">0.55</output></label>
+                        <input type="range" id="HudBrushStrength" min="0.05" max="1.0" step="0.05" value="0.55" />
+                    </div>
+                    <div class="control-group">
+                        <label class="field-caption">Falloff <output id="HudBrushFalloffOut">0.60</output></label>
+                        <input type="range" id="HudBrushFalloff" min="0.05" max="1.0" step="0.05" value="0.60" />
+                    </div>
+                    <p style="color:#8fa3a1;font-size:9px;margin-top:6px;line-height:1.45;">
+                        Hold <strong>Shift</strong> to invert Clay/Carve · Right-drag orbits camera at any time.
+                    </p>
+                </div>
+
+                <!-- Camera Navigation Bar (bound by CameraNavigation.js) -->
+                <div class="camera-navigation">
+                    <label title="Enable WASD + Q/E fly navigation">
+                        <input type="checkbox" id="KeyboardCamera" checked />
+                        <span>WASD Fly</span>
+                    </label>
+                    <span class="vertical-divider"></span>
+                    <label class="camera-speed" title="Fly speed in metres per second">
+                        <input type="number" id="CameraSpeed" min="10" max="2000" step="10" value="220" />
+                        <span>m/s</span>
+                    </label>
+                </div>
+
+                <div class="viewport-lower">
+                    <div>
+                        <span id="ActiveToolReadout">Camera Orbit · Right-drag orbit · Wheel zoom</span>
+                        <span id="CameraPosition">X 0.0 · Y 40.0 · Z 0.0</span>
+                    </div>
+                    <div class="scale-reference">
+                        <span></span>
+                        <small id="ScaleReadout">100 m world scale</small>
+                    </div>
+                    <svg class="axis-reference" viewBox="0 0 61 57" aria-hidden="true">
+                        <path d="M30 34 L52 42 M30 34 L30 10 M30 34 L10 43" />
+                        <circle cx="30" cy="34" r="2" />
+                        <text x="53" y="45">X</text>
+                        <text x="27" y="8">Y</text>
+                        <text x="3" y="47">Z</text>
+                    </svg>
+                </div>
+            </div>
+
+            <div class="viewport-footnote">
+                <div id="CanvasHint">
+                    LMB Orbit / Sculpt <span>·</span> RMB Orbit <span>·</span> MMB Pan <span>·</span> Wheel Zoom <span>·</span> B/V/K/F 3D Sculpt <span>·</span> [ / ] Brush Size
+                </div>
+                <div id="RenderReadout">WebGL2 R16F Sparse Atlas · Ready</div>
+            </div>
+        </section>
+
+        <!-- 3. RIGHT INSPECTOR: PER-LAYER RESOLUTION SLIDERS, BIOME, GENERATOR, 3D SCULPT & OCEAN -->
+        <aside class="inspector" aria-label="Property inspector">
+            <div class="inspector-top">
+                <span>Property Inspector</span>
+                <span id="InspectorScope">Active landform</span>
+            </div>
+
+            <div class="inspector-scroll">
+                <div class="inspector-mask-context">
+                    <span id="ActiveMaskColour"></span>
+                    <span id="LayerTitle">Desert mesas &amp; dunes</span>
+                    <button type="button" class="quiet-button" id="SwitchToMaskEdit" title="Edit 2D shoreline mask">
+                        Edit Mask <span data-glyph="arrow-up-right"></span>
+                    </button>
+                </div>
+
+                <div class="inspector-identity">
+                    <div class="identity-glyph" id="StackIdentityGlyph"></div>
+                    <div>
+                        <span class="eyebrow" id="InspectorEyebrow">TERRAIN GENERATOR</span>
+                        <input type="text" class="identity-title" id="OperationName" value="Sandstone mesas" aria-label="Selected item name" />
+                        <p id="OperationSubtitle">Entire mask · local influence</p>
+                    </div>
+                </div>
+
+                <div class="inspector-tabs" role="tablist">
+                    <button type="button" class="active" data-inspector-tab="shape">Layer &amp; Stack</button>
+                    <button type="button" data-inspector-tab="sculpt">3D Sculpt</button>
+                    <button type="button" data-inspector-tab="ocean">Ocean &amp; Sky</button>
+                </div>
+
+                <!-- PER-LAYER INDEPENDENT SDF RESOLUTION & BIOME SETTINGS CARD -->
+                <section class="property-card" id="LayerSdfSettingsCard">
+                    <h3>
+                        <span data-glyph="box"></span>
+                        Layer 3D SDF Lattice
+                        <span class="small-pill" id="LayerVoxelSummaryPill">1024×1024×256</span>
+                    </h3>
+
+                    <div class="control-group">
+                        <label class="field-caption">
+                            Horizontal X / Z Resolution
+                            <output id="LayerResXZOut">1024 × 1024</output>
+                        </label>
+                        <input type="range" id="LayerResXZSlider" min="512" max="1536" step="128" value="1024" />
+                        <div class="range-labels">
+                            <span>512 (Authoring base)</span>
+                            <span>1024 (High)</span>
+                            <span>1536 (Ultra)</span>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label class="field-caption">
+                            Vertical Y Resolution
+                            <output id="LayerResYOut">256</output>
+                        </label>
+                        <input type="range" id="LayerResYSlider" min="128" max="384" step="64" value="256" />
+                        <div class="range-labels">
+                            <span>128 (Base)</span>
+                            <span>256 (High)</span>
+                            <span>384 (Tall cliffs)</span>
+                        </div>
+                    </div>
+
+                    <label class="field-row">
+                        <span>Biome Preset</span>
+                        <select id="LayerBiomeSelect" aria-label="Layer biome preset">
+                            <option value="desert">Desert sandstone</option>
+                            <option value="rocky">Rocky coastal granite</option>
+                            <option value="alpine">Alpine ridge &amp; scree</option>
+                            <option value="basalt">Basalt terraces</option>
+                            <option value="glacial">Glacial shelf</option>
+                        </select>
+                    </label>
+
+                    <label class="field-row">
+                        <span>Surface &amp; Cliff Albedo</span>
+                        <span style="display:flex;gap:6px;align-items:center;">
+                            <input type="color" id="LayerSurfaceColor" value="#c8a374" title="Surface albedo colour" />
+                            <input type="color" id="LayerCliffColor" value="#8d583a" title="Steep cliff rock colour" />
+                        </span>
+                    </label>
+
+                    <div class="control-group">
+                        <label class="field-caption">Stratigraphic Bedding <output id="LayerStrataOut">0.72</output></label>
+                        <input type="range" id="LayerStrataSlider" min="0" max="1" step="0.02" value="0.72" />
+                    </div>
+
+                    <div class="control-group">
+                        <label class="field-caption">Surface Roughness <output id="LayerRoughnessOut">0.62</output></label>
+                        <input type="range" id="LayerRoughnessSlider" min="0" max="1" step="0.02" value="0.62" />
+                    </div>
+
+                    <div class="control-group">
+                        <label class="field-caption">Seabed Extrusion (thin shell) <output id="LayerDepthOut">16 m</output></label>
+                        <input type="range" id="LayerDepthSlider" min="8" max="80" step="2" value="16" />
+                    </div>
+
+                    <div class="sampling-readout" id="LayerBrickDiagnostics">
+                        <strong id="LayerPitchReadout">Voxel pitch: 0.70 × 1.25 × 0.60 m</strong>
+                        <p id="LayerBricksReadout">Allocated narrow-band bricks: — · Zero LOD</p>
+                    </div>
+                </section>
+
+                <!-- PROCEDURAL OPERATION INSPECTOR (populated by LayerStackPanel.js) -->
+                <div id="OperationInspector"></div>
+
+                <!-- 3D VOLUMETRIC SDF SCULPTING INSPECTOR TAB -->
+                <div id="SculptInspector" hidden>
+                    <section class="property-card sculpt-panel">
+                        <h3>
+                            <span data-glyph="brush"></span>
+                            3D Volumetric SDF Sculptor
+                            <span class="small-pill" id="SculptStrokeCountPill">0 strokes</span>
+                        </h3>
+                        <p class="card-note">
+                            Sculpt directly on the active layer's 3D Signed Distance Field in real time. Supports overhangs, caves, arches, tunnels, and vertical cliffs with sub-millisecond 10³ brick GPU updates.
+                        </p>
+
+                        <div class="sculpt-mode-pills" style="margin-top:14px;">
+                            <button type="button" data-inspector-sculpt="clay" class="active">Clay (+)</button>
+                            <button type="button" data-inspector-sculpt="carve">Carve (−)</button>
+                            <button type="button" data-inspector-sculpt="smooth">Smooth</button>
+                            <button type="button" data-inspector-sculpt="flatten">Flatten</button>
+                        </div>
+
+                    <div class="control-group">
+                        <label class="field-caption">3D Brush Radius <output id="InspBrushRadiusOut">18 m</output></label>
+                        <input type="range" id="InspBrushRadius" min="6" max="80" step="1" value="18" />
+                    </div>
+
+                        <div class="control-group">
+                            <label class="field-caption">Brush Strength <output id="InspBrushStrengthOut">0.55</output></label>
+                            <input type="range" id="InspBrushStrength" min="0.05" max="1.0" step="0.05" value="0.55" />
+                        </div>
+
+                        <div class="control-group">
+                            <label class="field-caption">Radial Falloff <output id="InspBrushFalloffOut">0.60</output></label>
+                            <input type="range" id="InspBrushFalloff" min="0.05" max="1.0" step="0.05" value="0.60" />
+                        </div>
+
+                        <div class="operation-actions">
+                            <button type="button" class="border-button" id="ActivateSculptBtn">
+                                <span data-glyph="brush"></span>
+                                Paint in 3D Viewport
+                            </button>
+                            <button type="button" class="quiet-button danger" id="ClearLayerSculpts">
+                                <span data-glyph="trash"></span>
+                                Clear Sculpts
+                            </button>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- OCEAN & ATMOSPHERE INSPECTOR TAB -->
+                <div id="OceanInspector" hidden>
+                    <section class="property-card">
+                        <h3>
+                            <span data-glyph="waves"></span>
+                            World-Space Spectral Ocean
+                            <label class="switch">
+                                <input type="checkbox" id="OceanEnabledToggle" checked aria-label="Enable ocean surface" />
+                                <span></span>
+                            </label>
+                        </h3>
+
+                        <div class="metric">
+                            <span id="OceanWaveMetric">0.65</span>
+                            <small>× swell</small>
+                        </div>
+                        <p class="muted">Aperiodic 24-wave world-space spectrum · Analytic ray-distance ordering against SDF</p>
+
+                        <div class="control-group">
+                            <label class="field-caption">Wave Amplitude Scale <output id="OceanAmplitudeOut">0.65</output></label>
+                            <input type="range" id="OceanAmplitudeSlider" min="0.0" max="2.2" step="0.05" value="0.65" />
+                        </div>
+
+                        <div class="control-group">
+                            <label class="field-caption">Solar Elevation <output id="SunElevationOut">36°</output></label>
+                            <input type="range" id="SunElevationSlider" min="6" max="82" step="1" value="36" />
+                        </div>
+
+                        <div class="control-group">
+                            <label class="field-caption">Solar Azimuth <output id="SunAzimuthOut">44°</output></label>
+                            <input type="range" id="SunAzimuthSlider" min="-180" max="180" step="2" value="44" />
+                        </div>
+
+                        <div class="linked-metrics">
+                            <div>
+                                <span>SEA LEVEL</span>
+                                <strong>0.0 <small>m</small></strong>
+                            </div>
+                            <div>
+                                <span>DEPTH ORDERING</span>
+                                <strong>Exact <small>ray t</small></strong>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <footer class="inspector-footer">
+                <span class="status-dot"></span>
+                <span id="InspectorFooterText">Global 3D SDF · R16F Hardware Trilinear</span>
+            </footer>
+        </aside>
+    </main>
+
+    <!-- ========================================== GENERATOR CATALOGUE POPUP ========================================== -->
+    <div class="generator-menu" id="GeneratorMenu" role="dialog" aria-label="Add landform generator" hidden>
+        <div class="generator-menu-heading">
+            <div>
+                <span class="eyebrow" id="GeneratorMenuCaption">ADD TO ACTIVE STACK</span>
+                <strong id="GeneratorTarget">Desert mesas &amp; dunes · Entire mask</strong>
+            </div>
+            <button type="button" class="icon-button" id="CloseGeneratorMenu" title="Close catalogue" aria-label="Close catalogue">
+                <span data-glyph="close"></span>
+            </button>
+        </div>
+
+        <label class="search-field">
+            <span data-glyph="search"></span>
+            <input type="text" id="GeneratorSearch" placeholder="Search ridges, dunes, arches, caves…" />
+        </label>
+
+        <div class="generator-categories">
+            <button type="button" class="active" data-generator-category="landform">Surface Relief</button>
+            <button type="button" data-generator-category="volume">3D Volumetric CSG</button>
+        </div>
+
+        <div class="generator-choices" id="GeneratorChoices"></div>
+        <div class="generator-menu-footer">Evaluated directly into the layer's 3D Signed Distance Field</div>
+    </div>
+
+    <!-- ========================================== APPLICATION STATUS BAR ========================================== -->
+    <footer class="application-status">
+        <span id="StatusMessage">Initialising Global 3D SDF authoring workspace…</span>
+        <div>
+            <span id="GlobalBrickSummary">Atlas: —</span>
+            <span id="OceanSummary">Ocean: 24-wave analytic ray space</span>
+            <span>Zero LOD · FrontierGlobalSDF/1</span>
+        </div>
+    </footer>
+
+    <script type="module" src="./Workspace.js"></script>
+</body>
+</html>
