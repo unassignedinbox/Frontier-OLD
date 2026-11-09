@@ -497,4 +497,38 @@ Suite('15. Flow routing never cycles, even on pathological bowl and plateau surf
     }
 });
 
-console.log(`\nAll ${Passed}/15 Open-World SDF Terrain Studio validation suites passed!`);
+
+// 16. Erosion invalidation: editing the surface below an erosion layer must re-bake it
+Suite('16. Erosion re-bakes when its input surface changes (no stale bake reuse)', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const R = World.regions[3];
+    const ErosionLayer = R.stack.find(L => L.type === 'erosion');
+    const BaseLayer = R.stack[0];
+    assert.ok(ErosionLayer && BaseLayer, 'Erosion demo must expose both an erosion and a base layer');
+
+    EvaluateTerrainRegion(World, R);
+    const VersionBefore = ErosionLayer.bakeVersion;
+    const PeakBefore = R.runtime.maxHeight;
+
+    // Change the terrain BELOW the erosion layer: the bake must be invalidated.
+    BaseLayer.amplitude *= 1.6;
+    R.dirty = true;
+    EvaluateTerrainRegion(World, R);
+
+    assert.ok(ErosionLayer.bakeVersion > VersionBefore, 'Editing a layer below the erosion layer must trigger a re-bake');
+    assert.ok(R.runtime.maxHeight > PeakBefore + 5.0, 'Re-baked terrain must reflect the stronger base landform');
+
+    // Re-evaluating with no changes must NOT re-bake (the cache has to actually work).
+    const VersionAfter = ErosionLayer.bakeVersion;
+    EvaluateTerrainRegion(World, R);
+    assert.equal(ErosionLayer.bakeVersion, VersionAfter, 'Unchanged inputs must reuse the cached bake');
+
+    // Changing an erosion parameter must invalidate it too.
+    ErosionLayer.params.iterations = 10;
+    EvaluateTerrainRegion(World, R);
+    assert.ok(ErosionLayer.bakeVersion > VersionAfter, 'Changing erosion parameters must trigger a re-bake');
+});
+
+console.log(`\nAll ${Passed}/16 Open-World SDF Terrain Studio validation suites passed!`);

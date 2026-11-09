@@ -526,6 +526,28 @@ function PointToPolylineDist(Wx, Wz, Poly)
  *
  * Caches live on the layer, keyed by a cheap signature of everything that can change the result.
  */
+/**
+ * Cheap, order-sensitive fingerprint of the surface an erosion layer is about to consume.
+ *
+ * Without this, editing anything BELOW an erosion layer (a fractal amplitude, a spline, a sculpt
+ * pass, a repainted mask) would silently reuse the previous bake - the terrain would look identical
+ * no matter what you changed, and the bug would be invisible because the numbers all look plausible.
+ * Sampled on a stride so it costs nothing next to a bake.
+ */
+function HashSurface(Heights, Count, Stride = 37)
+{
+    let H = 2166136261 >>> 0;
+    for (let I = 0; I < Count; I += Stride)
+    {
+        // Quantise to 1 cm so float noise from unrelated operations cannot force a needless re-bake.
+        const Q = Math.round(Heights[I] * 100) | 0;
+        H = Math.imul(H ^ (Q & 0xffff), 16777619) >>> 0;
+        H = Math.imul(H ^ ((Q >>> 16) & 0xffff), 16777619) >>> 0;
+    }
+    H = Math.imul(H ^ Count, 16777619) >>> 0;
+    return H >>> 0;
+}
+
 function EnsureErosionBuffers(Region, Nx, Nz)
 {
     const Need = Nx * Nz;
@@ -603,9 +625,9 @@ function ResolveErosionGroupParams(Region, Layer, GroupMembers)
  * Applies one erosion layer to the current working surface.
  * Returns { erosionDepth, depositionDepth, regolith, lakeMask, lakeLevel, flowAccum, hardness, stats }.
  */
-function ApplyErosionLayer(World, Region, Layer, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, RefSpan)
+function ApplyErosionLayer(World, Region, Layer, Params, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, RefSpan)
 {
-    const Params = Layer.params || {};
+    Params = Params || Layer.params || {};
     const CellArea = StepX * StepZ;
 
     // Authored micro-detail (sculpt strokes) is captured on the first bake so it can be re-imprinted
@@ -703,12 +725,13 @@ function ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, 
         const Opacity = Clamp(Number(Layer.opacity) ?? 1.0, 0.0, 1.0);
 
         // Cached result reused while nothing that affects it has changed.
-        const CacheKey = JSON.stringify({ sig: ErosionLayerSignature(Layer), params: EffectiveParams, nx: Nx, nz: Nz });
+        const InputHash = HashSurface(Heights, Nx * Nz);
+        const CacheKey = JSON.stringify({ sig: ErosionLayerSignature(Layer), params: EffectiveParams, nx: Nx, nz: Nz, in: InputHash });
         let Bake = Layer._bake;
         if (!Bake || Layer.cacheKey !== CacheKey)
         {
             const WorkParams = { ...EffectiveParams, hardnessMap: null };
-            Bake = ApplyErosionLayer(World, Region, { ...Layer, params: WorkParams }, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, Math.min(Region.bounds.width, Region.bounds.depth));
+            Bake = ApplyErosionLayer(World, Region, Layer, WorkParams, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, Math.min(Region.bounds.width, Region.bounds.depth));
             Layer._bake = Bake;
             Layer.cacheKey = CacheKey;
         }
