@@ -332,8 +332,6 @@ void ForceSourceInspector::ConstructInspector()
     case 2: Changed |= ConstructTiming(Page); break;
     default: Changed |= ConstructReceivers(Page); break;
     }
-    if (NextButton::Construct(Page, "FieldWorkspace", "Open Force Field / Wind workspace \xE2\x86\x97"))
-        InspectorRuntime::Instance().RequestWorkspaceAction("field-workspace:on");
     char Footer[96];
     std::snprintf(Footer, sizeof(Footer), "Levelspace record \xC2\xB7 ForceSource \xC2\xB7 %s", Descriptor.Identifier);
     FooterRow::Construct(Page, Footer, "Saved with the level");

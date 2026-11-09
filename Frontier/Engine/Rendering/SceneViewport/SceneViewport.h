@@ -7,19 +7,15 @@
 #pragma once
 
 #include "EnvironmentOverlay.h"
-#include "Engine/Interface/SceneViewportPresentation.h"
-#include "Engine/PhysicalDynamics/FluidDynamics/PlumeSourceProjection.h"
 #include "Rendering/AnalyticIllumination/AnalyticIlluminationSequence.h"
 #include "Rendering/GlobalIllumination/OccupantRelocation.h"
 #include "Rendering/GlobalIllumination/PickProjection.h"
-#include "Rendering/GlobalIllumination/ImpactSparkGpuRecord.h"
 
 #include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <vector>
 
@@ -66,7 +62,6 @@ struct ViewportRendering
     uint32_t VirtualizedStreamSlots = 0;     // [-] arena slots the pages stream through (0: one per page)
     bool     AnalyticIllumination = false;   // [-] the fast closed-form renderer (AnalyticIllumination) instead of the GI
     uint32_t Refinements          = 0;       // [-] RefinementBit mask of options beyond the demo (0: the demo)
-    CameraMotionBlurComponent CameraMotionBlur{}; // [-] Off, camera-only, or camera + object motion
     // 📝 The rest of the Render settings record. Every default is the demo's, so a caller that sets only the fields above refreshes
     //    exactly as before; the fields above overwrite Toggles' Indirect, Antialias, ExposureCompensation, Inspection and Refinements,
     //    and Toggles.RayTracing applies only on a viewport built with ray tracing (SceneViewportConfiguration::RayTracing).
@@ -75,7 +70,6 @@ struct ViewportRendering
     uint32_t         CardTileBudget = 0;       // [-] static surface-card tiles relit per refresh; 0 = the quality grade's
     VarianceSettings DiffuseFilter{0.08f, 24, 3, 4.0f};
     VarianceSettings GlossyFilter{0.12f, 12, 2, 3.0f};
-    std::vector<ImpactSparkGpuRecord> ImpactSparks{};  // [-] live particle streaks already simulated from Jolt contacts
 };
 
 // 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).
@@ -136,16 +130,6 @@ class SceneViewport
     // 📝 Beyond the demo: the editor's placements of the proving ground's occupants (OccupantRelocation), applied before the next
     //    refresh; returns how many occupants changed. A rebuilt viewport starts from the archive again.
     uint32_t RelocateOccupants(const std::vector<OccupantPlacement>& Placements);
-    // 📝 Writes the live or resting vehicle deformation profile (VehicleVisual.slang VehicleProfile) into Host_->VehicleRegion,
-    //    preserving the steering-column pivot/axis and cabin frame loaded from VehicleProfile.bin.
-    void WriteVehicleState(float SteeringAngle, const std::array<bool, 4>& CarcassFieldActive,
-                           const std::array<std::array<float, 4>, 4>& Deformation,
-                           const std::array<const float*, 4>& CarcassFields);
-    // 📝 Supplies live world-grid plume sources (tyre smoke/fire, FluidPlume emitters & explosions) and GI fire light.
-    void AssignPlumeState(const FluidDynamics::PlumeSettings& Settings,
-                          std::span<const FluidDynamics::PlumeSourceEntry> Sources,
-                          const FluidDynamics::PlumeFireLightEntry& FireLight,
-                          std::optional<std::array<float, 3>> FocusOverride = std::nullopt);
     // 📝 Beyond the demo: GPU picking (PickProjection). The occupants drawn at and around a point of the last refreshed image (a
     //    fraction of its width and height from the top-left), seen through that refresh's camera, unjittered, with the occupants
     //    where that refresh drew them; false while nothing has been refreshed or when the pick program is unavailable.
@@ -178,13 +162,6 @@ class SceneViewport
     std::shared_ptr<DeviceTextureView>     PresentedView_{};
     std::string                            Adapter_{};
     double                                 ElapsedSeconds_ = 0.0;
-    std::vector<float>                     BaseVehicleProfile_{};            // [-] VehicleProfile.bin baseline (cabin, steering column, tablet)
-    FluidDynamics::PlumeSettings           PlumeSettings_{};
-    std::vector<FluidDynamics::PlumeSourceEntry> PlumeSources_{};
-    FluidDynamics::PlumeFireLightEntry     PlumeFireLight_{};
-    std::optional<std::array<float, 3>>    PlumeFocusOverride_{};
-    float                                  PriorFireIntensity_ = 0.0f;
-    std::array<float, 3>                   PriorFirePosition_  = {0.0f, 0.0f, 0.0f};
 };
 
 } // namespace Frontier::GlobalIllumination

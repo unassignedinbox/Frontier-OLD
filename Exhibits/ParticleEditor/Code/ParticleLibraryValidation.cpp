@@ -161,13 +161,6 @@ int main(int ArgumentCount, char** Arguments)
     const ParticlePreset* Tornado = Library.ResolvePreset("tornado");
     Expect(Tornado && Tornado->WindLink && Tornado->WindLink->Category == ParticleFieldCategory::Tornado && Tornado->WindLink->Local
            && Tornado->WindLink->RadiusMetres == 2.4 && Tornado->WindLink->Strength == 9.0, "the tornado preset links its column");
-    const ParticlePreset* Derez = Library.ResolvePreset("derez-cube");
-    Expect(Derez && Derez->Parameters.Behaviour == ParticleBehaviour::VisualEffect && Derez->Parameters.Appearance == ParticleAppearance::Cube &&
-               Derez->Parameters.Transition && Derez->Parameters.Transition->Fragment && Derez->Parameters.BurstAtOrigin,
-           "the Derez cube keeps its authorable surface transition and shard raster path");
-    const ParticlePreset* BlackHole = Library.ResolvePreset("black-hole");
-    Expect(BlackHole && BlackHole->Parameters.Attractor && BlackHole->Parameters.Lensing,
-           "the Black hole preset carries both its acceleration and screen-space lensing inputs");
     std::printf("  library: %zu presets, %zu groups, %zu default fields\n", Library.Presets.size(), Library.Groups.size(),
                 Library.Fields.size());
 

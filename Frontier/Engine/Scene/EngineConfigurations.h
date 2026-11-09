@@ -5,8 +5,6 @@
 
 #pragma once
 
-#include "Engine/PhysicalDynamics/Vehicle/VehicleSpecification.h"
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -639,25 +637,19 @@ struct ForceSourceConfiguration : RevisionCounter
 
 struct FluidPlumeConfiguration : RevisionCounter
 {
-    bool        Enabled              = true;
-    uint32_t    LatticeResolutionX   = 128;
-    uint32_t    LatticeResolutionY   = 64;
-    uint32_t    LatticeResolutionZ   = 128;
-    float       BuoyancyLift         = 2.15f;
-    float       VorticityConfinement = 1.85f;
-    float       DissipationRate      = 0.22f;
-    float       FuelInjectionRate    = 1.40f;
-    float       FlameIntensity       = 1.65f;
-    float       SootExtinction       = 1.10f;
-    float       BlackbodyCoreKelvin  = 1850.0f;
-    bool        CombustionEnabled    = true;
-    bool        SelfShadowing        = true;
-    float       PositionMetres[3]    = { 0.0f, 0.0f, 0.0f };   // [m] level z-up anchor
-    float       DomainScale          = 1.0f;                   // [-] world multiplier on fluid bounds
-    std::string SpaceFile;                                     // "<level>.<record>.fluidspace"
-    std::string PresetIdentity       = "camp_fire";
-    uint8_t     BurstPattern         = 0;                      // FluidBurstPattern
-    uint32_t    BurstGeneration      = 0;                      // incremented to fire an impulse in the level
+    bool     Enabled              = true;
+    uint32_t LatticeResolutionX   = 128;
+    uint32_t LatticeResolutionY   = 64;
+    uint32_t LatticeResolutionZ   = 128;
+    float    BuoyancyLift         = 2.15f;
+    float    VorticityConfinement = 1.85f;
+    float    DissipationRate      = 0.22f;
+    float    FuelInjectionRate    = 1.40f;
+    float    FlameIntensity       = 1.65f;
+    float    SootExtinction       = 1.10f;
+    float    BlackbodyCoreKelvin  = 1850.0f;
+    bool     CombustionEnabled    = true;
+    bool     SelfShadowing        = true;
 };
 
 struct FractureConfiguration : RevisionCounter
@@ -928,65 +920,8 @@ struct GeometryConfiguration : RevisionCounter
         bool                               Breakable        = false;   // [-] a smash-alley prop with a fragment pool
         uint32_t                           FragmentCapacity = 0;       // [-]
         bool                               Luminous         = false;   // [-] carries clustered lamps (street lamps, lanterns)
-        std::vector<std::array<float, 3>>  WorldTriangles{};           // [m] world-space triangle corners (3 per facet) for fixed mesh colliders
         std::string                        Diagnostic{};               // [-] why it did not bind
     } Resolved{};
 };
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                                    VEHICLE AND TYRES
-//------------------------------------------------------------------------------------------------------------------------
-
-// 📝 One drivable vehicle (levelspace type "Vehicle"): where it starts, whether it simulates, and its whole specification
-//    (VehicleSpecification: geometry and every tunable of the solver). The scene archive's ControlVehicle body and wheels
-//    (occupants 0–4) draw it; the four Tyre records it encloses carry the per-corner set.
-struct VehicleConfiguration : RevisionCounter
-{
-    bool                          Visible         = true;    // [-] drawn (the archive's car), else the occupants stay inactive
-    bool                          Physics         = true;    // [-] driven by the physics once Simulate starts
-    bool                          Possessed       = true;    // [-] the driving keys reach this vehicle while simulating
-    bool                          ChaseCamera             = true;    // [-] viewport camera follows behind this vehicle while possessed
-    bool                          ThreadedPhysics         = true;    // [-] run editor simulation on the fixed-cadence PhysicsThread
-    bool                          EquilibriumPlacement    = true;    // [-] fit 4-corner slope normal + static sag + radial tyre compression
-    bool                          EngageBrakesOnPlacement = false;   // [-] hold service + parking brakes on spawn/reset until throttle > 0.02
-    float                         PhysicsStepHz           = 240.0f;  // [Hz] fixed-rate physics cadence
-    int                           CollisionSteps  = 1;       // [-] Jolt broadphase/narrowphase steps per fixed step
-    int                           SolverSubsteps  = 1;       // [-] inner vehicle/drivetrain/tyre sub-steps per fixed step
-    SpatialConfiguration          Spatial = [] { SpatialConfiguration Start; Start.PositionMetres[0] = -40.0f; Start.PositionMetres[1] = 0.0f;
-                                                 Start.PositionMetres[2] = 0.0f; return Start; }();   // [-] start: ground point under the CoM, heading
-    std::string                   GroupName = "Vehicles";
-    Vehicle::VehicleSpecification Specification = Vehicle::ConstructControlVehicleSpecification();
-};
-
-// 📝 One tyre of a vehicle (levelspace type "Tyre", enclosed by its Vehicle record): the corner it is fitted to, its compound
-//    and cold pressure. A detached tyre keeps its record in the pit lane and leaves its corner to the vehicle's default.
-struct TyreConfiguration : RevisionCounter
-{
-    uint32_t    Corner       = 0;          // [-] 0 front left, 1 front right, 2 rear left, 3 rear right
-    bool        Enclosed     = true;       // [-] fitted to its vehicle
-    std::string Compound     = "Medium";   // [-] Soft · Medium · Hard · Intermediate · Wet
-    float       ColdPressure = 110000.0f;  // [Pa]
-    std::string SetName      = "Set A";
-};
-
-// 📝 The compounds the tyre records name: grip scale and window (the vehicle inspector prototype's CompoundCatalogue).
-struct TyreCompound
-{
-    const char* Name;
-    const char* Colour;
-    float       GripScale;
-    float       WindowLow_C, WindowHigh_C;
-    float       WearRate;
-};
-inline constexpr TyreCompound TyreCompounds[] = {
-    { "Soft", "#e05b5b", 1.06f, 78.0f, 104.0f, 1.35f },      { "Medium", "#e8c24a", 1.00f, 68.0f, 96.0f, 1.00f },
-    { "Hard", "#dcdcdc", 0.94f, 58.0f, 88.0f, 0.72f },       { "Intermediate", "#4cbf6f", 0.84f, 40.0f, 70.0f, 0.90f },
-    { "Wet", "#4a90e2", 0.72f, 30.0f, 60.0f, 0.85f } };
-[[nodiscard]] inline const TyreCompound& ResolveTyreCompound(const std::string& Name) noexcept
-{
-    for (const TyreCompound& Compound : TyreCompounds)
-        if (Name == Compound.Name) return Compound;
-    return TyreCompounds[1];
-}
 
 } // namespace Frontier

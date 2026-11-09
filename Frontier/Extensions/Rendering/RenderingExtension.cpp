@@ -10,10 +10,6 @@
 #include "Engine/Diagnostics/LogCategories.h"
 #include "Engine/Diagnostics/LogStream.h"
 #include "Engine/Interface/ProjectContent.h"
-#include "Engine/PhysicalDynamics/FluidDynamics/FluidSpaceCodec.h"
-#include "Engine/PhysicalDynamics/Vehicle/TraceContactTyre.h"
-#include "Engine/PhysicalDynamics/Vehicle/TyreCarcass.h"
-#include "Engine/Scene/VehicleReadings.h"
 
 #include <algorithm>
 #include <chrono>
@@ -167,8 +163,6 @@ RenderingExtension::RenderingExtension(std::filesystem::path ProjectRoot, std::f
 SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Request, const Frontier::WorldSpace& World, double ElapsedSeconds)
 {
     SceneViewportRefresh Outcome;
-    ImpactSparks_.Advance(Request.DeltaSeconds, Request.ImpactSparks);
-
     Frontier::RenderPipelineConfiguration Pipeline;
     if (const auto* Entry = FindEntry<Frontier::RenderPipelineRecord>(World, "RenderPipeline")) Pipeline = Entry->QueryConfiguration();
     const std::string Quality    = Pipeline.QualityTier <= 0 ? "low" : (Pipeline.QualityTier == 1 ? "medium" : "high");
@@ -187,35 +181,24 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
         return Outcome;
     }
 
-    const std::string RequestedArchive = World.QueryEnvironmentArchive().empty() ? "ProvingGround" : World.QueryEnvironmentArchive();
-    const bool        IndoorLobby      = (RequestedArchive == "Lobby");
-
-    // ① (re)build when the scene archive or rendering tiers change; a failed bring-up is not retried until they change again
-    if (!Viewport_ || RequestedArchive != SceneArchive_ || Quality != Quality_ || RayTracing != RayTracing_)
+    // ① (re)build when the tiers change; a failed bring-up is not retried until they change again
+    if (!Viewport_ || Quality != Quality_ || RayTracing != RayTracing_)
     {
-        if (!Failure_.empty() && RequestedArchive == SceneArchive_ && Quality == Quality_ && RayTracing == RayTracing_)
+        if (!Failure_.empty() && Quality == Quality_ && RayTracing == RayTracing_)
         {
             Outcome.Status          = Failure_;
-            Outcome.Readout.Failure = Outcome.Status;
+            Outcome.Readout.Failure = Failure_;
             return Outcome;
         }
         Viewport_.reset();
-        GeometryScene_ = nullptr;
-        Held_          = {};
-        Pick_          = {};
-        SceneArchive_  = RequestedArchive;
-        Quality_       = Quality;
-        RayTracing_    = RayTracing;
+        Quality_    = Quality;
+        RayTracing_ = RayTracing;
         Failure_.clear();
         Frontier::GlobalIllumination::SceneViewportConfiguration Configuration;
         Configuration.GlobalIlluminationShaders = ShaderRoot_ / "GlobalIllumination";
-        if (!IndoorLobby)
-        {
-            Configuration.EnvironmentShaders = ShaderRoot_ / "Environment";
-        }
-        Configuration.EnvironmentLighting = !IndoorLobby;
-        Configuration.SceneArchive        = ResolveArchive(ProjectRoot_, SceneArchive_.c_str());
-        Configuration.CelestialMaps       = ResolveArchive(ProjectRoot_, "CelestialMaps");
+        Configuration.EnvironmentShaders        = ShaderRoot_ / "Environment";
+        Configuration.SceneArchive              = ResolveArchive(ProjectRoot_, "ProvingGround");
+        Configuration.CelestialMaps             = ResolveArchive(ProjectRoot_, "CelestialMaps");
         // 📝 The engine shapes sit beside the shader archives (EngineContent/ShapeArchives); shaders compiled into a build folder
         //    have none beside them, so the engine content's own folder serves (the Construct dialog lists the same one).
         const std::filesystem::path ShaderFolder = ShaderRoot_.has_filename() ? ShaderRoot_ : ShaderRoot_.parent_path();
@@ -242,9 +225,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
             Outcome.Readout.Failure = Failure_;
             return Outcome;
         }
-        Viewport_           = std::move(Candidate);
-        VehicleShown_       = false;
-        AuthoringSignature_ = 0;
+        Viewport_ = std::move(Candidate);
         Frontier::WriteLogFormat(ViewportLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "SceneViewport",
                                  "Proving ground up on %s in %.1f s (%s, %s, vehicle omitted).", Viewport_->QueryAdapter().c_str(),
                                  std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count(), Quality.c_str(),
@@ -265,24 +246,8 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
         }
         else if (Viewport_->PickOccupants(Request.PickPoint, Seen, &Diagnostic))
         {
-            Pick_.Occupant = Seen.QueryOccupant(0, 0);
-            Pick_.Record   = Geometry_.ResolvePickedRecord(Seen);
-            if (!Pick_.Record.has_value() && VehicleShown_)
-            {
-                const bool HeroPlate = Pick_.Occupant == 5u && Viewport_->QueryScene() != nullptr &&
-                                       Viewport_->QueryScene()->Occupants.size() > 5u &&
-                                       Viewport_->QueryScene()->Occupants[5].Name == "Hero plates";
-                if ((Pick_.Occupant == 0u || HeroPlate) && ActiveVehicleToken_.IsValid())
-                {
-                    Pick_.Record = ActiveVehicleToken_.Value;
-                }
-                else if (Pick_.Occupant >= 1u && Pick_.Occupant <= 4u)
-                {
-                    const RecordToken CornerToken = ActiveCornerTokens_[Pick_.Occupant - 1u];
-                    if (CornerToken.IsValid()) Pick_.Record = CornerToken.Value;
-                    else if (ActiveVehicleToken_.IsValid()) Pick_.Record = ActiveVehicleToken_.Value;
-                }
-            }
+            Pick_.Occupant     = Seen.QueryOccupant(0, 0);
+            Pick_.Record       = Geometry_.ResolvePickedRecord(Seen);
             Pick_.Milliseconds = Seen.Milliseconds;
         }
         else
@@ -308,8 +273,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
             if (auto* Host = Viewport_->AccessHost()) (void)Host->WriteMaterialBlock(Block, Records);
         (void)Viewport_->RelocateOccupants(Placements);
     }
-    SynchronizeVehicleVisuals(World);
-    SynchronizePlumeSources(World, Request.DeltaSeconds, ElapsedSeconds);
 
     // ③ one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
     if (!Pipeline.LiveRefresh && Held_.View != VK_NULL_HANDLE && Held_.View == Viewport_->QueryPresentedView())
@@ -326,7 +289,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Camera.Position            = {Request.CameraPosition[0], Request.CameraPosition[1], Request.CameraPosition[2]};
     Camera.Target              = {Request.CameraTarget[0], Request.CameraTarget[1], Request.CameraTarget[2]};
     Camera.VerticalFieldOfView = Request.VerticalFieldOfView;
-    Camera.Near                = std::max(0.005, Request.CameraNear);
     Camera.Up = Request.CameraUp;
     Frontier::GlobalIllumination::ViewportRendering Rendering;
     Rendering.GlobalIllumination   = Pipeline.GlobalIllumination;
@@ -336,7 +298,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
     Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
-    Rendering.CameraMotionBlur       = Request.CameraMotionBlur;
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
@@ -377,7 +338,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     };
     Rendering.DiffuseFilter = Filter(Pipeline.DiffuseWaveletLevels, Pipeline.DiffuseTallyLimit, Pipeline.DiffuseMinimumWeight, Pipeline.DiffuseColourSigma);
     Rendering.GlossyFilter  = Filter(Pipeline.GlossyWaveletLevels, Pipeline.GlossyTallyLimit, Pipeline.GlossyMinimumWeight, Pipeline.GlossyColourSigma);
-    Rendering.ImpactSparks  = ImpactSparks_.BuildGpuRecords();
     // 📝 Screen targets follow the panel once its size held still for six interface ticks (a dragged splitter would rebuild
     //    them on every tick); meanwhile the last extent stretches over the panel.
     const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality,
@@ -449,406 +409,6 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Outcome.Readout.GeometryGeneration  = Geometry_.QueryGeneration();
     Held_ = Outcome;
     return Outcome;
-}
-
-void RenderingExtension::SynchronizeVehicleVisuals(const Frontier::WorldSpace& World)
-{
-    if (!Viewport_ || Viewport_->QueryScene() == nullptr || Viewport_->QueryScene()->Occupants.size() < 5u) return;
-    const auto& SceneOccupants  = Viewport_->QueryScene()->Occupants;
-    const bool  HasHeroPlates   = SceneOccupants.size() > 5u && SceneOccupants[5].Name == "Hero plates";
-    const uint32_t VehicleCount = HasHeroPlates ? 6u : 5u;
-
-    const Frontier::VehicleRecord* ShownVehicle = nullptr;
-    for (const Frontier::SceneRecordBase* Candidate : World.FindAllByType("Vehicle"))
-    {
-        const auto* Typed = dynamic_cast<const Frontier::VehicleRecord*>(Candidate);
-        if (Typed != nullptr && Typed->QueryConfiguration().Visible)
-        {
-            ShownVehicle = Typed;
-            break;
-        }
-    }
-
-    if (ShownVehicle == nullptr)
-    {
-        if (VehicleShown_)
-        {
-            std::vector<Frontier::GlobalIllumination::OccupantPlacement> Hidden;
-            Hidden.reserve(VehicleCount);
-            for (uint32_t Index = 0u; Index < VehicleCount; ++Index)
-            {
-                Frontier::GlobalIllumination::OccupantPlacement Placement;
-                Placement.Occupant = Index;
-                Placement.Current  = { 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 };
-                Placement.Active   = false;
-                Hidden.push_back(Placement);
-            }
-            (void)Viewport_->RelocateOccupants(Hidden);
-            VehicleShown_       = false;
-            ActiveVehicleToken_ = {};
-            ActiveCornerTokens_ = {};
-            AuthoringSignature_ = 0u;
-        }
-        return;
-    }
-
-    const Frontier::RecordToken           VehicleToken  = ShownVehicle->QueryToken();
-    const Frontier::VehicleConfiguration& Configuration = ShownVehicle->QueryConfiguration();
-    const Vehicle::VehicleGeometry&       Geometry      = Configuration.Specification.Geometry;
-
-    constexpr double AuthoredWheelRadius = 0.50855;
-    constexpr double AuthoredWheelWidth  = 0.39580;
-    const double     RadiusScale         = std::clamp(static_cast<double>(Geometry.TyreRadius) / AuthoredWheelRadius, 0.25, 3.0);
-    const double     WidthScale          = std::clamp(static_cast<double>(Geometry.TyreWidth) / AuthoredWheelWidth, 0.25, 3.0);
-
-    const auto ToTransform = [](const std::array<float, 16>& Matrix, double ScaleXZ, double ScaleY)
-    {
-        Frontier::GlobalIllumination::Transform Out{};
-        for (size_t Index = 0; Index < 16; ++Index) Out[Index] = static_cast<double>(Matrix[Index]);
-        for (size_t Row = 0; Row < 3; ++Row)
-        {
-            Out[0 + Row] *= ScaleXZ;
-            Out[4 + Row] *= ScaleY;
-            Out[8 + Row] *= ScaleXZ;
-        }
-        Out[15] = 1.0;
-        return Out;
-    };
-
-    const auto AssembleColumnMajor = [](const Vehicle::Vec3& Position, const Vehicle::Quat& Rotation, double ScaleXZ, double ScaleY)
-    {
-        const Vehicle::Vec3 X = Rotation.Rotate({ 1.0f, 0.0f, 0.0f });
-        const Vehicle::Vec3 Y = Rotation.Rotate({ 0.0f, 1.0f, 0.0f });
-        const Vehicle::Vec3 Z = Rotation.Rotate({ 0.0f, 0.0f, 1.0f });
-        return Frontier::GlobalIllumination::Transform{
-            X.x * ScaleXZ, X.y * ScaleXZ, X.z * ScaleXZ, 0.0,
-            Y.x * ScaleY,  Y.y * ScaleY,  Y.z * ScaleY,  0.0,
-            Z.x * ScaleXZ, Z.y * ScaleXZ, Z.z * ScaleXZ, 0.0,
-            Position.x,    Position.y,    Position.z,    1.0 };
-    };
-
-    std::array<RecordToken, 4> CornerTokens{};
-    std::array<bool, 4>        CornerFitted{ true, true, true, true };
-    std::array<float, 4>       CornerColdPressure{
-        Configuration.Specification.Solver.Tyre.InflationPressure,
-        Configuration.Specification.Solver.Tyre.InflationPressure,
-        Configuration.Specification.Solver.Tyre.InflationPressure,
-        Configuration.Specification.Solver.Tyre.InflationPressure };
-    uint64_t Signature = (static_cast<uint64_t>(Configuration.Revision) << 16u) ^ VehicleToken.Value ^ (VehicleShown_ ? 0x9E3779B9u : 0u);
-    for (const Frontier::SceneRecordBase* Candidate : World.FindAllByType("Tyre"))
-    {
-        const auto* Tyre = dynamic_cast<const Frontier::TyreRecord*>(Candidate);
-        if (Tyre == nullptr || Candidate->QueryParentToken() != VehicleToken) continue;
-        const Frontier::TyreConfiguration& Fit    = Tyre->QueryConfiguration();
-        const uint32_t                     Corner = Fit.Corner & 3u;
-        CornerTokens[Corner]                      = Candidate->QueryToken();
-        CornerFitted[Corner]                      = Fit.Enclosed;
-        CornerColdPressure[Corner]                = Fit.ColdPressure;
-        Signature ^= (static_cast<uint64_t>(Fit.Revision) + 0x9E3779B97F4A7C15ull + (Signature << 6u) + (Signature >> 2u));
-    }
-    ActiveVehicleToken_ = VehicleToken;
-    ActiveCornerTokens_ = CornerTokens;
-
-    Frontier::VehicleReading Live;
-    if (Frontier::QueryVehicleReading(VehicleToken, Live) && Live.Simulating && Live.VisualValid)
-    {
-        AuthoringSignature_ = 0u;
-        const bool FirstActivation = !VehicleShown_;
-        VehicleShown_              = true;
-
-        const double YawRadians = Configuration.Spatial.OrientationDegrees[2] * 3.14159265358979323846 / 180.0;
-        const Vehicle::Quat HeadingQuat{ 0.0f, 0.0f, static_cast<float>(std::sin(0.5 * YawRadians)), static_cast<float>(std::cos(0.5 * YawRadians)) };
-        const Vehicle::Vec3 GroundBase{
-            Configuration.Spatial.PositionMetres[0],
-            Configuration.Spatial.PositionMetres[1],
-            Configuration.Spatial.PositionMetres[2] };
-
-        std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
-        Placements.reserve(VehicleCount);
-
-        Frontier::GlobalIllumination::OccupantPlacement BodyPlacement;
-        BodyPlacement.Occupant  = 0u;
-        BodyPlacement.Current   = ToTransform(Live.BodyTransform, 1.0, 1.0);
-        BodyPlacement.Active    = true;
-        BodyPlacement.Recapture = FirstActivation;
-        Placements.push_back(BodyPlacement);
-        if (HasHeroPlates)
-        {
-            Frontier::GlobalIllumination::OccupantPlacement PlatePlacement = BodyPlacement;
-            PlatePlacement.Occupant = 5u;
-            Placements.push_back(PlatePlacement);
-        }
-
-        std::array<bool, 4>                   FieldActive{};
-        std::array<std::array<float, 4>, 4>   Deformation{};
-        std::array<const float*, 4>           FieldPointers{};
-        for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
-        {
-            Frontier::GlobalIllumination::OccupantPlacement WheelPlacement;
-            WheelPlacement.Occupant = 1u + Corner;
-            WheelPlacement.Active   = true;
-            if (Live.CornerFitted[Corner])
-            {
-                WheelPlacement.Current = ToTransform(Live.WheelTransforms[Corner], RadiusScale, WidthScale);
-                FieldActive[Corner]    = Live.CornerFieldValid[Corner];
-                FieldPointers[Corner]  = Live.CornerFieldValid[Corner] ? Live.CornerFields[Corner].data() : nullptr;
-                Deformation[Corner]    = {
-                    Live.ContactAngle[Corner],
-                    Live.Deflection[Corner],
-                    Live.GaugePressure[Corner],
-                    Live.LateralShift[Corner] };
-            }
-            else
-            {
-                // 📝 Detached pit-lane tyre: laid flat beside the vehicle on the pit apron.
-                const float ForeOffset = Corner < 2u ? 0.72f : -0.72f;
-                const float SideOffset = (Corner & 1u) == 0u ? 2.15f : -2.15f;
-                const Vehicle::Vec3 PitSpot =
-                    GroundBase + HeadingQuat.Rotate({ ForeOffset, SideOffset, 0.5f * Geometry.TyreWidth });
-                const Vehicle::Quat FlatQuat =
-                    (HeadingQuat * Vehicle::Quat::AxisAngle({ 1.0f, 0.0f, 0.0f }, 1.5707963f)).Normalized();
-                WheelPlacement.Current = AssembleColumnMajor(PitSpot, FlatQuat, RadiusScale, WidthScale);
-            }
-            Placements.push_back(WheelPlacement);
-        }
-        (void)Viewport_->RelocateOccupants(Placements);
-        Viewport_->WriteVehicleState(Live.SteeringColumnAngle, FieldActive, Deformation, FieldPointers);
-        return;
-    }
-
-    // 📝 Editor authoring mode (simulation stopped): memoize by record revisions so idle refreshes cost nothing.
-    if (VehicleShown_ && Signature == AuthoringSignature_) return;
-    const bool FirstActivation = !VehicleShown_;
-    VehicleShown_              = true;
-    AuthoringSignature_        = Signature;
-
-    const Vehicle::VehicleSolverConfiguration Solver = Vehicle::ResolveSolverConfiguration(Configuration.Specification);
-    const double YawRadians = Configuration.Spatial.OrientationDegrees[2] * 3.14159265358979323846 / 180.0;
-    const double PitchRadians = Configuration.Spatial.OrientationDegrees[1] * 3.14159265358979323846 / 180.0;
-    const double RollRadians  = Configuration.Spatial.OrientationDegrees[0] * 3.14159265358979323846 / 180.0;
-    const Vehicle::Quat Orientation =
-        (Vehicle::Quat::AxisAngle({ 0.0f, 0.0f, 1.0f }, static_cast<float>(YawRadians)) *
-         Vehicle::Quat::AxisAngle({ 0.0f, 1.0f, 0.0f }, static_cast<float>(PitchRadians)) *
-         Vehicle::Quat::AxisAngle({ 1.0f, 0.0f, 0.0f }, static_cast<float>(RollRadians))).Normalized();
-
-    const Vehicle::Vec3 GroundBase{
-        Configuration.Spatial.PositionMetres[0],
-        Configuration.Spatial.PositionMetres[1],
-        Configuration.Spatial.PositionMetres[2] };
-
-    std::array<Vehicle::CarcassField, 4>  RestingFields{};
-    std::array<bool, 4>                   FieldActive{};
-    std::array<std::array<float, 4>, 4>   Deformation{};
-    std::array<const float*, 4>           FieldPointers{};
-    std::array<float, 4>                  CornerDeflections{};
-    std::array<Vehicle::Vec3, 4>          RestingHubLocal{};
-    Vehicle::Vec3                         MeanHubLocal{};
-    for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
-    {
-        RestingHubLocal[Corner] = Vehicle::ResolveRestingHubLocal(Solver, Corner);
-        MeanHubLocal += RestingHubLocal[Corner];
-    }
-    MeanHubLocal = MeanHubLocal * 0.25f;
-
-    const float TotalWeight = Geometry.Mass * 9.81f;
-    for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
-    {
-        if (!CornerFitted[Corner]) continue;
-        const float Share      = Corner < 2u ? (0.5f * Geometry.FrontWeightFraction) : (0.5f * (1.0f - Geometry.FrontWeightFraction));
-        const float TargetLoad = std::max(200.0f, TotalWeight * Share);
-        const float Pressure   = std::max(5000.0f, CornerColdPressure[Corner]);
-
-        if (Solver.Carcass == Vehicle::TyreCarcassCategory::Spring)
-        {
-            const float Stiffness     = Vehicle::PressureStiffness(Solver.TraceContact, Pressure);
-            CornerDeflections[Corner] = std::clamp(TargetLoad / std::max(1000.0f, Stiffness), 0.0f, Solver.TraceContact.MaxDeflection);
-            Deformation[Corner]       = { -1.5707963f, CornerDeflections[Corner], Pressure, 0.0f };
-        }
-        else if (auto Soft = Vehicle::ConstructTyreCarcass(Solver.Carcass, Solver.CarcassTuning, Geometry.TyreRadius, Geometry.TyreRimRadius, Geometry.TyreWidth))
-        {
-            const double EstimatedStiffness  = std::max(10000.0, Vehicle::ResolveCarcassStiffness(Solver.CarcassTuning, Pressure));
-            float        EstimatedDeflection = std::clamp(static_cast<float>(TargetLoad / EstimatedStiffness), 0.002f, 0.095f);
-            Vehicle::CarcassContact Contact;
-            Contact.Ground        = true;
-            Contact.GroundPoint   = { 0.0f, 0.0f, 0.0f };
-            Contact.GroundNormal  = { 0.0f, 0.0f, 1.0f };
-            Contact.HubRotation   = Vehicle::Quat{};
-            Contact.GaugePressure = Pressure;
-            Contact.Seconds       = 1.0f / 240.0f;
-
-            if (Solver.Carcass == Vehicle::TyreCarcassCategory::Fem)
-            {
-                for (int Sweep = 0; Sweep < 4; ++Sweep)
-                {
-                    Contact.HubPosition                 = { 0.0f, 0.0f, Geometry.TyreRadius - EstimatedDeflection };
-                    const Vehicle::CarcassResponse Step = Soft->Advance(Contact);
-                    if (Step.NormalLoad > 1.0f)
-                        EstimatedDeflection = std::clamp(EstimatedDeflection * std::sqrt(TargetLoad / Step.NormalLoad), 0.001f, 0.11f);
-                }
-            }
-            else
-            {
-                Contact.HubPosition = { 0.0f, 0.0f, Geometry.TyreRadius - EstimatedDeflection };
-                Soft->Reset(Contact);
-                for (int Sweep = 0; Sweep < 28; ++Sweep) (void)Soft->Advance(Contact);
-            }
-            Contact.HubPosition                     = { 0.0f, 0.0f, Geometry.TyreRadius - EstimatedDeflection };
-            const Vehicle::CarcassResponse Settled  = Soft->Advance(Contact);
-            CornerDeflections[Corner]               = std::max(0.0005f, Settled.Deflection > 0.0f ? Settled.Deflection : EstimatedDeflection);
-            Soft->SampleField(0.0f, RestingFields[Corner]);
-            FieldActive[Corner]   = true;
-            FieldPointers[Corner] = RestingFields[Corner].data();
-            Deformation[Corner]   = { -1.5707963f, CornerDeflections[Corner], Pressure, 0.0f };
-        }
-    }
-
-    const float MeanDeflection = 0.25f * (CornerDeflections[0] + CornerDeflections[1] + CornerDeflections[2] + CornerDeflections[3]);
-    // 📝 Parked/editor placement follows the same COM + suspension + tyre-radius equilibrium as physics spawn.
-    const Vehicle::Vec3 GroundUp      = Orientation.Rotate({ 0.0f, 0.0f, 1.0f });
-    const Vehicle::Vec3 ChassisCOM    = GroundBase + GroundUp * (Geometry.TyreRadius - MeanDeflection) - Orientation.Rotate(MeanHubLocal);
-    const Vehicle::Vec3 BodyOrigin    = ChassisCOM - Orientation.Rotate({ 0.0f, 0.0f, Geometry.CoMAuthoredZ() });
-
-    std::vector<Frontier::GlobalIllumination::OccupantPlacement> Placements;
-    Placements.reserve(VehicleCount);
-
-    Frontier::GlobalIllumination::OccupantPlacement BodyPlacement;
-    BodyPlacement.Occupant  = 0u;
-    BodyPlacement.Current   = AssembleColumnMajor(BodyOrigin, Orientation, 1.0, 1.0);
-    BodyPlacement.Active    = true;
-    BodyPlacement.Recapture = FirstActivation;
-    Placements.push_back(BodyPlacement);
-    if (HasHeroPlates)
-    {
-        Frontier::GlobalIllumination::OccupantPlacement PlatePlacement = BodyPlacement;
-        PlatePlacement.Occupant = 5u;
-        Placements.push_back(PlatePlacement);
-    }
-
-    for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
-    {
-        Frontier::GlobalIllumination::OccupantPlacement WheelPlacement;
-        WheelPlacement.Occupant = 1u + Corner;
-        WheelPlacement.Active   = true;
-        if (CornerFitted[Corner])
-        {
-            const Vehicle::Vec3 HubWorld = ChassisCOM + Orientation.Rotate(RestingHubLocal[Corner]);
-            WheelPlacement.Current = AssembleColumnMajor(HubWorld, Orientation, RadiusScale, WidthScale);
-        }
-        else
-        {
-            const float ForeOffset = Corner < 2u ? 0.72f : -0.72f;
-            const float SideOffset = (Corner & 1u) == 0u ? 2.15f : -2.15f;
-            const Vehicle::Vec3 PitSpot =
-                GroundBase + Orientation.Rotate({ ForeOffset, SideOffset, 0.5f * Geometry.TyreWidth });
-            const Vehicle::Quat FlatQuat =
-                (Orientation * Vehicle::Quat::AxisAngle({ 1.0f, 0.0f, 0.0f }, 1.5707963f)).Normalized();
-            WheelPlacement.Current = AssembleColumnMajor(PitSpot, FlatQuat, RadiusScale, WidthScale);
-        }
-        Placements.push_back(WheelPlacement);
-    }
-
-    (void)Viewport_->RelocateOccupants(Placements);
-    Viewport_->WriteVehicleState(0.0f, FieldActive, Deformation, FieldPointers);
-}
-
-void RenderingExtension::SynchronizePlumeSources(const Frontier::WorldSpace& World, float DeltaSeconds, double ElapsedSeconds)
-{
-    if (!Viewport_) return;
-
-    FluidDynamics::PlumeSettings Settings{};
-    if (Quality_ == "low") Settings.QualityGrade = 0;
-    else if (Quality_ == "medium") Settings.QualityGrade = 1;
-    else if (Quality_ == "ultra") Settings.QualityGrade = 3;
-    else Settings.QualityGrade = 2;
-
-    if (const auto* WindEntry = FindEntry<Frontier::WindRecord>(World, "Wind"))
-    {
-        const auto& Wind = WindEntry->QueryConfiguration();
-        if (Wind.Enabled && Wind.AdvectPlumes)
-        {
-            const float Radians = Wind.DirectionDegrees * (3.14159265358979323846f / 180.0f);
-            const float Gust    = Wind.GustAmplitude * 0.35f *
-                                  std::sin(static_cast<float>(ElapsedSeconds) * Wind.GustFrequencyHz * 6.2831853f);
-            const float Speed   = std::clamp(Wind.SpeedMetresPerSecond * 0.25f + Gust, 0.0f, 9.0f);
-            Settings.WindVector = { std::cos(Radians) * Speed, std::sin(Radians) * Speed, 0.0f };
-        }
-        else
-        {
-            Settings.WindVector = { 0.0f, 0.0f, 0.0f };
-        }
-    }
-
-    const float ClampedDt = std::clamp(DeltaSeconds, 1.0f / 240.0f, 0.1f);
-    PlumeProjector_.BeginStep(ClampedDt);
-    FluidDynamics::PlumeProjectionOutput Output{};
-
-    for (const Frontier::SceneRecordBase* Base : World.FindAllByType("Vehicle"))
-    {
-        const auto* Entry = dynamic_cast<const Frontier::VehicleRecord*>(Base);
-        if (!Entry) continue;
-        Frontier::VehicleReading Reading{};
-        if (Frontier::QueryVehicleReading(Entry->QueryToken(), Reading) && Reading.Simulating && Reading.VisualValid)
-        {
-            PlumeProjector_.ProjectVehicle(Entry->QueryToken().Value, Reading.Telemetry, Reading.Throttle[0],
-                                           Settings, ClampedDt, Output);
-        }
-    }
-
-    for (const Frontier::SceneRecordBase* Base : World.FindAllByType("FluidPlume"))
-    {
-        const auto* Entry = dynamic_cast<const Frontier::FluidPlumeRecord*>(Base);
-        if (!Entry || !Entry->QueryConfiguration().Enabled) continue;
-        const auto& Config = Entry->QueryConfiguration();
-
-        FluidDynamics::FluidParameters Params = FluidDynamics::FluidParameters::ConstructInitialParameters();
-        bool TriggerOnFirst = false;
-
-        if (!Config.SpaceFile.empty())
-        {
-            const std::filesystem::path Candidate = ProjectRoot_ / "Content" / "Levels" / Config.SpaceFile;
-            const std::string Key                 = Candidate.string();
-            auto Found                            = LoadedFluidSpaces_.find(Key);
-            if (Found == LoadedFluidSpaces_.end() && std::filesystem::exists(Candidate))
-            {
-                FluidDynamics::FluidSceneDocument Doc{};
-                if (FluidDynamics::LoadFluidSpaceFile(Candidate, Doc))
-                {
-                    Found = LoadedFluidSpaces_.emplace(Key, std::move(Doc)).first;
-                }
-            }
-            if (Found != LoadedFluidSpaces_.end())
-            {
-                Params = Found->second.Parameters;
-            }
-        }
-        else if (const auto* Preset = FluidDynamics::FindFluidPreset(Config.PresetIdentity))
-        {
-            Params         = FluidDynamics::ConstructPresetParameters(Preset->Identity);
-            TriggerOnFirst = Preset->TriggerExplosionOnLoad;
-        }
-        else
-        {
-            Params         = FluidDynamics::ConstructPresetParameters("camp_fire");
-            TriggerOnFirst = false;
-        }
-
-        if (!Config.CombustionEnabled)
-        {
-            Params.SourceFuel = 0.0f;
-            Params.BlastFuel  = 0.0f;
-        }
-
-        const std::array<float, 3> Pos = { Config.PositionMetres[0], Config.PositionMetres[1], Config.PositionMetres[2] };
-        PlumeProjector_.ProjectFluidPlume(
-            Entry->QueryToken().Value, Pos, Config.DomainScale, Params, TriggerOnFirst,
-            Config.BurstGeneration, static_cast<FluidDynamics::FluidBurstPattern>(Config.BurstPattern),
-            static_cast<float>(ElapsedSeconds), Output);
-    }
-
-    PlumeProjector_.FinalizeStep(Output);
-    Viewport_->AssignPlumeState(
-        Settings, Output.Sources, Output.PrimaryFireLight,
-        Output.HasFocus ? std::optional<std::array<float, 3>>(Output.FocusPosition) : std::nullopt);
 }
 
 } // namespace Frontier

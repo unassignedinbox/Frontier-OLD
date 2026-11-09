@@ -41,7 +41,7 @@ class AnalyticIlluminationSequence
     AnalyticIlluminationSequence(DeviceExchange& Exchange, std::filesystem::path SpirvFolder);
     bool Construct(const GlobalIllumination::SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion,
                    const std::shared_ptr<DeviceRegion>& OccupantRegion, const std::shared_ptr<DeviceRegion>& MaterialRegion,
-                   std::string* OutDiagnostic = nullptr, const std::shared_ptr<DeviceRegion>& VehicleRegion = nullptr);
+                   std::string* OutDiagnostic = nullptr);
     // 📝 One refresh into Target (an rgba8 sRGB view of Extent), submitted and awaited.
     bool Refresh(const AnalyticCamera& Camera, const AnalyticSun& Sun, std::array<uint32_t, 2> Extent, const std::shared_ptr<DeviceTextureView>& Target,
                  std::string* OutDiagnostic = nullptr);
@@ -51,7 +51,7 @@ class AnalyticIlluminationSequence
     DeviceExchange&                                Exchange_;
     GlobalIllumination::ShaderInterchange          Shaders_;
     const GlobalIllumination::SceneStructure*      Scene_ = nullptr;
-    std::shared_ptr<DeviceRegion>                  VertexRegion_{}, OccupantRegion_{}, MaterialRegion_{}, VehicleRegion_{}, ConstantRegion_{}, Instances_{};
+    std::shared_ptr<DeviceRegion>                  VertexRegion_{}, OccupantRegion_{}, MaterialRegion_{}, ConstantRegion_{}, Instances_{};
     std::shared_ptr<DescriptorLayout>              Layout_{};
     std::shared_ptr<DescriptorGroup>               Group_{};
     std::shared_ptr<DeviceSampler>                 Comparison_{};

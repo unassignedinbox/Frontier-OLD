@@ -191,8 +191,6 @@ void WindInspector::ConstructInspector()
     }
     if (NextButton::Construct(Page, "OpenForceField", "Open the Force Field \xE2\x86\x97", Access.Forces != nullptr, "Add a Force Field record first"))
         InspectorRuntime::Instance().RequestSelection("ForceField");
-    if (NextButton::Construct(Page, "FieldWorkspace", "Open Force Field / Wind workspace \xE2\x86\x97"))
-        InspectorRuntime::Instance().RequestWorkspaceAction("field-workspace:on");
     CaptionText::Construct(Page, "The Wind is the Force Field's guest: the field's view, receivers and localized forces are on its page. A "
                                  "switched-off field suspends the wind without changing these settings.");
     FooterRow::Construct(Page, "Levelspace record \xC2\xB7 Wind", "Nested under the Force Field");

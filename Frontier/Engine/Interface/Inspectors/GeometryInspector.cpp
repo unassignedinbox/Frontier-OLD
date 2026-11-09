@@ -18,8 +18,6 @@
 
 #endif
 
-#include <array>
-#include <cmath>
 #include <cstdio>
 
 namespace Frontier
@@ -61,13 +59,7 @@ RecordOperationalCondition GeometryInspector::QueryDirectoryCondition() const no
 
 void GeometryInspector::ConstructEditor(RecordToken Token)
 {
-    std::array<double, 3> HalfExtents = { 0.5, 0.5, 0.5 };
-    for (size_t Axis = 0; Axis < HalfExtents.size(); ++Axis)
-    {
-        const double Extent = Parameters.Resolved.Extent[Axis];
-        if (std::isfinite(Extent) && Extent > 1.0e-6) HalfExtents[Axis] = 0.5 * Extent;
-    }
-    FractureEditor::ConstructInterface(Token, Parameters.Fracture, HalfExtents);
+    FractureEditor::ConstructInterface(Token, FractureView);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

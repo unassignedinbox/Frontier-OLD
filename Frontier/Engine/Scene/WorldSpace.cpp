@@ -4,7 +4,6 @@
 // 🧩 Dynamic scene world implementation with .levelspace container serialization and composable record simulation.
 
 #include "Engine/Scene/WorldSpace.h"
-#include "Engine/Scene/VehicleRecordCodec.h"
 
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
@@ -197,30 +196,6 @@ void DeserializeSpatialSubtable(const toml::table& InTable, SpatialConfiguration
     ReadFloat3(InTable, "orientation_deg", Spatial.OrientationDegrees);
     ReadFloat3(InTable, "scale", Spatial.Scale);
     Spatial.AdvanceRevision();
-}
-
-void SerializeFractureConfiguration(toml::table& Table, const FractureConfiguration& Fracture, const char* EnabledKey)
-{
-    Table.insert_or_assign(EnabledKey, Fracture.Enabled);
-    Table.insert_or_assign("voronoi_cells", static_cast<int64_t>(Fracture.VoronoiCellCount));
-    Table.insert_or_assign("impulse_threshold_ns", static_cast<double>(Fracture.ImpulseThresholdNs));
-    Table.insert_or_assign("impact_radial_bias", static_cast<double>(Fracture.ImpactRadialBias));
-    Table.insert_or_assign("debris_lifetime_seconds", static_cast<double>(Fracture.DebrisLifetimeSeconds));
-    Table.insert_or_assign("sleep_linear_velocity_mps", static_cast<double>(Fracture.SleepLinearVelocity));
-    Table.insert_or_assign("fracture_armed", Fracture.FractureArmed);
-    Table.insert_or_assign("impact_dust_burst", Fracture.ImpactDustBurst);
-}
-
-void DeserializeFractureConfiguration(const toml::table& Table, FractureConfiguration& Fracture, const char* EnabledKey)
-{
-    Fracture.Enabled = ReadBool(Table, EnabledKey, Fracture.Enabled);
-    Fracture.VoronoiCellCount = std::clamp(ReadUint32(Table, "voronoi_cells", Fracture.VoronoiCellCount), 4u, 256u);
-    Fracture.ImpulseThresholdNs = std::clamp(ReadFloat(Table, "impulse_threshold_ns", Fracture.ImpulseThresholdNs), 1.0f, 500.0f);
-    Fracture.ImpactRadialBias = std::clamp(ReadFloat(Table, "impact_radial_bias", Fracture.ImpactRadialBias), 0.0f, 1.0f);
-    Fracture.DebrisLifetimeSeconds = std::clamp(ReadFloat(Table, "debris_lifetime_seconds", Fracture.DebrisLifetimeSeconds), 1.0f, 60.0f);
-    Fracture.SleepLinearVelocity = std::clamp(ReadFloat(Table, "sleep_linear_velocity_mps", Fracture.SleepLinearVelocity), 0.01f, 2.0f);
-    Fracture.FractureArmed = ReadBool(Table, "fracture_armed", Fracture.FractureArmed);
-    Fracture.ImpactDustBurst = ReadBool(Table, "impact_dust_burst", Fracture.ImpactDustBurst);
 }
 
 void SerializePhysicsSubtable(toml::table& OutTable, const PhysicsConfiguration& Physics)
@@ -1245,90 +1220,36 @@ template <>
 void FluidPlumeRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
-    OutTable.insert_or_assign("combustion_enabled", Parameters.CombustionEnabled);
-    OutTable.insert_or_assign("self_shadow_enabled", Parameters.SelfShadowing);
     OutTable.insert_or_assign("buoyancy_lift", static_cast<double>(Parameters.BuoyancyLift));
     OutTable.insert_or_assign("vorticity", static_cast<double>(Parameters.VorticityConfinement));
-    OutTable.insert_or_assign("dissipation_rate", static_cast<double>(Parameters.DissipationRate));
-    OutTable.insert_or_assign("fuel_injection_rate", static_cast<double>(Parameters.FuelInjectionRate));
     OutTable.insert_or_assign("blackbody_k", static_cast<double>(Parameters.BlackbodyCoreKelvin));
-    OutTable.insert_or_assign("soot_extinction", static_cast<double>(Parameters.SootExtinction));
-    OutTable.insert_or_assign("domain_scale", static_cast<double>(Parameters.DomainScale));
-    OutTable.insert_or_assign("burst_pattern", static_cast<int64_t>(Parameters.BurstPattern));
-    if (!Parameters.SpaceFile.empty()) OutTable.insert_or_assign("space_file", Parameters.SpaceFile);
-    if (!Parameters.PresetIdentity.empty()) OutTable.insert_or_assign("preset", Parameters.PresetIdentity);
-    toml::array PositionArray;
-    for (int Axis = 0; Axis < 3; ++Axis)
-    {
-        PositionArray.push_back(std::round(static_cast<double>(Parameters.PositionMetres[Axis]) * 1.0e4) / 1.0e4);
-    }
-    OutTable.insert_or_assign("position", std::move(PositionArray));
 }
 
 template <>
 void FluidPlumeRecord::DeserializeConfiguration(const toml::table& InTable)
 {
     Parameters.Enabled              = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.CombustionEnabled    = ReadBool(InTable, "combustion_enabled", Parameters.CombustionEnabled);
-    Parameters.SelfShadowing        = ReadBool(InTable, "self_shadow_enabled", Parameters.SelfShadowing);
     Parameters.BuoyancyLift         = ReadFloat(InTable, "buoyancy_lift", Parameters.BuoyancyLift);
     Parameters.VorticityConfinement = ReadFloat(InTable, "vorticity", Parameters.VorticityConfinement);
-    Parameters.DissipationRate      = ReadFloat(InTable, "dissipation_rate", Parameters.DissipationRate);
-    Parameters.FuelInjectionRate    = ReadFloat(InTable, "fuel_injection_rate", Parameters.FuelInjectionRate);
     Parameters.BlackbodyCoreKelvin  = ReadFloat(InTable, "blackbody_k", Parameters.BlackbodyCoreKelvin);
-    Parameters.SootExtinction       = ReadFloat(InTable, "soot_extinction", Parameters.SootExtinction);
-    Parameters.DomainScale          = ReadFloat(InTable, "domain_scale", Parameters.DomainScale);
-    if (const auto Pattern = InTable["burst_pattern"].value<int64_t>())
-    {
-        Parameters.BurstPattern = static_cast<uint32_t>(std::clamp<int64_t>(*Pattern, 0, 4));
-    }
-    if (const auto File = InTable["space_file"].value<std::string>()) Parameters.SpaceFile = *File;
-    if (const auto Preset = InTable["preset"].value<std::string>()) Parameters.PresetIdentity = *Preset;
-    if (const toml::array* Pos = InTable["position"].as_array(); Pos && Pos->size() == 3)
-    {
-        for (size_t Axis = 0; Axis < 3; ++Axis)
-        {
-            Parameters.PositionMetres[Axis] = static_cast<float>((*Pos)[Axis].value_or<double>(0.0));
-        }
-    }
     Parameters.AdvanceRevision();
 }
 
 template <>
 void FractureRecord::SerializeConfiguration(toml::table& OutTable) const
 {
-    SerializeFractureConfiguration(OutTable, Parameters, "enabled");
+    OutTable.insert_or_assign("enabled", Parameters.Enabled);
+    OutTable.insert_or_assign("voronoi_cells", static_cast<int64_t>(Parameters.VoronoiCellCount));
+    OutTable.insert_or_assign("impulse_threshold_ns", static_cast<double>(Parameters.ImpulseThresholdNs));
 }
 
 template <>
 void FractureRecord::DeserializeConfiguration(const toml::table& InTable)
 {
-    DeserializeFractureConfiguration(InTable, Parameters, "enabled");
+    Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
+    Parameters.VoronoiCellCount   = ReadUint32(InTable, "voronoi_cells", Parameters.VoronoiCellCount);
+    Parameters.ImpulseThresholdNs = ReadFloat(InTable, "impulse_threshold_ns", Parameters.ImpulseThresholdNs);
     Parameters.AdvanceRevision();
-}
-
-template <>
-void VehicleRecord::SerializeConfiguration(toml::table& OutTable) const
-{
-    EncodeVehicleConfiguration(Parameters, OutTable);
-}
-
-template <>
-void VehicleRecord::DeserializeConfiguration(const toml::table& InTable)
-{
-    DecodeVehicleConfiguration(InTable, Parameters);
-}
-
-template <>
-void TyreRecord::SerializeConfiguration(toml::table& OutTable) const
-{
-    EncodeTyreConfiguration(Parameters, OutTable);
-}
-
-template <>
-void TyreRecord::DeserializeConfiguration(const toml::table& InTable)
-{
-    DecodeTyreConfiguration(InTable, Parameters);
 }
 
 template <>
@@ -1387,7 +1308,12 @@ void GeometryRecord::SerializeConfiguration(toml::table& OutTable) const
     WriteRoundedFloat3(OutTable, "position_m", Parameters.Spatial.PositionMetres);
     WriteRoundedFloat3(OutTable, "orientation_deg", Parameters.Spatial.OrientationDegrees);
     WriteRoundedFloat3(OutTable, "scale", Parameters.Spatial.Scale);
-    SerializeFractureConfiguration(OutTable, Parameters.Fracture, "fracture");
+    OutTable.insert_or_assign("fracture", Parameters.Fracture.Enabled);
+    if (Parameters.Fracture.Enabled)
+    {
+        OutTable.insert_or_assign("voronoi_cells", static_cast<int64_t>(Parameters.Fracture.VoronoiCellCount));
+        OutTable.insert_or_assign("impulse_threshold_ns", static_cast<double>(Parameters.Fracture.ImpulseThresholdNs));
+    }
     toml::array Stack;
     for (const ArrayModifierConfiguration& Modifier : Parameters.Modifiers)
     {
@@ -1452,7 +1378,9 @@ void GeometryRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Physics            = ReadBool(InTable, "physics", Parameters.Physics);
     Parameters.Locked             = ReadBool(InTable, "locked", Parameters.Locked);
     DeserializeSpatialSubtable(InTable, Parameters.Spatial);
-    DeserializeFractureConfiguration(InTable, Parameters.Fracture, "fracture");
+    Parameters.Fracture.Enabled            = ReadBool(InTable, "fracture", false);
+    Parameters.Fracture.VoronoiCellCount   = ReadUint32(InTable, "voronoi_cells", Parameters.Fracture.VoronoiCellCount);
+    Parameters.Fracture.ImpulseThresholdNs = ReadFloat(InTable, "impulse_threshold_ns", Parameters.Fracture.ImpulseThresholdNs);
     Parameters.Modifiers.clear();
     if (const toml::array* Stack = InTable["modifiers"].as_array())
     {
@@ -1799,9 +1727,6 @@ void WorldSpace::RegisterNativeEngineTypes()
     RegisterSimple.operator()<FluidPlumeRecord>("FluidPlume", "Solver · Fluid Plume", RecordClassification::Physics, "Flame", "Solvers", "#e8833a");
     RegisterSimple.operator()<FractureRecord>("Fracture", "Solver · Voronoi Fracture", RecordClassification::Physics, "Hammer", "Solvers", "#8fb3a4");
     RegisterSimple.operator()<ParticleRecord>("Particles", "Solver · GPU Particles", RecordClassification::Physics, "Sparkles", "Solvers", "#b494f4");
-    // 📝 Vehicles (Project Drive on Jolt) and the tyres they enclose.
-    RegisterSimple.operator()<VehicleRecord>("Vehicle", "Vehicle · Control Vehicle", RecordClassification::Vehicle, "Car", "Vehicles", "#e8c24a");
-    RegisterSimple.operator()<TyreRecord>("Tyre", "Vehicle · Tyre", RecordClassification::Tyre, "CircleDot", "Vehicles", "#e8c24a");
 }
 
 RecordToken WorldSpace::ConstructRecord(std::string_view TypeIdentifier,
@@ -1903,15 +1828,6 @@ SceneRecordBase* WorldSpace::FindFirstByType(std::string_view TypeIdentifier) no
     return nullptr;
 }
 
-std::vector<const SceneRecordBase*> WorldSpace::EnumerateRecords() const
-{
-    std::vector<const SceneRecordBase*> Records;
-    Records.reserve(OwnedRecords.size());
-    for (const std::unique_ptr<SceneRecordBase>& Record : OwnedRecords)
-        if (Record) Records.push_back(Record.get());
-    return Records;
-}
-
 std::vector<const SceneRecordBase*> WorldSpace::FindAllByType(std::string_view TypeIdentifier) const
 {
     std::vector<const SceneRecordBase*> Found;
@@ -1948,18 +1864,13 @@ bool WorldSpace::LoadLevelSpace(const std::filesystem::path& LevelSpacePath, std
     }
 
     Clear();
-    LoadedLevelPath    = LevelSpacePath;
-    EnvironmentArchive = "ProvingGround";
+    LoadedLevelPath = LevelSpacePath;
 
     if (const toml::table* LevelHeader = Document["level"].as_table())
     {
         if (const auto Name = (*LevelHeader)["name"].value<std::string>())
         {
             WorldName = *Name;
-        }
-        if (const auto Archive = (*LevelHeader)["environment_archive"].value<std::string>(); Archive && !Archive->empty())
-        {
-            EnvironmentArchive = *Archive;
         }
     }
 
@@ -2034,10 +1945,6 @@ bool WorldSpace::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std
     toml::table Header;
     Header.insert_or_assign("format_version", int64_t{1});
     Header.insert_or_assign("name", WorldName);
-    if (!EnvironmentArchive.empty() && EnvironmentArchive != "ProvingGround")
-    {
-        Header.insert_or_assign("environment_archive", EnvironmentArchive);
-    }
     Root.insert_or_assign("level", std::move(Header));
 
     std::unordered_map<uint64_t, std::string> TokenIdentities;
@@ -2060,10 +1967,10 @@ bool WorldSpace::SaveLevelSpace(const std::filesystem::path& LevelSpacePath, std
         Entry.insert_or_assign("identity", TokenIdentities[Record->QueryToken().Value]);
         Entry.insert_or_assign("type", Record->QueryTypeIdentifier());
         Entry.insert_or_assign("name", Record->QueryRecordName());
-        const RecordToken EnclosingToken = Record->QueryParentToken();
-        if (EnclosingToken.IsValid())
+        const RecordToken Parent = Record->QueryParentToken();
+        if (Parent.IsValid())
         {
-            if (const auto Found = TokenIdentities.find(EnclosingToken.Value); Found != TokenIdentities.end())
+            if (const auto Found = TokenIdentities.find(Parent.Value); Found != TokenIdentities.end())
             {
                 Entry.insert_or_assign("parent", Found->second);
             }

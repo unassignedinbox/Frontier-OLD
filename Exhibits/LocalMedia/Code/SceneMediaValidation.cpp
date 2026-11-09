@@ -97,7 +97,6 @@ int main(int ArgumentCount, char **Arguments)
             auto &Centre = *static_cast<ControlCentrePanel *>(Ownership.get());
             Require(Centre.Initialize() && Centre.Activate(), "Control Centre initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
-            Require(Workspace.OpenLevel(Project / "Content/Levels/Default.levelspace"), "Default level opened");
             auto                     &World = Workspace.QueryWorldSpace();
             Require(World.QueryRecordCount() == 67, "Default level includes Force Field, its 14 forces, local media and the 37 scene objects");
             auto *FieldEntry      = dynamic_cast<ForceFieldRecord *>(World.FindFirstByType("ForceField"));

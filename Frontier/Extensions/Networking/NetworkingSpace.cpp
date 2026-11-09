@@ -44,17 +44,6 @@ bool NetworkingSpace::QueryHosting() const noexcept
     return Local != nullptr && Local->Role == NetworkRole::Host;
 }
 
-void NetworkingSpace::RegisterPeerIdentity(uint32_t Identifier, std::string Identity)
-{
-    Identities[Identifier] = std::move(Identity);
-}
-
-const std::string* NetworkingSpace::QueryPeerIdentity(uint32_t Identifier) const noexcept
-{
-    const auto Found = Identities.find(Identifier);
-    return Found != Identities.end() ? &Found->second : nullptr;
-}
-
 void NetworkingSpace::Post(NetworkTopic Topic, std::string Payload, uint32_t To)
 {
     NetworkMessage Message;

@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                          DIAGRAMCONTROLS.H
 ==========================================================================================================================================*/
-// 🧩 Generic, reusable analytical plotting, polar dial, spectrum ramp, disc row, and dockable editor frame controls.
+// 🧩 Generic, reusable analytical plotting, polar dial, spectrum ramp, disc row, and modal editor frame controls.
 
 #pragma once
 
@@ -98,8 +98,8 @@ struct DiagramControls
                                         float                   ReferenceValue,
                                         ImU32                   SeriesTint);
 
-    // Generic split-pane dockable window frame used by standalone <Domain>Editor classes.
-    static void ConstructEditorWindowFrame(const char*                                             WindowTitle,
+    // Generic split-pane modal window frame used by standalone <Domain>Editor classes.
+    static void ConstructEditorModalFrame(const char*                                             WindowTitle,
                                           const char*                                             GlyphName,
                                           RecordToken                                             Token,
                                           RecordInspector&                                        Inspector,

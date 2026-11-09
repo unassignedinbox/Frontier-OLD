@@ -9,8 +9,6 @@ build/
 Binaries/*
 !Binaries/FrontierSceneViewport-Windows-x64.zip
 !Binaries/FrontierSceneViewport-Windows-x64.zip.sha256
-!Binaries/FrontierNetworkingValidation-Windows-x64.zip
-!Binaries/FrontierNetworkingValidation-Windows-x64.zip.sha256
 
 # Sample meshes / textures / assets — tracked separately.
 EngineContent/*
@@ -76,6 +74,3 @@ _AgentScratch/
 
 # The Zig toolchain configure writes CMake's standard-library probe to a file named "-" in the source root.
 /-
-
-# JS exhibit dependencies
-**/node_modules/

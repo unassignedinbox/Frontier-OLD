@@ -95,7 +95,6 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The bridge the editor uses, on a device of its own; the presented image comes back to the CPU.
         Everest::EverestWorkspace     Workspace(*Centre, EverestRoot);
-        Require(Workspace.OpenLevel(EverestRoot / "Content/Levels/Default.levelspace"), "Failed to open Default.levelspace");
         Frontier::RenderingExtension Bridge(EverestRoot, ShaderRoot, nullptr);
         std::vector<uint8_t>          ViewportPixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};

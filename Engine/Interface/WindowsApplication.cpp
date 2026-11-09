@@ -325,16 +325,8 @@ int ConstructApplicationWindow(const ApplicationWindowCallbacks &Callbacks)
         }
         if (InterfaceFaulted)
         {
-            // 📝 ImGui's recoverable missing-End/Pop diagnostics assert by default. Disable only that assertion while EndFrame
-            //    unwinds the partial stacks, but leave its debug log enabled; normal-frame assertions remain unchanged.
-            const bool AssertOnRecovery = IO.ConfigErrorRecoveryEnableAssert;
-            const bool DebugLogOnRecovery = IO.ConfigErrorRecoveryEnableDebugLog;
-            IO.ConfigErrorRecoveryEnableAssert = false;
-            IO.ConfigErrorRecoveryEnableDebugLog = true;
             try { ImGui::EndFrame(); }
             catch (...) { DiagnosticJournal::Append("FrameConstructError", "Frame recovery failed"); }
-            IO.ConfigErrorRecoveryEnableAssert = AssertOnRecovery;
-            IO.ConfigErrorRecoveryEnableDebugLog = DebugLogOnRecovery;
             continue;
         }
         ImGui::Render();

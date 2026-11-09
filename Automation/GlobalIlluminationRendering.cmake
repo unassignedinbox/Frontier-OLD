@@ -23,7 +23,6 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/RefreshEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/EnvironmentEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
-    Frontier/Engine/Rendering/GlobalIllumination/PlumeSpace.cpp
     Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp
     Frontier/Engine/Rendering/GlobalIllumination/OccupantRelocation.cpp
     Frontier/Engine/Rendering/GlobalIllumination/PickProjection.cpp
@@ -35,7 +34,7 @@ target_include_directories(FrontierGlobalIllumination PUBLIC
     "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
 target_compile_definitions(FrontierGlobalIllumination PUBLIC VK_NO_PROTOTYPES)
 target_compile_features(FrontierGlobalIllumination PUBLIC cxx_std_20)
-target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads FrontierVirtualizedGeometry FrontierFluidDynamics)
+target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads FrontierVirtualizedGeometry)
 
 # 📝 Only the pinned compiler (Automation/PrepareVulkanCompute.py) rebuilds these units by default, so every build presents the
 #    SPIR-V the parity validation measured. Without it the editor uses the stored archives in
@@ -85,25 +84,13 @@ set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
     "DisplayExposure:IntegrateExposure:compute"
     "DisplayPresent:PresentVertex:vertex"
     "DisplayPresent:PresentFragment:fragment"
-    "ImpactSpark:ImpactSparkVertex:vertex"
-    "ImpactSpark:ImpactSparkFragment:fragment"
     "EnvironmentVisibility:ProjectEnvironmentVisibility:compute"
     "EnvironmentVisibility:RestoreEnvironmentRadiance:compute"
     "EnvironmentLighting:ProjectEnvironmentSky:compute"
     "EnvironmentLighting:ProjectCloudShadow:compute"
     # 📝 Beyond the demo: the editor's GPU picking (PickProjection).
     "PickRaster:PickVertex:vertex"
-    "PickRaster:PickFragment:fragment"
-    # 📝 World-anchored toroidal smoke & fire plume solver + shadow transmittance + volumetric raymarch (PlumeSpace).
-    "PlumeAdvection:AdvectVelocity:compute"
-    "PlumeAdvection:AdvectThermo:compute"
-    "PlumeAdvection:ResolveSunTransmittance:compute"
-    "PlumeVorticity:ResolveCurl:compute"
-    "PlumeVorticity:ConfineVorticity:compute"
-    "PlumePressure:ResolveDivergence:compute"
-    "PlumePressure:RelaxPressure:compute"
-    "PlumePressure:ProjectVelocity:compute"
-    "PlumeMarch:MarchPlume:compute")
+    "PickRaster:PickFragment:fragment")
 
 set(FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS)
 if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)
@@ -139,7 +126,6 @@ endif()
 add_library(FrontierSceneViewport STATIC
     Frontier/Engine/Geometry/ShapeArchive.cpp
     Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
-    Frontier/Engine/Rendering/SceneViewport/ImpactSparkSequence.cpp
     Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
 target_include_directories(FrontierSceneViewport PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering FrontierAnalyticIllumination)
@@ -169,23 +155,12 @@ if(TARGET Frontier)
 endif()
 
 if(BUILD_TESTING)
-    # 📝 Deterministic seeded shake, bounded motion and compact motion-blur control encoding.
-    add_executable(CameraEffectsValidation Exhibits/SceneViewport/Code/CameraEffectsValidation.cpp)
-    target_link_libraries(CameraEffectsValidation PRIVATE FrontierSession)
-    add_test(NAME CameraEffectsValidation COMMAND CameraEffectsValidation)
-
     # 📝 Offscreen scene viewport frames (own device, same code path as the editor) — Exhibits/SceneViewport/README.md.
     add_executable(SceneViewportValidation
         Exhibits/SceneViewport/Code/SceneViewportValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)
     target_include_directories(SceneViewportValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-    target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport FrontierPhysicsExtension)
-
-    # 📝 Replays real Jolt contact events through the bounded ballistic particle sequence.
-    add_executable(ImpactSparkValidation Exhibits/SceneViewport/Code/ImpactSparkValidation.cpp)
-    target_link_libraries(ImpactSparkValidation PRIVATE FrontierSceneViewport FrontierPhysicsExtension)
-    add_test(NAME ImpactSparkValidation COMMAND ImpactSparkValidation)
-    set_tests_properties(ImpactSparkValidation PROPERTIES TIMEOUT 60)
+    target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport)
 
     # 📝 The fifteen inspection views of one settled daylight view: the Render settings inspector's debug-view thumbnails.
     add_executable(InspectionViewCapture

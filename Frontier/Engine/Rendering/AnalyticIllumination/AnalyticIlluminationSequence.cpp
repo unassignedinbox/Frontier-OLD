@@ -4,7 +4,6 @@
 // 🧩 Bring-up and refresh of the analytic illumination: shared bindings, the refresh profile (camera, sun, sky gradient, the sun's
 //    orthographic box around the camera) and the two raster sequences in one submission.
 #include "AnalyticIlluminationSequence.h"
-#include "Rendering/GlobalIllumination/IlluminationConstants.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -99,7 +98,7 @@ AnalyticIlluminationSequence::AnalyticIlluminationSequence(DeviceExchange& Excha
 
 bool AnalyticIlluminationSequence::Construct(const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion,
                                              const std::shared_ptr<DeviceRegion>& OccupantRegion, const std::shared_ptr<DeviceRegion>& MaterialRegion,
-                                             std::string* OutDiagnostic, const std::shared_ptr<DeviceRegion>& VehicleRegion)
+                                             std::string* OutDiagnostic)
 {
     try
     {
@@ -107,18 +106,8 @@ bool AnalyticIlluminationSequence::Construct(const SceneStructure& Scene, const 
         VertexRegion_   = VertexRegion;
         OccupantRegion_ = OccupantRegion;
         MaterialRegion_ = MaterialRegion;
-        if (VehicleRegion)
-        {
-            VehicleRegion_ = VehicleRegion;
-        }
-        else
-        {
-            std::vector<float> EmptyVehicle(2612u, 0.0f);
-            VehicleRegion_ = Exchange_.ConstructRegionFrom(EmptyVehicle.data(), EmptyVehicle.size() * sizeof(float), "Analytic vehicle fallback");
-        }
-        Shaders_.ConfigureConstants(ConstructSpecializationConstants(SceneConstantInputs{}));
         using D = DescriptorCode;
-        const std::vector<DescriptorSlot> Slots = {{D::Uniform}, {D::StorageRead}, {D::StorageRead}, {D::TextureDepth2D}, {D::SamplerComparison}, {D::StorageRead}};
+        const std::vector<DescriptorSlot> Slots = {{D::Uniform}, {D::StorageRead}, {D::StorageRead}, {D::TextureDepth2D}, {D::SamplerComparison}};
         Layout_ = Exchange_.ConstructDescriptorLayout(Slots, "Analytic illumination");
         ConstantRegion_ = Exchange_.ConstructRegion(76 * 4, "Analytic refresh profile");
         std::vector<uint32_t> Identities(std::max<size_t>(1, Scene.Occupants.size()));
@@ -134,7 +123,7 @@ bool AnalyticIlluminationSequence::Construct(const SceneStructure& Scene, const 
         Solar_->ConstructTargets(SolarDepthExtent);
         Shading_ = std::make_unique<SurfaceShadingRasterization>(Exchange_, Shaders_);
         Shading_->ConstructPrograms(Layout_);
-        Group_ = Exchange_.ConstructDescriptorGroup(Layout_, {ConstantRegion_, OccupantRegion_, MaterialRegion_, Solar_->DepthView, Comparison_, VehicleRegion_},
+        Group_ = Exchange_.ConstructDescriptorGroup(Layout_, {ConstantRegion_, OccupantRegion_, MaterialRegion_, Solar_->DepthView, Comparison_},
                                                     "Analytic illumination");
     }
     catch (const std::exception& Error)

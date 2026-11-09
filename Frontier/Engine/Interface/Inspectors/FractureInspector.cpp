@@ -25,7 +25,7 @@ namespace Frontier
 
 void FractureInspector::ConstructEditor(RecordToken Token)
 {
-    FractureEditor::ConstructInterface(Token, Parameters);
+    FractureEditor::ConstructInterface(Token, *this);
 }
 
 void FractureInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
@@ -44,8 +44,7 @@ void FractureInspector::ConstructInspector()
     Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##ImpThr", "Impulse Threshold", Parameters.ImpulseThresholdNs, 1.0f, 500.0f, "%.1f N*s");
     Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##RadBias", "Impact Radial Bias", Parameters.ImpactRadialBias, 0.0f, 1.0f, "%.2f");
     Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##DebrisLife", "Debris Lifetime", Parameters.DebrisLifetimeSeconds, 1.0f, 60.0f, "%.1f s");
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##SleepSpeed", "Sleep Linear Speed", Parameters.SleepLinearVelocity, 0.01f, 2.0f, "%.2f m/s");
-    if (InspectorControls::ConstructActionButton(Palette, Faces, "##PreFracture", "Rebuild Voronoi Preview"))
+    if (InspectorControls::ConstructActionButton(Palette, Faces, "##PreFracture", "Recompute Convex Cells"))
     {
         ++Parameters.PrefractureTriggerCount;
         Changed = true;

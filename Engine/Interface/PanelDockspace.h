@@ -59,8 +59,6 @@ class PanelDockspace
     bool               ConfigurePlatform() noexcept;
     void               ConstructInterface(float Scale);
     [[nodiscard]] bool QueryOpen(const std::string &Key) const noexcept;
-    // True only when the panel's ImGui Begin() returned visible content this frame.
-    [[nodiscard]] bool QueryPresented(const std::string &Key) const noexcept;
     [[nodiscard]] bool QueryDetachedWindows() const noexcept
     {
         return DetachedEnabled;
@@ -78,7 +76,6 @@ class PanelDockspace
         int                    Placement       = 0;
         bool                   NativeWindow    = false;
         bool                   Presented       = false;
-        bool                   FocusNextFrame  = false;
         bool                   RestoreGeometry = false;
         float                  X = 0, Y = 0, Width = 640, Height = 520;
     };

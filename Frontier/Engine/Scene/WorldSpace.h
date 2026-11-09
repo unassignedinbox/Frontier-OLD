@@ -116,8 +116,6 @@ using FluidPlumeRecord     = TypedSceneRecord<FluidPlumeConfiguration, FluidPlum
 using FractureRecord       = TypedSceneRecord<FractureConfiguration, FractureInspector>;
 using ParticleRecord       = TypedSceneRecord<ParticleConfiguration, ParticleInspector>;
 using GeometryRecord       = TypedSceneRecord<GeometryConfiguration, GeometryInspector>;
-using VehicleRecord        = TypedSceneRecord<VehicleConfiguration, VehicleInspector>;
-using TyreRecord           = TypedSceneRecord<TyreConfiguration, TyreInspector>;
 #else
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration>;
@@ -136,8 +134,6 @@ using FluidPlumeRecord     = TypedSceneRecord<FluidPlumeConfiguration>;
 using FractureRecord       = TypedSceneRecord<FractureConfiguration>;
 using ParticleRecord       = TypedSceneRecord<ParticleConfiguration>;
 using GeometryRecord       = TypedSceneRecord<GeometryConfiguration>;
-using VehicleRecord        = TypedSceneRecord<VehicleConfiguration>;
-using TyreRecord           = TypedSceneRecord<TyreConfiguration>;
 #endif
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -270,13 +266,8 @@ class WorldSpace
     [[nodiscard]] SceneRecordBase*   FindRecord(RecordToken Token) noexcept;
     [[nodiscard]] SceneRecordBase*   FindFirstByType(std::string_view TypeIdentifier) noexcept;
     [[nodiscard]] std::vector<const SceneRecordBase*> FindAllByType(std::string_view TypeIdentifier) const;
-    // 📝 Every record in level order (the WorldRegister's survey).
-    [[nodiscard]] std::vector<const SceneRecordBase*> EnumerateRecords() const;
     [[nodiscard]] const std::string& QueryWorldName() const noexcept { return WorldName; }
     void                             ConfigureWorldName(std::string Name) { WorldName = std::move(Name); }
-
-    [[nodiscard]] const std::string& QueryEnvironmentArchive() const noexcept { return EnvironmentArchive; }
-    void                             ConfigureEnvironmentArchive(std::string Archive) { EnvironmentArchive = std::move(Archive); }
 
     [[nodiscard]] const std::filesystem::path& QueryLoadedLevelPath() const noexcept { return LoadedLevelPath; }
 
@@ -287,8 +278,7 @@ class WorldSpace
   private:
     void RegisterNativeEngineTypes();
 
-    std::string                                   WorldName          = "Default";
-    std::string                                   EnvironmentArchive = "ProvingGround";
+    std::string                                   WorldName = "Default";
     std::filesystem::path                         LoadedLevelPath;
     std::vector<SceneTypeRegistration>            TypeRegistry;
     std::vector<std::unique_ptr<SceneRecordBase>> OwnedRecords;

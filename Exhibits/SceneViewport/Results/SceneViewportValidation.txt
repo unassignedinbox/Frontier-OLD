@@ -1,47 +1,41 @@
   bring-up on SwiftShader Device (Subzero) (an own device)
-  bring-up ① facet space: 2094 occupants, 58 facet sets, 3871 KiB of vertices (low) (354 ms, 0 submissions so far)
-  bring-up ② distance volumes: 32 in 118x35x797 texels (9133 ms, 64 submissions so far)
-  bring-up ③ 2094 occupant profiles and the two-level ray tracing hierarchy (289 ms, 64 submissions so far)
-  bring-up ④ scene distance field (178 ms, 64 submissions so far)
-  bring-up ⑤ illumination stages and programs (69152 ms, 64 submissions so far)
-  bring-up ⑥ surface card capture (853 ms, 66 submissions so far)
-  bring-up ⑦ screen targets 480x270 (5 ms, 66 submissions so far)
+  bring-up ① facet space: 2094 occupants, 58 facet sets, 3871 KiB of vertices (low) (24 ms, 0 submissions so far)
+  bring-up ② distance volumes: 32 in 118x35x797 texels (8613 ms, 64 submissions so far)
+  bring-up ③ 2094 occupant profiles and the two-level ray tracing hierarchy (27 ms, 64 submissions so far)
+  bring-up ④ scene distance field (94 ms, 64 submissions so far)
+  bring-up ⑤ illumination stages and programs (52689 ms, 64 submissions so far)
+  bring-up ⑥ surface card capture (684 ms, 66 submissions so far)
+  bring-up ⑦ screen targets 480x270 (3 ms, 66 submissions so far)
   bring-up ⑧ PlanetaryAtmosphere environment on the same queue
 device: SwiftShader Device (Subzero)
-bring-up: 85.1 s, 2094 occupants (1406 inactive), 30 luminaires, environment overlaid
+bring-up: 65.5 s, 2094 occupants (1406 inactive), 30 luminaires, environment overlaid
 [PASS] PlanetaryAtmosphere overlaid on the illumination device
 [PASS] vehicle body and wheels deactivated (no car)
 [PASS] street lamps and lamp posts placed from the scene — 20 + 10
 environment lighting: PlanetaryAtmosphere lights the scene
-  key light Sun (10.8628, 8.5313, 6.1981) from (-0.53, 0.59, 0.62); sun (10.8628, 8.5313, 6.1981); sky zenith (0.2987, 0.6281, 1.6083); cloud shadow 44.5 % of the map, deepest τ 3.93
-Daylight: 1 refreshes, mean 15.17 s, slowest 15.17 s; image 0.5588, sky 0.795, ground 0.278, brightest 0.980, isolated bright pixels 548 → /home/user/Frontier/build-remaining/SceneViewportEvidenceFinal/Daylight.png
+  key light Sun (10.8628, 8.5313, 6.1981) from (-0.53, 0.59, 0.62); sun (10.8628, 8.5313, 6.1981); sky zenith (0.1652, 0.3998, 1.2197); cloud shadow 39.6 % of the map, deepest τ 3.80
+Daylight: 12 refreshes, mean 11.98 s, slowest 13.28 s; image 0.5295, sky 0.729, ground 0.272, brightest 0.951, isolated bright pixels 27 → out/Daylight.png
 [PASS] Daylight presented a lit image
-  key light Sun (7.9591, 4.1792, 1.5306) from (0.93, 0.34, 0.14); sun (7.9591, 4.1792, 1.5306); sky zenith (0.1070, 0.2172, 0.5873); cloud shadow 48.5 % of the map, deepest τ 9.21
-LowSunFlare: 1 refreshes, mean 20.70 s, slowest 20.70 s; image 0.6063, sky 0.760, ground 0.287, brightest 1.000, isolated bright pixels 201 → /home/user/Frontier/build-remaining/SceneViewportEvidenceFinal/LowSunFlare.png
+  key light Sun (7.9591, 4.1792, 1.5306) from (0.93, 0.34, 0.14); sun (7.9591, 4.1792, 1.5306); sky zenith (0.0842, 0.1905, 0.5624); cloud shadow 42.3 % of the map, deepest τ 9.21
+LowSunFlare: 12 refreshes, mean 12.62 s, slowest 14.18 s; image 0.5631, sky 0.674, ground 0.254, brightest 1.000, isolated bright pixels 81 → out/LowSunFlare.png
 [PASS] LowSunFlare presented a lit image
-  local-fog sun shafts: overlaid mean luminance 0.69134 shafted, 0.69406 unshadowed, 0.69305 shafted (99.85 % of the unshadowed)
+  fog sun shafts: overlaid mean luminance 0.76732 shafted, 0.77070 unshadowed, 0.76749 shafted (99.58 % of the unshadowed)
   key light Sun (0.0000, 0.0000, 0.0000) from (-0.94, -0.34, -0.07); sun (0.0000, 0.0000, 0.0000); sky zenith (0.0056, 0.0056, 0.0169); cloud shadow 0.0 % of the map, deepest τ 0.00
-DuskFogLamps: 1 refreshes, mean 14.60 s, slowest 14.60 s; image 0.1612, sky 0.117, ground 0.135, brightest 0.989, isolated bright pixels 350 → /home/user/Frontier/build-remaining/SceneViewportEvidenceFinal/DuskFogLamps.png
+DuskFogLamps: 12 refreshes, mean 12.05 s, slowest 13.91 s; image 0.1761, sky 0.134, ground 0.148, brightest 0.989, isolated bright pixels 94 → out/DuskFogLamps.png
 [PASS] DuskFogLamps presented a lit image
-  key light Moon (0.0516, 0.0567, 0.0643) from (0.78, -0.11, 0.62); sun (0.0000, 0.0000, 0.0000); sky zenith (0.0000, 0.0000, 0.0000); cloud shadow 0.0 % of the map, deepest τ 0.00
-NightMoonsPlanetsStars: 1 refreshes, mean 15.29 s, slowest 15.29 s; image 0.0151, sky 0.002, ground 0.034, brightest 1.000, isolated bright pixels 16 → /home/user/Frontier/build-remaining/SceneViewportEvidenceFinal/NightMoonsPlanetsStars.png
+  key light Moon (0.0642, 0.0639, 0.0671) from (-0.74, 0.30, 0.60); sun (0.0000, 0.0000, 0.0000); sky zenith (0.0000, 0.0000, 0.0000); cloud shadow 0.0 % of the map, deepest τ 0.00
+NightMoonsPlanetsStars: 12 refreshes, mean 11.94 s, slowest 14.97 s; image 0.0186, sky 0.003, ground 0.041, brightest 1.000, isolated bright pixels 23 → out/NightMoonsPlanetsStars.png
 [PASS] NightMoonsPlanetsStars presented a lit image
-[PASS] impact raster is driven by real Jolt metal and concrete contacts — 2 contact events
-[PASS] contact replay emitted ballistic GPU streak records — 66 live filings
-impact particles: 60 changed pixels, 50 incandescent pixels → /home/user/Frontier/build-remaining/SceneViewportEvidenceFinal/ImpactSparkRaster.png
-[PASS] impact-particle raster capture saved
-[PASS] moving impact streaks change the presented raster — 60 pixels
-[PASS] particle streaks preserve incandescent blackbody colour — 50 hot pixels
-[PASS] daylight sky is bright — 0.795212
+[PASS] daylight sky is bright — 0.729475
 [PASS] low sun saturates the disc and flare — 1.000000
-[PASS] night sky darker than day — 0.002299 vs 0.795212
-[PASS] night sky shows stars — 16 isolated bright pixels
-[PASS] fog sun shafts shadowed by the scene's sun cascades — 0.691344 / 0.694065 unshadowed / 0.693052
-[PASS] daylight sky view is the environment's blue sky — 0.298695, 1.608292
-[PASS] clouds shade the ground (projected cloud shadow map) — 44.482422 %
+[PASS] night sky darker than day — 0.002528 vs 0.729475
+[PASS] night sky shows stars — 23 isolated bright pixels
+[PASS] fog sun shafts shadowed by the scene's sun cascades — 0.767316 / 0.770702 unshadowed / 0.767488
+[PASS] daylight sky view is the environment's blue sky — 0.165243, 1.219747
+[PASS] clouds shade the ground (projected cloud shadow map) — 39.611816 %
 [PASS] low sun reddened by the environment's air — 1.752603 → 5.199851
-[PASS] Luna and Ember light the night — Moon 0.172635
-[PASS] night sky view far darker than day — 0.000000 vs 1.608292
+[PASS] Luna and Ember light the night — Moon 0.195149
+[PASS] night sky view far darker than day — 0.000000 vs 1.219747
 [PASS] no rejected transfers or failed submissions
 
 === scene viewport: 0 failing checks

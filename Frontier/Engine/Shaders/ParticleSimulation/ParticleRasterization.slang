@@ -279,11 +279,13 @@ CubeVarying CubeVertex(uint VertexIndex : SV_VulkanVertexID, uint InstanceIndex 
 // 📝 Derez shards: each derez cube that hit the floor splits into 8 half-size cubes that burst off the impact point, fall under
 //    gravity, rest on the floor and fade. Shards are not particles and do not collide.
 [shader("vertex")]
-CubeVarying ShardVertex(uint VertexIndex : SV_VulkanVertexID, uint InstanceIndex : SV_VulkanInstanceID)
+CubeVarying ShardVertex(uint VertexIndex : SV_VulkanVertexID)
 {
     var Out = ConstructClippedCube();
-    let Shard = VertexIndex / 36u;
-    let Current = Particles[InstanceIndex];
+    let Owner = VertexIndex / 288u;
+    let Remainder = VertexIndex % 288u;
+    let Shard = Remainder / 36u;
+    let Current = Particles[Owner];
     if (Current.Transition.y <= 0.0 || Current.Appearance.x <= 0.0) { return Out; }
     let Since = Effect.Physics.y - (Current.Transition.y - 1.0);
     let Life = Effect.MolecularReach.w;

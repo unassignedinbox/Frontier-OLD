@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <fstream>
 
 namespace Frontier::GlobalIllumination
@@ -39,8 +38,7 @@ SceneViewport::SceneViewport() = default;
 
 SceneViewport::~SceneViewport()
 {
-    // 📝 Device resources die before their exchanges; retire in-flight work before tearing down borrowed views and host buffers.
-    if (Exchange_) Exchange_->AwaitIdle();
+    // 📝 Device resources die before their exchanges; the borrowed environment views before the environment images.
     PresentedView_.reset();
     Pick_.reset();
     Overlay_.reset();
@@ -83,28 +81,9 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     }
     if (Configuration.Journal) Configuration.Journal("bring-up on " + Adapter_ + " (" + (HostDevice != nullptr ? "the editor's device" : "an own device") + ")");
 
-    // ① resolve <ArchiveStem>.facetspace dynamically (falling back to ProvingGround.facetspace or first *.facetspace)
+    // ① the proving ground exactly as the demo built it, the vehicle deactivated (no car yet)
     IlluminationAssets Assets;
-    const std::string  ArchiveStem   = Configuration.SceneArchive.filename().string();
-    std::filesystem::path FacetCandidate = Configuration.SceneArchive / (ArchiveStem + ".facetspace");
-    std::error_code       FacetError;
-    if (!std::filesystem::is_regular_file(FacetCandidate, FacetError))
-    {
-        FacetCandidate = Configuration.SceneArchive / "ProvingGround.facetspace";
-        if (!std::filesystem::is_regular_file(FacetCandidate, FacetError) &&
-            std::filesystem::is_directory(Configuration.SceneArchive, FacetError))
-        {
-            for (const auto& Entry : std::filesystem::directory_iterator(Configuration.SceneArchive, FacetError))
-            {
-                if (Entry.is_regular_file() && Entry.path().extension() == ".facetspace")
-                {
-                    FacetCandidate = Entry.path();
-                    break;
-                }
-            }
-        }
-    }
-    Assets.FacetSpace  = FacetCandidate;
+    Assets.FacetSpace  = Configuration.SceneArchive / "ProvingGround.facetspace";
     Assets.OmitVehicle = true;
     if (!ReadArchive(Configuration.SceneArchive / "Materials.bin", Assets.MaterialProfiles, OutDiagnostic)) return false;
     // 📝 Beyond the demo: the engine shapes (EngineContent/ShapeArchives) and the editor's reserve of occupants for copies and
@@ -131,14 +110,6 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Host_->Journal = Configuration.Journal;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
     if (!Host_->Construct(Assets, Settings, ScreenExtent, OutDiagnostic)) return false;
-    if (ArchiveStem == "Lobby")
-    {
-        Host_->StreetLampPoles.clear();
-        Host_->PointLampPosts.clear();
-        Host_->Luminaires.StudioLuminaires = QueryLobbyStudioLuminaires();
-        Host_->Luminaires.VehicleBeam      = AutomotiveBeam::Off;
-        Host_->Luminaires.RoofLightEnabled = false;
-    }
 
     // ② idle profiles of the parts the editor does not run yet (vehicle visual, effects, the demo's own clouds)
     const std::pair<const char*, std::shared_ptr<DeviceRegion>> Profiles[] = {{"VehicleProfile.bin", Host_->VehicleRegion},
@@ -150,11 +121,6 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
         std::vector<uint8_t> Bytes;
         if (!ReadArchive(Configuration.SceneArchive / Name, Bytes, OutDiagnostic)) return false;
         Exchange_->WriteRegion(Region, 0, Bytes.data(), std::min<VkDeviceSize>(Bytes.size(), Region->Capacity));
-        if (Region == Host_->VehicleRegion && Bytes.size() >= sizeof(float))
-        {
-            BaseVehicleProfile_.assign(Bytes.size() / sizeof(float), 0.0f);
-            std::memcpy(BaseVehicleProfile_.data(), Bytes.data(), BaseVehicleProfile_.size() * sizeof(float));
-        }
     }
 
     // ③ the PlanetaryAtmosphere environment on the same device and queue (the viewport keeps the demo's own sky without it)
@@ -265,7 +231,6 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         PresentedView_ = Exchange_->ConstructView(Host_->CaptureTexture);
     }
     ElapsedSeconds_ += std::max(0.0, DeltaSeconds);
-    if (Host_) Host_->AssignImpactSparks(Rendering.ImpactSparks);
     if (Rendering.AnalyticIllumination)
     {
         // 📝 The analytic illumination draws the loaded scene into the same presented image; the global illumination rests.
@@ -273,8 +238,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         {
             auto Candidate = std::make_unique<AnalyticIllumination::AnalyticIlluminationSequence>(
                 *Exchange_, Configuration_.GlobalIlluminationShaders.parent_path() / "AnalyticIllumination");
-            if (!Candidate->Construct(Host_->Scene, Host_->VertexRegion, Host_->OccupantRegion, Host_->MaterialRegion, OutDiagnostic, Host_->VehicleRegion))
-                return false;
+            if (!Candidate->Construct(Host_->Scene, Host_->VertexRegion, Host_->OccupantRegion, Host_->MaterialRegion, OutDiagnostic)) return false;
             Analytic_ = std::move(Candidate);
             if (Configuration_.Journal) Configuration_.Journal("analytic illumination up");
         }
@@ -338,29 +302,11 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         VirtualizedConfigured_   = Rendering.VirtualizedGeometry;
         Virtualized.StreamSlots  = Rendering.VirtualizedStreamSlots;
     }
-    // 📝 World-grid plume transport & raymarch + live fire illumination feeding DirectRadiance, CardDirect & RayIntersection.
+    // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
+    //    presentation word carries only exposure/scale metadata.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.PresentationControl = (1u << 8) | (1000u << 20) | EncodeCameraMotionBlurControl(Rendering.CameraMotionBlur);
-    const std::array<float, 3> PlumeFocus = PlumeFocusOverride_.value_or(
-        std::array<float, 3>{ static_cast<float>(Inputs.Focus[0]), static_cast<float>(Inputs.Focus[1]), static_cast<float>(Inputs.Focus[2]) });
-    const bool SmokeActive = Host_->Plume && Host_->Plume->PrepareRefresh(
-        PlumeSettings_, PlumeSources_, PlumeFireLight_, PlumeFocus,
-        static_cast<float>(std::max(DeltaSeconds, 1.0 / 120.0)), ElapsedSeconds_);
-    Inputs.External.SmokeResident = SmokeActive;
-    Inputs.External.FireBlock     = {
-        PlumeFireLight_.Position[0], PlumeFireLight_.Position[1], PlumeFireLight_.Position[2], PlumeFireLight_.Intensity,
-        PlumeFireLight_.Colour[0], PlumeFireLight_.Colour[1], PlumeFireLight_.Colour[2], PlumeFireLight_.Reach
-    };
-    const float FireMoveSq = (PlumeFireLight_.Position[0] - PriorFirePosition_[0]) * (PlumeFireLight_.Position[0] - PriorFirePosition_[0]) +
-                             (PlumeFireLight_.Position[1] - PriorFirePosition_[1]) * (PlumeFireLight_.Position[1] - PriorFirePosition_[1]) +
-                             (PlumeFireLight_.Position[2] - PriorFirePosition_[2]) * (PlumeFireLight_.Position[2] - PriorFirePosition_[2]);
-    if (Host_->Cards && (std::fabs(PlumeFireLight_.Intensity - PriorFireIntensity_) > 6.0f ||
-                         (PlumeFireLight_.Intensity > 1.0f && FireMoveSq > 0.36f)))
-    {
-        Host_->Cards->InvalidateLighting();
-        PriorFireIntensity_ = PlumeFireLight_.Intensity;
-        PriorFirePosition_  = PlumeFireLight_.Position;
-    }
+    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20);
+    Inputs.External.FireBlock      = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.46f, 0.14f, 14.0f};
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
     Inputs.LuminairesLive          = true;
@@ -430,80 +376,11 @@ uint32_t SceneViewport::RelocateOccupants(const std::vector<OccupantPlacement>& 
     return Host_ ? GlobalIllumination::RelocateOccupants(*Host_, Placements) : 0u;
 }
 
-void SceneViewport::WriteVehicleState(float SteeringAngle, const std::array<bool, 4>& CarcassFieldActive,
-                                      const std::array<std::array<float, 4>, 4>& Deformation,
-                                      const std::array<const float*, 4>& CarcassFields)
-{
-    if (!Host_ || !Exchange_ || !Host_->VehicleRegion) return;
-    constexpr size_t ProfileFloats = 2612u; // 10,448 B = 653 float4s (VehicleVisual.slang VehicleProfile)
-    std::vector<float> Profile(ProfileFloats, 0.0f);
-    if (!BaseVehicleProfile_.empty())
-    {
-        const size_t CopyFloats = std::min(Profile.size(), BaseVehicleProfile_.size());
-        std::memcpy(Profile.data(), BaseVehicleProfile_.data(), CopyFloats * sizeof(float));
-    }
-    else
-    {
-        Profile[1]  = 1.0f; // Cabin.y: see-through glazing enabled
-        Profile[10] = 1.0f; // Axis: non-zero unit axis fallback
-        Profile[19] = 1.0f; // CabinShift.w: unit tablet scale
-    }
-    Profile[0] = SteeringAngle;
-    for (size_t Wheel = 0; Wheel < 4; ++Wheel)
-    {
-        const size_t WheelOffset       = 20u + Wheel * 4u;
-        const size_t DeformationOffset = 36u + Wheel * 4u;
-        const bool   FieldActive       = CarcassFieldActive[Wheel] && CarcassFields[Wheel] != nullptr;
-        Profile[WheelOffset + 0u] = 0.0f;
-        Profile[WheelOffset + 1u] = FieldActive ? 1.0f : 0.0f;
-        Profile[WheelOffset + 2u] = 0.0f;
-        Profile[WheelOffset + 3u] = 0.0f;
-        for (size_t Axis = 0; Axis < 4; ++Axis) Profile[DeformationOffset + Axis] = Deformation[Wheel][Axis];
-        const size_t FieldBase = 52u + Wheel * 160u * 4u;
-        if (FieldActive)
-        {
-            const float* Displacements = CarcassFields[Wheel];
-            float        PeakMagnitude = 0.0f;
-            for (size_t Point = 0; Point < 160u; ++Point)
-            {
-                const float Dx = Displacements[Point * 3u + 0u];
-                const float Dy = Displacements[Point * 3u + 1u];
-                const float Dz = Displacements[Point * 3u + 2u];
-                Profile[FieldBase + Point * 4u + 0u] = Dx;
-                Profile[FieldBase + Point * 4u + 1u] = Dy;
-                Profile[FieldBase + Point * 4u + 2u] = Dz;
-                Profile[FieldBase + Point * 4u + 3u] = 0.0f;
-                PeakMagnitude = std::max(PeakMagnitude, std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz));
-            }
-            // 📝 VehicleVisual.slang gates both Path A and Path B on Deformation[Wheel].y > 1e-5; ensure inflated nodal fields enter Path A.
-            if (PeakMagnitude > 1.0e-5f && Profile[DeformationOffset + 1u] <= 1.0e-5f)
-                Profile[DeformationOffset + 1u] = PeakMagnitude;
-        }
-        else
-        {
-            std::fill_n(Profile.data() + FieldBase, 160u * 4u, 0.0f);
-        }
-    }
-    Exchange_->WriteRegion(Host_->VehicleRegion, 0, Profile.data(),
-                           std::min<VkDeviceSize>(Profile.size() * sizeof(float), Host_->VehicleRegion->Capacity));
-}
-
 Transform SceneViewport::ResolveViewProjection(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent) noexcept
 {
     const double Aspect = static_cast<double>(ScreenExtent[0]) / static_cast<double>(std::max(1u, ScreenExtent[1]));
     return MultiplyTransform(ConstructPerspectiveTransform(Camera.VerticalFieldOfView, Aspect, Camera.Near),
                              ConstructViewTransform(Camera.Position, Camera.Target, Camera.Up));
-}
-
-void SceneViewport::AssignPlumeState(const FluidDynamics::PlumeSettings& Settings,
-                                     std::span<const FluidDynamics::PlumeSourceEntry> Sources,
-                                     const FluidDynamics::PlumeFireLightEntry& FireLight,
-                                     std::optional<std::array<float, 3>> FocusOverride)
-{
-    PlumeSettings_      = Settings;
-    PlumeSources_.assign(Sources.begin(), Sources.end());
-    PlumeFireLight_     = FireLight;
-    PlumeFocusOverride_ = FocusOverride;
 }
 
 bool SceneViewport::PickOccupants(std::array<double, 2> Point, OccupantPick& Outcome, std::string* OutDiagnostic)

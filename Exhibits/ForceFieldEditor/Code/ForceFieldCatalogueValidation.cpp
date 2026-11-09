@@ -434,20 +434,15 @@ int main(int ArgumentCount, char** Arguments)
     std::cout << "\nTaxonomy\n";
     {
         bool Ordered = EnumerateForceSourceDescriptors().size() == 16;
-        int                    Flows = 0, Accelerations = 0, Dampings = 0;
-        std::vector<uint32_t>  Colours;
-        bool                   DistinctPalette = true;
+        int  Flows = 0, Accelerations = 0, Dampings = 0;
         for (const ForceSourceDescriptor& Descriptor : EnumerateForceSourceDescriptors())
         {
             Flows += Descriptor.Contribution == ForceContribution::Flow;
             Accelerations += Descriptor.Contribution == ForceContribution::Accelerate;
             Dampings += Descriptor.Contribution == ForceContribution::Damp;
             Ordered &= ResolveForceSourceDescriptor(Descriptor.Identifier) == &Descriptor;
-            DistinctPalette &= Descriptor.ColourRgb != 0 && std::find(Colours.begin(), Colours.end(), Descriptor.ColourRgb) == Colours.end();
-            Colours.push_back(Descriptor.ColourRgb);
         }
         Verify(Ordered && Flows == 9 && Accelerations == 6 && Dampings == 1, "16 types: 9 flows, 6 accelerations, 1 damping, each found by its identifier");
-        Verify(DistinctPalette && Colours.size() == 16, "All 16 ForceSource categories have distinct, non-zero debug colours");
         bool Native = true;
         for (uint8_t Value = 1; Value <= 8; ++Value)
             Native &= static_cast<uint8_t>(ResolveForceSourceDescriptor(static_cast<ForceSourceCategory>(Value)).Category) == Value;

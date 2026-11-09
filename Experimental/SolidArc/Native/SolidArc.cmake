@@ -187,10 +187,7 @@ if(SOLIDARC_WINDOWED_HOST AND TARGET glfw)
     target_link_libraries(SolidArc PRIVATE FrontierSolidArcUI glfw)
     if(WIN32)
         set_target_properties(SolidArc PROPERTIES WIN32_EXECUTABLE ON)
-        # ClangCL uses the MSVC frontend but reports CXX_COMPILER_ID=Clang; both need the GUI-subsystem main entry point.
-        if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-            target_link_options(SolidArc PRIVATE /ENTRY:mainCRTStartup)
-        endif()
+        target_link_options(SolidArc PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/ENTRY:mainCRTStartup>)
         # 📝 Version details (Package/SolidArcWorkspace.rc); no icon and no custom manifest. MSVC only, like the
         #    Frontier and TextureWorkspace version resources: the Zig cross-toolchain has no resource compiler.
         if(MSVC)
@@ -198,7 +195,7 @@ if(SOLIDARC_WINDOWED_HOST AND TARGET glfw)
             target_sources(SolidArc PRIVATE "${SOLIDARC_NATIVE}/Package/SolidArcWorkspace.rc")
         endif()
         # 📝 MinGW-style toolchains (the Zig cross-build) keep a console window unless the subsystem is named explicitly.
-        if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        if(NOT MSVC)
             target_link_options(SolidArc PRIVATE "-Wl,--subsystem,windows")
         endif()
     endif()

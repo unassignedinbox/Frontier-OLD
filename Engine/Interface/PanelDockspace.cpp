@@ -95,7 +95,6 @@ bool PanelDockspace::ConfigureOpen(const std::string &Key, bool Open) noexcept
             if (Open && Entry.Specification.Available && !Entry.Specification.Available())
                 return false;
             Entry.Specification.Open = Open;
-            Entry.FocusNextFrame = Open;
             return true;
         }
     return false;
@@ -106,14 +105,6 @@ bool PanelDockspace::QueryOpen(const std::string &Key) const noexcept
     for (const auto &Entry : Entries)
         if (Entry.Specification.Key == Key)
             return Entry.Specification.Open;
-    return false;
-}
-
-bool PanelDockspace::QueryPresented(const std::string &Key) const noexcept
-{
-    for (const auto &Entry : Entries)
-        if (Entry.Specification.Key == Key)
-            return Entry.Presented;
     return false;
 }
 
@@ -128,7 +119,6 @@ bool PanelDockspace::ConfigureDetached(const std::string &Key, bool Detached) no
                 return false;
             Entry.Specification.Open = true;
             Entry.Placement          = Detached ? 1 : -1;
-            Entry.FocusNextFrame     = true;
             return true;
         }
     return false;
@@ -184,21 +174,6 @@ namespace
 // visited *this call*, exactly like EncodeLayout's Capture guard: a healthy tree never reaches either
 // limit, a corrupted one just stops adding buttons to the offending branch instead of recursing
 // forever.
-void FocusDockedWindow(ImGuiWindow *Window)
-{
-    if (Window == nullptr) return;
-    if (ImGuiDockNode *Node = Window->DockNode)
-    {
-        // 📝 FocusWindow deliberately does not select a different dock tab. Queue both IDs so opening a panel
-        //    selects it on the next tab-bar layout even when the existing window was previously hidden.
-        Node->SelectedTabId = Window->TabId;
-        if (Node->TabBar != nullptr)
-            Node->TabBar->SelectedTabId = Node->TabBar->NextSelectedTabId = Window->TabId;
-        Node->LastFocusedNodeId = Node->ID;
-    }
-    ImGui::FocusWindow(Window);
-}
-
 void ConfigureLeafButtons(ImGuiDockNode *Region, bool &Requested, std::set<ImGuiDockNode *> &Visited, int Depth = 0)
 {
     if (!Region || Depth > 32 || !Visited.insert(Region).second)
@@ -322,7 +297,6 @@ void PanelDockspace::ConstructInterface(float Scale)
                 {
                     Entry.Specification.Open = true;
                     Entry.Placement          = -1;
-                    Entry.FocusNextFrame     = true;
                 }
             ImGui::EndPopup();
         }
@@ -358,24 +332,8 @@ void PanelDockspace::ConstructInterface(float Scale)
         if (Entry.Placement < 0)
         {
             Entry.NativeWindow = false;
-            ImGuiDockNode *Target = ImGui::DockBuilderGetCentralNode(Dockspace);
-            ImGuiDockNode *Root = ImGui::DockBuilderGetNode(Dockspace);
-            if (Target == nullptr && Root != nullptr && Root->LastFocusedNodeId != 0)
-                Target = ImGui::DockBuilderGetNode(Root->LastFocusedNodeId);
-            if (Target == nullptr)
-                for (const auto &Candidate : Entries)
-                {
-                    if (&Candidate == &Entry || !Candidate.Specification.Open) continue;
-                    ImGuiWindow *Window = ImGui::FindWindowByName(Candidate.WindowName.c_str());
-                    if (Window != nullptr && Window->DockNode != nullptr && Window->DockNode->IsLeafNode())
-                    {
-                        Target = Window->DockNode;
-                        break;
-                    }
-                }
-            const ImGuiID DockTarget = Target != nullptr ? Target->ID : Dockspace;
-            ImGui::DockBuilderDockWindow(Entry.WindowName.c_str(), DockTarget);
-            ImGui::SetNextWindowDockID(DockTarget, ImGuiCond_Always);
+            ImGui::DockBuilderDockWindow(Entry.WindowName.c_str(), Dockspace);
+            ImGui::SetNextWindowViewport(Main->ID);
         }
         else if (Entry.Placement > 0 && DetachedEnabled &&
                  (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable))
@@ -390,19 +348,9 @@ void PanelDockspace::ConstructInterface(float Scale)
         if (Entry.NativeWindow && DetachedEnabled)
             WindowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;
         ImGui::SetNextWindowClass(&WindowClass);
-        const bool FocusThisFrame = Entry.FocusNextFrame;
-        if (FocusThisFrame) ImGui::SetNextWindowFocus();
         const ImGuiWindowFlags PanelFlags =
             Entry.Specification.WheelScrollOnly ? ImGuiWindowFlags_NoScrollbar : ImGuiWindowFlags_None;
-        const bool BeginVisible = ImGui::Begin(Entry.WindowName.c_str(), &Entry.Specification.Open, PanelFlags);
-        ImGuiWindow *PanelWindow = ImGui::GetCurrentWindow();
-        if (FocusThisFrame)
-        {
-            FocusDockedWindow(PanelWindow);
-            Entry.FocusNextFrame = PanelWindow != nullptr && PanelWindow->DockIsActive && !PanelWindow->DockTabIsVisible;
-        }
-        const bool Presented = BeginVisible && PanelWindow != nullptr && (!PanelWindow->DockIsActive || PanelWindow->DockTabIsVisible);
-        if (Presented)
+        if (ImGui::Begin(Entry.WindowName.c_str(), &Entry.Specification.Open, PanelFlags))
         {
             if (ImGui::BeginPopupContextWindow("Panel hosting"))
             {

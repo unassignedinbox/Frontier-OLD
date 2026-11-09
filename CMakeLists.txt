@@ -122,40 +122,11 @@ add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
 target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1)
 find_package(Threads REQUIRED)
-# 📝 Vehicle physics: Project Drive (GRIT's translation, renamed and proven identical to its source), the soft tyre carcasses
-#    (spring, XPBD lattice, Hex8 finite elements) and the authored specification. No Jolt here; the Physics extension hosts it.
-add_library(FrontierVehicleDynamics STATIC
-    Frontier/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/TyreCarcassLattice.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/TyreCarcassSolid.cpp
-    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSpecification.cpp)
-target_include_directories(FrontierVehicleDynamics PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/Frontier")
-add_library(FrontierFractureDynamics STATIC
-    Frontier/Engine/PhysicalDynamics/FractureDynamics/VoronoiFracture.cpp)
-target_include_directories(FrontierFractureDynamics PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/Frontier")
-target_compile_features(FrontierFractureDynamics PUBLIC cxx_std_20)
-add_library(FrontierFluidDynamics STATIC
-    Frontier/Engine/PhysicalDynamics/FluidDynamics/FluidSceneSpecification.cpp
-    Frontier/Engine/PhysicalDynamics/FluidDynamics/FluidSpaceCodec.cpp
-    Frontier/Engine/PhysicalDynamics/FluidDynamics/PlumeSourceProjection.cpp)
-target_include_directories(FrontierFluidDynamics PUBLIC
-    "${CMAKE_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}/Frontier"
-    "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
-target_compile_features(FrontierFluidDynamics PUBLIC cxx_std_20)
 add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
-    Frontier/Engine/Scene/WorldRegister.cpp
-    Frontier/Engine/Scene/VehicleRecordCodec.cpp
-    Frontier/Engine/Scene/VehicleReadings.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
@@ -178,7 +149,6 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/ParticleEditor/ParticleEditorWorkspace.cpp
     Frontier/Engine/Interface/Controls/ControlTheme.cpp
     Frontier/Engine/Interface/Controls/ControlColumn.cpp
-    Frontier/Engine/Interface/Controls/CurveEditor.cpp
     Frontier/Engine/Interface/Controls/GlyphRun.cpp
     Frontier/Engine/Interface/Controls/GlyphSymbol.cpp
     Frontier/Engine/Interface/Controls/DiagramPen.cpp
@@ -271,8 +241,6 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
     Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
     Frontier/Engine/Interface/Inspectors/GeometryInspector.cpp
-    Frontier/Engine/Interface/Inspectors/VehicleInspector.cpp
-    Frontier/Engine/Interface/Inspectors/TyreInspector.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/TransformSection.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/QuickControlSection.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/ModifierStackSection.cpp
@@ -280,20 +248,12 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/Geometry/FractureSection.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
     Frontier/Engine/Interface/ViewportChromeControls.cpp)
-add_library(FrontierSession STATIC
-    Frontier/Engine/Session/SessionSpace.cpp
-    Frontier/Engine/Rendering/SceneViewport/CameraEffects.cpp
-    Frontier/Engine/Rendering/SceneViewport/VehicleCameraSolver.cpp)
-target_include_directories(FrontierSession PUBLIC
-    "${CMAKE_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}/Frontier")
-
 target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierAuthoringControls FrontierInterfaceExtension FrontierVehicleDynamics FrontierFractureDynamics FrontierFluidDynamics FrontierSession Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
+target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
 
 include(Automation/StageProjectContent.cmake)
 
@@ -305,40 +265,16 @@ target_link_libraries(FrontierRenderingExtension PUBLIC FrontierSceneEditorUI Fr
 add_library(FrontierParticleExtension STATIC
     Frontier/Extensions/Particle/ParticleExtension.cpp)
 target_link_libraries(FrontierParticleExtension PUBLIC FrontierSceneEditorUI FrontierParticleSimulation)
-add_library(FrontierFluidExtension STATIC
-    Frontier/Extensions/Fluid/FluidExtension.cpp)
-target_link_libraries(FrontierFluidExtension PUBLIC FrontierSceneEditorUI FrontierFluidSimulation)
-# 📝 Networking providers: the EOS and Photon SDKs stay optional; without them the adapters compile as honest stubs.
-option(FRONTIER_EOS_SDK "Link the Epic Online Services SDK behind EosAdapter" OFF)
-option(FRONTIER_PHOTON_SDK "Link the Photon Realtime SDK behind PhotonAdapter" OFF)
-set(FRONTIER_EOS_SDK_ROOT "" CACHE PATH "EOS SDK root (Include/, Lib/ or Bin/) when FRONTIER_EOS_SDK is on")
-set(FRONTIER_PHOTON_ROOT "" CACHE PATH "Photon Realtime root (realtime/include) when FRONTIER_PHOTON_SDK is on")
 add_library(FrontierNetworkingExtension STATIC
     Frontier/Extensions/Networking/NetworkingSpace.cpp
-    Frontier/Extensions/Networking/NetworkingTransport.cpp
-    Frontier/Extensions/Networking/NetworkingExtension.cpp
-    Frontier/Extensions/Networking/ReplicationCodec.cpp
-    Frontier/Extensions/Networking/EosAdapter.cpp
-    Frontier/Extensions/Networking/PhotonAdapter.cpp
-    Frontier/Extensions/Networking/NetworkingSession.cpp)
+    Frontier/Extensions/Networking/NetworkingExtension.cpp)
 target_link_libraries(FrontierNetworkingExtension PUBLIC FrontierSceneEditorUI)
-if(FRONTIER_EOS_SDK)
-    target_compile_definitions(FrontierNetworkingExtension PUBLIC FRONTIER_EOS_SDK)
-    target_include_directories(FrontierNetworkingExtension PUBLIC "${FRONTIER_EOS_SDK_ROOT}/Include")
-endif()
-if(FRONTIER_PHOTON_SDK)
-    target_compile_definitions(FrontierNetworkingExtension PUBLIC FRONTIER_PHOTON_SDK)
-    target_include_directories(FrontierNetworkingExtension PUBLIC "${FRONTIER_PHOTON_ROOT}/realtime/include")
-endif()
 # 📝 Physics: JoltPhysics (pinned, Automation/JoltPhysics.cmake) behind PhysicsSpace; only the extension sees Jolt's headers.
 include(Automation/JoltPhysics.cmake)
 frontier_add_jolt()
 add_library(FrontierPhysicsExtension STATIC
     Frontier/Extensions/Physics/JoltExtension.cpp
-    Frontier/Extensions/Physics/JoltAdapter.cpp
     Frontier/Extensions/Physics/PhysicsSpace.cpp
-    Frontier/Extensions/Physics/PhysicsThread.cpp
-    Frontier/Extensions/Physics/PhysicsVehicle.cpp
     Frontier/Extensions/Physics/PhysicsExtension.cpp)
 target_link_libraries(FrontierPhysicsExtension PUBLIC FrontierSceneEditorUI PRIVATE Jolt)
 
@@ -347,15 +283,13 @@ add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestSimulationRecords.cpp
     Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp
-    Projects/Everest/Source/EverestFieldViewport.cpp
-    Projects/Everest/Source/Session/LobbySessionPolicy.cpp
-    Projects/Everest/Source/Session/LobbySession.cpp)
+    Projects/Everest/Source/EverestFieldViewport.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source")
 target_compile_definitions(EverestProjectEditor PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension FrontierFluidExtension FrontierPhysicsExtension FrontierNetworkingExtension)
+target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierRenderingExtension FrontierParticleExtension FrontierPhysicsExtension)
 frontier_stage_project_content(EverestProjectEditor
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -366,28 +300,22 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
-    Frontier/Engine/Scene/WorldRegister.cpp
-    Frontier/Engine/Scene/VehicleRecordCodec.cpp
-    Frontier/Engine/Scene/VehicleReadings.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
-    Frontier/Engine/Interface/ProjectContent.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
     Frontier/Engine/Diagnostics/LogStream.cpp
     Projects/Everest/Source/EverestApplication.cpp
     Projects/Everest/Source/EverestSimulationRecords.cpp
     Projects/Everest/Source/EverestViewportNavigation.cpp
-    Projects/Everest/Source/EverestWorkspace.cpp
-    Projects/Everest/Source/Session/LobbySessionPolicy.cpp
-    Projects/Everest/Source/Session/LobbySession.cpp)
+    Projects/Everest/Source/EverestWorkspace.cpp)
 target_include_directories(EverestProjectRuntime PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_compile_definitions(EverestProjectRuntime PUBLIC FRONTIER_SHIPPING_PROFILE=1 FRONTIER_EDITOR=0)
-target_link_libraries(EverestProjectRuntime PUBLIC FrontierVehicleDynamics FrontierFluidDynamics FrontierSession Threads::Threads)
+target_link_libraries(EverestProjectRuntime PUBLIC Threads::Threads)
 frontier_stage_project_content(EverestProjectRuntime
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -827,13 +755,6 @@ if(BUILD_TESTING)
     add_test(NAME ParticleLibraryValidation COMMAND ParticleLibraryValidation "${CMAKE_SOURCE_DIR}")
     set_tests_properties(ParticleLibraryValidation PROPERTIES TIMEOUT 60)
 
-    # 📝 Deterministic convex Voronoi fracture authoring: closed manifolds, shared cut-token faces, convexity, source-volume closure and bias.
-    add_executable(FractureGeometryValidation
-        Exhibits/Fracture/Code/FractureGeometryValidation.cpp)
-    target_link_libraries(FractureGeometryValidation PRIVATE FrontierFractureDynamics)
-    add_test(NAME FractureGeometryValidation COMMAND FractureGeometryValidation)
-    set_tests_properties(FractureGeometryValidation PROPERTIES TIMEOUT 120)
-
     add_executable(PhysicsSpaceValidation
         Exhibits/Physics/Code/PhysicsSpaceValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)
@@ -841,57 +762,12 @@ if(BUILD_TESTING)
     target_link_libraries(PhysicsSpaceValidation PRIVATE FrontierPhysicsExtension)
     add_test(NAME PhysicsSpaceValidation COMMAND PhysicsSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Physics")
     set_tests_properties(PhysicsSpaceValidation PROPERTIES TIMEOUT 300)
-    add_executable(VehicleImpactEventValidation Exhibits/Physics/Code/VehicleImpactEventValidation.cpp)
-    target_link_libraries(VehicleImpactEventValidation PRIVATE FrontierPhysicsExtension)
-    add_test(NAME VehicleImpactEventValidation COMMAND VehicleImpactEventValidation)
-    set_tests_properties(VehicleImpactEventValidation PROPERTIES TIMEOUT 60)
-
-    # 📝 Vehicle physics: physics checks of the slip, tyre and powertrain models on the Jolt-hosted car, the three tyre carcasses,
-    #    and Project Drive's own suites run against the renamed core (RunProjectDriveIdentity.sh compares them with the source).
-    add_executable(VehicleDynamicsValidation Exhibits/VehiclePhysics/Code/VehicleDynamicsValidation.cpp)
-    target_link_libraries(VehicleDynamicsValidation PRIVATE FrontierPhysicsExtension)
-    add_test(NAME VehicleDynamicsValidation COMMAND VehicleDynamicsValidation "${CMAKE_SOURCE_DIR}/Exhibits/VehiclePhysics")
-    set_tests_properties(VehicleDynamicsValidation PROPERTIES TIMEOUT 900)
-    add_executable(TyreCarcassValidation Exhibits/VehiclePhysics/Code/TyreCarcassValidation.cpp)
-    target_link_libraries(TyreCarcassValidation PRIVATE FrontierPhysicsExtension)
-    add_test(NAME TyreCarcassValidation COMMAND TyreCarcassValidation "${CMAKE_SOURCE_DIR}/Exhibits/VehiclePhysics")
-    set_tests_properties(TyreCarcassValidation PROPERTIES TIMEOUT 900)
-    add_executable(VehicleCurvePackValidation
-        Exhibits/VehiclePhysics/Code/VehicleCurvePackValidation.cpp
-        Frontier/Engine/Scene/VehicleRecordCodec.cpp)
-    target_include_directories(VehicleCurvePackValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
-    target_link_libraries(VehicleCurvePackValidation PRIVATE FrontierVehicleDynamics)
-    add_test(NAME VehicleCurvePackValidation COMMAND VehicleCurvePackValidation)
-    set_tests_properties(VehicleCurvePackValidation PROPERTIES TIMEOUT 60)
-    add_executable(VehicleWorkspaceCapture
-        Exhibits/VehiclePhysics/Code/VehicleWorkspaceCapture.cpp
-        Engine/Render/StbImageWriteImplementation.cpp)
-    target_include_directories(VehicleWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-    target_link_libraries(VehicleWorkspaceCapture PRIVATE EverestProjectEditor)
-    foreach(ProjectDriveSuite VehicleValidation VehicleDrivingValidation AbsSuperchargerValidation AerodynamicsValidation BrakingValidation
-            SuperchargerValidation VehicleInputValidation ProjectDriveTrace)
-        add_executable(ProjectDrive${ProjectDriveSuite} Exhibits/VehiclePhysics/Code/ProjectDrive/${ProjectDriveSuite}.cpp)
-        target_include_directories(ProjectDrive${ProjectDriveSuite} PRIVATE "${CMAKE_SOURCE_DIR}/Frontier/Engine/PhysicalDynamics/Vehicle")
-        target_link_libraries(ProjectDrive${ProjectDriveSuite} PRIVATE FrontierVehicleDynamics)
-        if(NOT MSVC)
-            target_compile_options(ProjectDrive${ProjectDriveSuite} PRIVATE -w)
-        endif()
-        if(NOT ProjectDriveSuite STREQUAL "ProjectDriveTrace")
-            add_test(NAME ProjectDrive${ProjectDriveSuite} COMMAND ProjectDrive${ProjectDriveSuite})
-            set_tests_properties(ProjectDrive${ProjectDriveSuite} PROPERTIES TIMEOUT 300)
-        endif()
-    endforeach()
 
     add_executable(NetworkingSpaceValidation
         Exhibits/Networking/Code/NetworkingSpaceValidation.cpp)
     target_link_libraries(NetworkingSpaceValidation PRIVATE FrontierNetworkingExtension)
     add_test(NAME NetworkingSpaceValidation COMMAND NetworkingSpaceValidation "${CMAKE_SOURCE_DIR}/Exhibits/Networking/Results/NetworkingSpaceValidation.md")
     set_tests_properties(NetworkingSpaceValidation PROPERTIES TIMEOUT 60)
-    add_executable(NetworkingProviderValidation
-        Exhibits/Networking/Code/NetworkingProviderValidation.cpp)
-    target_link_libraries(NetworkingProviderValidation PRIVATE FrontierNetworkingExtension)
-    add_test(NAME NetworkingProviderValidation COMMAND NetworkingProviderValidation "${CMAKE_SOURCE_DIR}/Exhibits/Networking/Results/NetworkingProviderValidation.md")
-    set_tests_properties(NetworkingProviderValidation PROPERTIES TIMEOUT 60)
 
     add_executable(ParticleSpaceValidation
         Exhibits/ParticleEditor/Code/ParticleSpaceValidation.cpp)
@@ -958,19 +834,6 @@ if(BUILD_TESTING)
     target_include_directories(ParticleEditorCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
     target_link_libraries(ParticleEditorCapture PRIVATE EverestProjectEditor)
 
-    add_executable(FluidDynamicsValidation
-        Exhibits/FluidEditor/Code/FluidDynamicsValidation.cpp)
-    target_link_libraries(FluidDynamicsValidation PRIVATE EverestProjectEditor)
-    add_test(NAME FluidDynamicsValidation COMMAND FluidDynamicsValidation
-        "${CMAKE_SOURCE_DIR}/Experimental/Fluid/Samples"
-        "${CMAKE_SOURCE_DIR}/Projects/Everest/Content/FluidSpaces")
-
-    add_executable(FluidEditorCapture
-        Exhibits/FluidEditor/Code/FluidEditorCapture.cpp
-        Engine/Render/StbImageWriteImplementation.cpp)
-    target_include_directories(FluidEditorCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-    target_link_libraries(FluidEditorCapture PRIVATE EverestProjectEditor)
-
     # 📝 The scene objects in the workspace: the geometry groups, five geometry inspector pages, the viewport before and after edits.
     add_executable(SceneGeometryCapture
         Exhibits/SceneViewport/Code/SceneGeometryCapture.cpp
@@ -983,74 +846,13 @@ if(BUILD_TESTING)
     target_link_libraries(EverestShippingValidation PRIVATE EverestProjectRuntime)
     add_test(NAME EverestShippingValidation COMMAND EverestShippingValidation
         "${CMAKE_SOURCE_DIR}/Projects/Everest")
-
-    # 📝 Studio Lobby startup, dynamic 1-to-5 vehicle roster, Lobby-only cinematic camera, rig/route transitions & GPU captures.
-    add_executable(LobbySessionValidation
-        Exhibits/LobbySession/Code/LobbySessionValidation.cpp)
-    target_link_libraries(LobbySessionValidation PRIVATE EverestProjectEditor)
-    add_test(NAME LobbySessionValidation COMMAND LobbySessionValidation
-        "${CMAKE_SOURCE_DIR}/EngineContent"
-        "${CMAKE_SOURCE_DIR}/Projects/Everest"
-        "${CMAKE_BINARY_DIR}/LobbySessionValidation.md")
-    set_tests_properties(LobbySessionValidation PROPERTIES TIMEOUT 120)
-
-    add_executable(LobbyWorkspaceCapture
-        Exhibits/LobbySession/Code/LobbyWorkspaceCapture.cpp
-        Engine/Render/StbImageWriteImplementation.cpp)
-    target_include_directories(LobbyWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-    target_link_libraries(LobbyWorkspaceCapture PRIVATE EverestProjectEditor)
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/AnalyticIlluminationRendering.cmake)
 include(Automation/ParticleSimulationRendering.cmake)
-include(Automation/FluidSimulationRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)
-
-# Standalone Vulkan Everest game runtime (FRONTIER_EDITOR == 0, GLFW_NO_API, zero OpenGL).
-add_executable(Everest
-    Projects/Everest/Source/EverestRuntimeMain.cpp
-    Frontier/Extensions/Rendering/RenderingExtension.cpp
-    Frontier/Extensions/Rendering/SceneGeometryOccupancy.cpp
-    Frontier/Extensions/Physics/JoltExtension.cpp
-    Frontier/Extensions/Physics/JoltAdapter.cpp
-    Frontier/Extensions/Physics/PhysicsSpace.cpp
-    Frontier/Extensions/Physics/PhysicsThread.cpp
-    Frontier/Extensions/Physics/PhysicsVehicle.cpp
-    Frontier/Extensions/Physics/PhysicsExtension.cpp
-    Frontier/Extensions/Interface/ViewportTexture.cpp
-    Engine/Interface/WindowsApplication.cpp
-    Engine/Interface/VulkanPresentation.cpp
-    "${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp"
-    "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp")
-target_include_directories(Everest PRIVATE
-    "${IMGUI_ROOT}/backends"
-    "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
-target_compile_definitions(Everest PRIVATE
-    FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE
-    FRONTIER_BUILD_COMMIT=\"${FRONTIER_BUILD_COMMIT}\"
-    FRONTIER_BUILD_REVISION="${FRONTIER_BUILD_REVISION}")
-target_link_libraries(Everest PRIVATE EverestProjectRuntime FrontierSceneViewport FrontierInterface Jolt glfw)
-if(WIN32)
-    target_compile_definitions(Everest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(Everest PRIVATE comdlg32 shell32 ole32)
-    if(MSVC)
-        target_link_options(Everest PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
-    endif()
-endif()
-if(TARGET FrontierGlobalIlluminationShaders)
-    add_dependencies(Everest FrontierGlobalIlluminationShaders)
-endif()
-if(TARGET FrontierEnvironmentShaders)
-    add_dependencies(Everest FrontierEnvironmentShaders)
-endif()
-if(TARGET FrontierVirtualizedGeometryShaders)
-    add_dependencies(Everest FrontierVirtualizedGeometryShaders)
-endif()
-if(TARGET FrontierAnalyticIlluminationShaders)
-    add_dependencies(Everest FrontierAnalyticIlluminationShaders)
-endif()
 
 # SolidArc CAD workspace: reuse shared Frontier interface, dependencies and browser.
 option(FRONTIER_BUILD_SOLIDARC "Build the integrated SolidArc CAD workspace" ON)

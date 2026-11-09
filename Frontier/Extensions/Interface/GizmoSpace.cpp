@@ -75,8 +75,8 @@ constexpr uint8_t QuadHoverAlpha = 140;                                         
 // Unit vector perpendicular to Direction (any).
 [[nodiscard]] Vector3 Perpendicular(Vector3 Direction)
 {
-    const Vector3 ReferenceAxis = std::abs(Direction.X) < 0.9 ? Vector3{ 1.0, 0.0, 0.0 } : Vector3{ 0.0, 1.0, 0.0 };
-    return Normalize(Cross(Direction, ReferenceAxis));
+    const Vector3 Helper = std::abs(Direction.X) < 0.9 ? Vector3{ 1.0, 0.0, 0.0 } : Vector3{ 0.0, 1.0, 0.0 };
+    return Normalize(Cross(Direction, Helper));
 }
 
 class GizmoBuilder

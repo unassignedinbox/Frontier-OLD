@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                         DIAGRAMCONTROLS.CPP
 ==========================================================================================================================================*/
-// 🧩 Generic, reusable analytical plotting, polar dial, spectrum ramp, disc row, and dockable editor frame controls.
+// 🧩 Generic, reusable analytical plotting, polar dial, spectrum ramp, disc row, and modal editor frame controls.
 
 #include "Engine/Interface/DiagramControls.h"
 
@@ -445,100 +445,91 @@ void DiagramControls::ConstructTimeSeriesPlot(const InspectorPalette& Palette,
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                                    9. EDITOR WINDOW FRAME
+//                                                    9. EDITOR MODAL FRAME
 //------------------------------------------------------------------------------------------------------------------------
 
-void DiagramControls::ConstructEditorWindowFrame(const char*                                             WindowTitle,
-                                                 const char*                                             GlyphName,
-                                                 RecordToken                                             Token,
-                                                 RecordInspector&                                        Inspector,
-                                                 const std::function<void(ImDrawList*, ImVec2, ImVec2)>& CanvasCallback)
+void DiagramControls::ConstructEditorModalFrame(const char*                                             WindowTitle,
+                                                const char*                                             GlyphName,
+                                                RecordToken                                             Token,
+                                                RecordInspector&                                        Inspector,
+                                                const std::function<void(ImDrawList*, ImVec2, ImVec2)>& CanvasCallback)
 {
-    SceneDirectory&        Directory = SceneDirectory::Instance();
-    InspectorRuntime&      Runtime   = InspectorRuntime::Instance();
-    const InspectorPalette Palette   = InspectorPalette::Resolve();
-    const EditorTypefaces  Faces     = EditorTypefaces::Resolve();
-    const ImGuiViewport*   MainVp    = ImGui::GetMainViewport();
-    const float            Scale     = Runtime.ResolveInterfaceScale();
-    const ImVec2           Margin(52.0f * Scale, 46.0f * Scale);
-    const ImVec2           FirstPos(MainVp->WorkPos.x + Margin.x, MainVp->WorkPos.y + Margin.y);
-    const ImVec2           FirstSize(std::max(640.0f * Scale, MainVp->WorkSize.x - Margin.x * 2.0f),
-                                     std::max(420.0f * Scale, MainVp->WorkSize.y - Margin.y * 2.0f));
-    char                   WindowName[192];
-    std::snprintf(WindowName, sizeof(WindowName), "%s###FrontierDomainEditor", WindowTitle);
+    SceneDirectory&         Directory = SceneDirectory::Instance();
+    InspectorRuntime&       Runtime   = InspectorRuntime::Instance();
+    const InspectorPalette  Palette   = InspectorPalette::Resolve();
+    const EditorTypefaces   Faces     = EditorTypefaces::Resolve();
+    const ImGuiViewport*    MainVp    = ImGui::GetMainViewport();
+    const ImVec2            Margin(52.0f, 46.0f);
+    const ImVec2            ModalPos(MainVp->WorkPos.x + Margin.x, MainVp->WorkPos.y + Margin.y);
+    const ImVec2            ModalSize(std::max(640.0f, MainVp->WorkSize.x - Margin.x * 2.0f),
+                                      std::max(420.0f, MainVp->WorkSize.y - Margin.y * 2.0f));
 
-    ImGui::SetNextWindowPos(FirstPos, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(FirstSize, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowViewport(MainVp->ID);
+    ImGui::SetNextWindowPos(ModalPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ModalSize, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16.0f * Scale);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Palette.ColumnBg));
-    bool Open = true;
-    const bool Shown = ImGui::Begin(WindowName, &Open, ImGuiWindowFlags_NoCollapse);
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar(3);
-
-    bool Closing = false;
-    if (Shown)
+    if (ImGui::Begin("##DomainEditorModal", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking))
     {
         ImDrawList*       DrawList   = ImGui::GetWindowDrawList();
         const std::string RecordName = Directory.QueryName(Token);
         const uint64_t    Revision   = Inspector.QueryRevision();
-        const ImVec2      HeaderMin  = ImGui::GetCursorScreenPos();
-        const ImVec2      Available  = ImGui::GetContentRegionAvail();
-        const float       Header     = 50.0f * Scale;
-        const ImVec2      HeaderMax(HeaderMin.x + Available.x, HeaderMin.y + Header);
 
-        DrawList->AddRectFilled(HeaderMin, HeaderMax, Palette.InspectorTopBg);
-        DrawList->AddLine(ImVec2(HeaderMin.x, HeaderMax.y), ImVec2(HeaderMax.x, HeaderMax.y), Palette.EdgeBorder, 1.0f * Scale);
-        ConstructEditorGlyph(DrawList, ImVec2(HeaderMin.x + 24.0f * Scale, HeaderMin.y + 25.0f * Scale), 8.0f * Scale,
-                             Palette.ThemeAccent, GlyphName, 1.5f * Scale);
-        DrawList->AddText(Faces.Medium, 14.0f * Scale, ImVec2(HeaderMin.x + 42.0f * Scale, HeaderMin.y + 17.5f * Scale),
+        DrawList->AddRect(ModalPos, ImVec2(ModalPos.x + ModalSize.x, ModalPos.y + ModalSize.y), Palette.EdgeBorder, 16.0f, 0, 1.5f);
+        DrawList->AddRectFilled(ModalPos, ImVec2(ModalPos.x + ModalSize.x, ModalPos.y + 50.0f),
+                                Palette.InspectorTopBg, 16.0f, ImDrawFlags_RoundCornersTop);
+        DrawList->AddLine(ImVec2(ModalPos.x, ModalPos.y + 50.0f),
+                          ImVec2(ModalPos.x + ModalSize.x, ModalPos.y + 50.0f),
+                          Palette.EdgeBorder, 1.0f);
+
+        ConstructEditorGlyph(DrawList, ImVec2(ModalPos.x + 24.0f, ModalPos.y + 25.0f), 8.0f,
+                             Palette.ThemeAccent, GlyphName, 1.5f);
+        DrawList->AddText(Faces.Medium, 14.0f, ImVec2(ModalPos.x + 42.0f, ModalPos.y + 17.5f),
                           Palette.TextPrimary, WindowTitle);
 
-        char SyncReadout[160] = {};
+        char SyncReadout[128] = {};
         std::snprintf(SyncReadout, sizeof(SyncReadout), "LIVE CONFIGURATION · %s · REV #%llu",
                       RecordName.c_str(), static_cast<unsigned long long>(Revision));
-        const float  CloseW      = 92.0f * Scale;
-        const ImVec2 CloseMin(HeaderMax.x - CloseW - 14.0f * Scale, HeaderMin.y + 10.0f * Scale);
-        const float  ReadoutX    = HeaderMin.x + 300.0f * Scale;
-        const float  ReadoutRight = CloseMin.x - 16.0f * Scale;
-        if (ReadoutRight > ReadoutX + 100.0f * Scale)
-            DrawList->AddText(Faces.Monospace, 10.5f * Scale, ImVec2(ReadoutX, HeaderMin.y + 19.5f * Scale), Palette.LiveGreen, SyncReadout);
+        DrawList->AddText(Faces.Monospace, 10.5f, ImVec2(ModalPos.x + 360.0f, ModalPos.y + 19.5f),
+                          Palette.LiveGreen, SyncReadout);
 
+        const float  CloseW = 92.0f;
+        const ImVec2 CloseMin(ModalPos.x + ModalSize.x - CloseW - 14.0f, ModalPos.y + 10.0f);
         ImGui::SetCursorScreenPos(CloseMin);
-        Closing = ImGui::InvisibleButton("##CloseDomainEditorBtn", ImVec2(CloseW, 30.0f * Scale));
+        if (ImGui::InvisibleButton("##CloseDomainEditorBtn", ImVec2(CloseW, 30.0f)))
+        {
+            Runtime.CloseActiveEditor();
+        }
         const bool CloseHover = ImGui::IsItemHovered();
-        DrawList->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale),
-                                CloseHover ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f * Scale);
-        DrawList->AddRect(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Palette.InsetFieldBorder, 9.0f * Scale);
-        DrawList->AddText(Faces.Medium, 11.0f * Scale, ImVec2(CloseMin.x + 15.0f * Scale, CloseMin.y + 9.0f * Scale),
+        DrawList->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f),
+                                CloseHover ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f);
+        DrawList->AddRect(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f), Palette.InsetFieldBorder, 9.0f);
+        DrawList->AddText(Faces.Medium, 11.0f, ImVec2(CloseMin.x + 15.0f, CloseMin.y + 9.0f),
                           Palette.TextPrimary, "Close Editor");
 
-        const float  BodyTop    = HeaderMax.y;
-        const float  BodyH      = std::max(0.0f, Available.y - Header - 12.0f * Scale);
-        const float  InspectorW = std::clamp(Available.x * 0.36f, 240.0f * Scale, 390.0f * Scale);
-        const float  CanvasW    = std::max(180.0f * Scale, Available.x - InspectorW - 36.0f * Scale);
-        const ImVec2 CanvasMin(HeaderMin.x + 16.0f * Scale, BodyTop + 16.0f * Scale);
-        const ImVec2 CanvasMax(CanvasMin.x + CanvasW, BodyTop + BodyH);
+        const float  BodyTop    = ModalPos.y + 50.0f;
+        const float  BodyH      = ModalSize.y - 50.0f;
+        const float  InspectorW = 390.0f;
+        const float  CanvasW    = std::max(220.0f, ModalSize.x - InspectorW - 36.0f);
+        const ImVec2 CanvasMin(ModalPos.x + 16.0f, BodyTop + 16.0f);
+        const ImVec2 CanvasMax(ModalPos.x + 16.0f + CanvasW, BodyTop + BodyH - 16.0f);
 
-        DrawList->AddRectFilled(CanvasMin, CanvasMax, Palette.InsetFieldBg, 14.0f * Scale);
-        DrawList->AddRect(CanvasMin, CanvasMax, Palette.EdgeBorder, 14.0f * Scale);
+        DrawList->AddRectFilled(CanvasMin, CanvasMax, Palette.InsetFieldBg, 14.0f);
+        DrawList->AddRect(CanvasMin, CanvasMax, Palette.EdgeBorder, 14.0f);
         const ImU32 GridInk = ModulateSpectrumAlpha(Palette.EdgeBorder, 0.45f);
         for (int Line = 1; Line < 8; ++Line)
         {
             const float X = CanvasMin.x + ((CanvasMax.x - CanvasMin.x) / 8.0f) * static_cast<float>(Line);
             const float Y = CanvasMin.y + ((CanvasMax.y - CanvasMin.y) / 8.0f) * static_cast<float>(Line);
-            DrawList->AddLine(ImVec2(X, CanvasMin.y + 38.0f * Scale), ImVec2(X, CanvasMax.y - 12.0f * Scale), GridInk, 1.0f * Scale);
-            DrawList->AddLine(ImVec2(CanvasMin.x + 12.0f * Scale, Y), ImVec2(CanvasMax.x - 12.0f * Scale, Y), GridInk, 1.0f * Scale);
+            DrawList->AddLine(ImVec2(X, CanvasMin.y + 38.0f), ImVec2(X, CanvasMax.y - 12.0f), GridInk, 1.0f);
+            DrawList->AddLine(ImVec2(CanvasMin.x + 12.0f, Y), ImVec2(CanvasMax.x - 12.0f, Y), GridInk, 1.0f);
         }
-        DrawList->AddText(Faces.Monospace, 10.0f * Scale, ImVec2(CanvasMin.x + 14.0f * Scale, CanvasMin.y + 12.0f * Scale),
-                          Palette.TextMuted, "GEOMETRY PREVIEW · NOT A RUNTIME FRACTURE BAKE");
         CanvasCallback(DrawList, CanvasMin, CanvasMax);
 
-        ImGui::SetCursorScreenPos(ImVec2(HeaderMin.x + Available.x - InspectorW, BodyTop));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f * Scale, 16.0f * Scale));
+        ImGui::SetCursorScreenPos(ImVec2(ModalPos.x + ModalSize.x - InspectorW, BodyTop));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 16.0f));
         if (ImGui::BeginChild("##DomainEditorParameters", ImVec2(InspectorW, BodyH), true))
         {
             InspectorControls::ConstructSectionDivider(Palette, Faces, "LIVE PARAMETERS", "InspectorRuntime");
@@ -548,7 +539,8 @@ void DiagramControls::ConstructEditorWindowFrame(const char*                    
         ImGui::PopStyleVar();
     }
     ImGui::End();
-    if (Closing || !Open) Runtime.CloseActiveEditor();
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
 }
 
 } // namespace Frontier

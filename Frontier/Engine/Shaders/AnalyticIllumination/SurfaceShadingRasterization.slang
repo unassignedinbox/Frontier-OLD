@@ -64,7 +64,6 @@ struct ShadingVarying
     [[vk::location(0)]] float3 World : LOCATION0;
     [[vk::location(1)]] float3 Normal : LOCATION1;
     [[vk::location(2)]] nointerpolation uint Family : LOCATION2;
-    [[vk::location(3)]] nointerpolation uint Vehicle : LOCATION3;
 };
 
 [shader("vertex")]
@@ -72,17 +71,14 @@ ShadingVarying ShadingVertex([[vk::location(0)]] float3 Position : LOCATION0, [[
                              [[vk::location(2)]] float3 Normal : LOCATION2, [[vk::location(3)]] uint OccupantOffset : LOCATION3,
                              [[vk::location(4)]] uint OccupantIndex : LOCATION4)
 {
-    let Index    = OccupantIndex + OccupantOffset;
-    let Occupant = Occupants[Index];
-    let Moved    = DeformAnalyticVehicleVertex(Index, Family, Position, Normal);
-    let World    = mul(float4(Moved.Position, 1.0), Occupant.LocalToWorld);
+    let Occupant = Occupants[OccupantIndex + OccupantOffset];
+    let World = mul(float4(Position, 1.0), Occupant.LocalToWorld);
     var Varying : ShadingVarying = {};
     Varying.Position = mul(World, Analytic.ViewProjection);
     Varying.World    = World.xyz;
-    Varying.Normal   = mul(float4(Moved.Normal, 0.0), Occupant.LocalToWorld).xyz;
+    Varying.Normal   = mul(float4(Normal, 0.0), Occupant.LocalToWorld).xyz;
     let Override     = Occupant.MaterialOverride;
     Varying.Family   = Override == NoFamilyOverride ? Family : ((Override & FamilyBlockBit) != 0u ? (Override & ~FamilyBlockBit) + Family : Override);
-    Varying.Vehicle  = SelectBranch(0u, 1u, Index < VehicleOccupantCount);
     return Varying;
 }
 
@@ -108,25 +104,10 @@ float SampleSolarVisibility(float3 World, float SlopeBias)
 [shader("fragment")]
 float4 ShadingFragment(ShadingVarying Varying) : SV_Target0
 {
+    let Material = Materials[Varying.Family];
     let View = normalize(Analytic.Camera.xyz - Varying.World);
     var Normal = normalize(Varying.Normal);
     if (dot(Normal, View) < 0.0) { Normal = -Normal; }   // two-sided: thin props are lit from the side they are seen from
-    if (Varying.Vehicle == 1u && Varying.Family == VehicleGlassFamily && VehicleState[0].Cabin.y > 0.5)
-    {
-        // 📝 Glazing in closed form: screen-door cabin view at normal incidence, crisp sky Fresnel reflection at grazing angles.
-        let NdotV      = saturate(dot(Normal, View));
-        let GlassRefl  = 0.06 + 0.94 * pow(1.0 - NdotV, 4.0);
-        let PixelHash  = frac(sin(dot(floor(Varying.Position.xy), float2(12.9898, 78.233))) * 43758.5453);
-        if (PixelHash > clamp(GlassRefl * 2.2 + 0.18, 0.20, 0.92))
-        {
-            discard;
-        }
-        let Reflected  = reflect(-View, Normal);
-        let GlazeTint  = float3(0.05, 0.07, 0.09) * Analytic.SkyHorizon.rgb;
-        let GlazeSky   = ResolveSkyRadiance(Reflected) * GlassRefl + GlazeTint;
-        return float4(ProjectFilmic(GlazeSky * Analytic.Camera.w), 1.0);
-    }
-    let Material = Materials[Varying.Family];
     let Light   = Analytic.Sun.xyz;
     let Half    = normalize(Light + View);
     let NdotL   = saturate(dot(Normal, Light));

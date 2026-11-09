@@ -32,9 +32,6 @@ ArchiveSets = {
     'ParticleSimulation': ('Frontier/Engine/Shaders/ParticleSimulation', ['ParticleSimulation', 'WindLattice', 'ParticleRasterization',
                                                                           'LightFibreRasterization', 'LensingRasterization'],
                            ['Frontier/Engine/Shaders/GlobalIllumination']),
-    # 📝 The Fluid editor's units (Experimental/Fluid 3D Eulerian gas & combustion solver + volumetric raymarch + overlays).
-    'FluidSimulation': ('Frontier/Engine/Shaders/FluidSimulation', ['FluidSimulation', 'FluidRaymarch', 'FluidOverlayRasterization'],
-                        ['Frontier/Engine/Shaders/GlobalIllumination']),
     'Environment': ('Frontier/Engine/Shaders', ['AtmosphereScattering', 'AtmosphereProjection', 'VisibilityProjection',
                                                  'PlanetaryProjection', 'CloudShadowProjection', 'VolumetricClouds', 'FogSpace',
                                                  'OpticalLensFlare', 'PreviewRaster']),

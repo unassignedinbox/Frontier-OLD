@@ -709,14 +709,8 @@ void ParticleEditorWorkspace::ConstructViewport(ImDrawList* Ink, ImVec2 Minimum,
         Capacity += ResolveParticleCapacity(Effect.Parameters);
         if (const ParticleEffectCensus* Census = ParticleEditorPages::ResolveCensus(Image, Effect.Token)) Alive += Census->Alive;
     }
-    char Hud[320];
-    if (Image.LightningSegmentCount || Image.LensingHoleCount || Image.HeatShimmerCount || Image.ShardRasterEffectCount)
-        std::snprintf(Hud, sizeof(Hud), "PARTICLES %u / %u   RATE %.0f fps   GPU %.2f ms   t %.1f s   LIGHTNING %u SEG · LENS %u · SHIMMER %u · SHARD %u / %u SLOTS",
-                      Alive, Capacity, Space.RefreshRate, Image.RefreshMilliseconds, Space.TimeSeconds, Image.LightningSegmentCount,
-                      Image.LensingHoleCount, Image.HeatShimmerCount, Image.ShardRasterEffectCount, Image.ShardRasterParticleCapacity);
-    else
-        std::snprintf(Hud, sizeof(Hud), "PARTICLES %u / %u   RATE %.0f fps   GPU %.2f ms   t %.1f s", Alive, Capacity, Space.RefreshRate,
-                      Image.RefreshMilliseconds, Space.TimeSeconds);
+    char Hud[160];
+    std::snprintf(Hud, sizeof(Hud), "PARTICLES %u / %u   RATE %.0f fps   GPU %.2f ms   t %.1f s", Alive, Capacity, Space.RefreshRate, Image.RefreshMilliseconds, Space.TimeSeconds);
     const ImVec2 HudAt(StageMin.x + 12.0f * Scale, StageMin.y + 12.0f * Scale);
     const float  HudW = Style.Measure(Style.Faces.Monospace, 10.5f, Hud) + 20.0f * Scale;
     Ink->AddRectFilled(HudAt, ImVec2(HudAt.x + HudW, HudAt.y + 26.0f * Scale), IM_COL32(12, 13, 17, 215), 7.0f * Scale);

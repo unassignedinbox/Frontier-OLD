@@ -53,13 +53,6 @@ ImU32 ContributionColour(ForceContribution Contribution, float Alpha) noexcept
     return IM_COL32((Value >> 16) & 255, (Value >> 8) & 255, Value & 255, static_cast<int>(std::clamp(Alpha, 0.0f, 1.0f) * 255.0f));
 }
 
-ImU32 SourceColour(const FieldSourceOutline& Source, float Alpha) noexcept
-{
-    if (Source.ColourRgb == 0) return ContributionColour(Source.Contribution, Alpha);
-    return IM_COL32((Source.ColourRgb >> 16) & 255, (Source.ColourRgb >> 8) & 255, Source.ColourRgb & 255,
-                    static_cast<int>(std::clamp(Alpha, 0.0f, 1.0f) * 255.0f));
-}
-
 ImU32 WithAlpha(ImU32 Colour, float Alpha) noexcept
 {
     const uint32_t Base = (Colour >> IM_COL32_A_SHIFT) & 255u;
@@ -881,20 +874,6 @@ std::vector<std::array<double, 3>> CircleOutline(double X, double Y, double Z, d
     return Points;
 }
 
-std::vector<std::array<double, 3>> CirclePlaneOutline(double X, double Y, double Z, double Radius, const std::array<double, 3>& AxisU,
-                                                      const std::array<double, 3>& AxisV, int Segments)
-{
-    std::vector<std::array<double, 3>> Points;
-    Points.reserve(static_cast<size_t>(Segments) + 1);
-    for (int Index = 0; Index <= Segments; ++Index)
-    {
-        const double Angle = Index / static_cast<double>(Segments) * π * 2.0;
-        const double U = std::cos(Angle) * Radius, V = std::sin(Angle) * Radius;
-        Points.push_back({X + AxisU[0] * U + AxisV[0] * V, Y + AxisU[1] * U + AxisV[1] * V, Z + AxisU[2] * U + AxisV[2] * V});
-    }
-    return Points;
-}
-
 std::vector<std::array<double, 3>> BoxOutline(const FieldSourceOutline& Source, double Y)
 {
     const double Turn = Source.RotationDegrees * π / 180.0, Cosine = std::cos(Turn), Sine = std::sin(Turn);
@@ -921,72 +900,30 @@ void ForceFieldVisualization::RenderSources(ImDrawList* Ink, const EditorTypefac
     {
         const float Alpha = static_cast<float>((0.45 + 0.55 * std::min(1.0, Source.Active + (Source.Selected ? 0.4 : 0.0))) *
                                                (Source.Dim && !Source.Selected ? 0.4 : 1.0));
-        const ImU32 Colour = SourceColour(Source, Alpha);
+        const ImU32 Colour = ContributionColour(Source.Contribution, Alpha);
         const float Width  = (Source.Selected ? 2.0f : 1.2f) * Scale;
         const float DashOn = Source.Active > 0.01 ? 0.0f : 5.0f * Scale;
-        const float GlowAlpha = Source.Selected ? 0.34f : Source.Dim ? 0.10f : 0.22f;
-        auto StrokeSource = [&](const std::vector<std::array<double, 3>>& Path, bool Close, ImU32 PathColour, float PathWidth, float PathDashOn,
-                                float PathDashOff) {
-            StrokeWorldPath(Ink, Path, Close, WithAlpha(PathColour, GlowAlpha), PathWidth * 3.2f, PathDashOn, PathDashOff);
-            StrokeWorldPath(Ink, Path, Close, PathColour, PathWidth, PathDashOn, PathDashOff);
-        };
         if (Source.Track.size() > 1)
         {
             std::vector<std::array<double, 3>> Track;
             for (const auto& Point : Source.Track) Track.push_back({Point[0], SliceY, Point[1]});
-            StrokeSource(Track, false, Colour, Scale, 2.0f * Scale, 5.0f * Scale);
+            StrokeWorldPath(Ink, Track, false, Colour, Scale, 2.0f * Scale, 5.0f * Scale);
         }
-        if (Source.Shape == FieldOutlineShape::Box) StrokeSource(BoxOutline(Source, SliceY), true, Colour, Width, DashOn, DashOn);
+        if (Source.Shape == FieldOutlineShape::Box) StrokeWorldPath(Ink, BoxOutline(Source, SliceY), true, Colour, Width, DashOn, DashOn);
         else if (Source.Shape == FieldOutlineShape::Circle)
         {
             const double OnScreen = PixelsPerMetre > 0 ? Source.Radius * PixelsPerMetre : 99.0;
-            if (OnScreen >= 3.0) StrokeSource(CircleOutline(Source.X, SliceY, Source.Z, Source.Radius, 72), true, Colour, Width, DashOn, DashOn);
+            if (OnScreen >= 3.0) StrokeWorldPath(Ink, CircleOutline(Source.X, SliceY, Source.Z, Source.Radius, 72), true, Colour, Width, DashOn, DashOn);
             if (Source.InnerRadius > 0 && (PixelsPerMetre <= 0 || Source.InnerRadius * PixelsPerMetre >= 3.0))
-                StrokeSource(CircleOutline(Source.X, SliceY, Source.Z, Source.InnerRadius, 48), true, WithAlpha(Colour, 0.6f), Width, 2.0f * Scale,
-                             3.0f * Scale);
+                StrokeWorldPath(Ink, CircleOutline(Source.X, SliceY, Source.Z, Source.InnerRadius, 48), true, WithAlpha(Colour, 0.6f), Width, 2.0f * Scale,
+                                3.0f * Scale);
         }
-        if (View.Mode == FieldViewMode::Oblique || View.Mode == FieldViewMode::Camera)
+        if (View.Mode == FieldViewMode::Oblique && Source.Height > 0)
         {
-            if (Source.Height > 0.0)
-            {
-                const double TopY = Source.BaseY + Source.Height;
-                if (Source.Shape == FieldOutlineShape::Box)
-                {
-                    const auto Bottom = BoxOutline(Source, Source.BaseY), Top = BoxOutline(Source, TopY);
-                    const ImU32 Edge = WithAlpha(Colour, 0.78f);
-                    StrokeSource(Bottom, true, Colour, Width, 0.0f, 0.0f);
-                    StrokeSource(Top, true, Edge, Width, 0.0f, 0.0f);
-                    for (size_t Corner = 0; Corner < Bottom.size(); ++Corner)
-                        StrokeSource({Bottom[Corner], Top[Corner]}, false, Edge, Width, 0.0f, 0.0f);
-                }
-                else if (Source.Shape == FieldOutlineShape::Circle)
-                {
-                    const double TopRadius = Source.TopRadius > 0.0 ? Source.TopRadius : Source.Radius;
-                    const auto   Bottom = CircleOutline(Source.X, Source.BaseY, Source.Z, Source.Radius, 48);
-                    const auto   Top = CircleOutline(Source.X, TopY, Source.Z, TopRadius, 48);
-                    const ImU32  Edge = WithAlpha(Colour, 0.78f);
-                    StrokeSource(Bottom, true, Colour, Width, 0.0f, 0.0f);
-                    StrokeSource(Top, true, Edge, Width, 0.0f, 0.0f);
-                    for (int Rib = 0; Rib < 8; ++Rib)
-                    {
-                        const double Angle = Rib / 8.0 * π * 2.0;
-                        StrokeSource({{Source.X + std::cos(Angle) * Source.Radius, Source.BaseY, Source.Z + std::sin(Angle) * Source.Radius},
-                                      {Source.X + std::cos(Angle) * TopRadius, TopY, Source.Z + std::sin(Angle) * TopRadius}},
-                                     false, Edge, Width, 0.0f, 0.0f);
-                    }
-                    if (Source.InnerRadius > 0.0)
-                        StrokeSource(CircleOutline(Source.X, Source.BaseY, Source.Z, Source.InnerRadius, 40), true, WithAlpha(Colour, 0.55f),
-                                     Width * 0.8f, 2.0f * Scale, 3.0f * Scale);
-                }
-            }
-            else if (Source.Shape == FieldOutlineShape::Circle && Source.Radius > 0.0)
-            {
-                constexpr std::array<double, 3> AxisX{1.0, 0.0, 0.0}, AxisY{0.0, 1.0, 0.0}, AxisZ{0.0, 0.0, 1.0};
-                const ImU32 Edge = WithAlpha(Colour, 0.62f);
-                StrokeSource(CircleOutline(Source.X, Source.Y, Source.Z, Source.Radius, 64), true, Edge, Width, 0.0f, 0.0f);
-                StrokeSource(CirclePlaneOutline(Source.X, Source.Y, Source.Z, Source.Radius, AxisX, AxisY, 64), true, Edge, Width, 0.0f, 0.0f);
-                StrokeSource(CirclePlaneOutline(Source.X, Source.Y, Source.Z, Source.Radius, AxisZ, AxisY, 64), true, Edge, Width, 0.0f, 0.0f);
-            }
+            StrokeWorldPath(Ink, {{Source.X, Source.Y, Source.Z}, {Source.X, Source.Y + Source.Height, Source.Z}}, false, Colour, 1.4f * Scale);
+            if (Source.Radius * PixelsPerMetre >= 3.0)
+                StrokeWorldPath(Ink, CircleOutline(Source.X, Source.Y + Source.Height, Source.Z, std::max(Source.InnerRadius, Source.Radius * 0.3), 48), true,
+                                WithAlpha(Colour, 0.5f), 1.4f * Scale);
         }
         ImVec2 Centre;
         if (!Project(Source.X, SliceY, Source.Z, Centre)) continue;
@@ -998,17 +935,13 @@ void ForceFieldVisualization::RenderSources(ImDrawList* Ink, const EditorTypefac
             if (Project(Source.X + std::sin(Turn) * Reach, SliceY, Source.Z - std::cos(Turn) * Reach, Tip))
             {
                 const float Angle = std::atan2(Tip.y - Centre.y, Tip.x - Centre.x);
-                Ink->AddLine(Centre, Tip, WithAlpha(Colour, GlowAlpha), 5.8f * Scale);
                 Ink->AddLine(Centre, Tip, Colour, 1.8f * Scale);
                 const ImVec2 Head[3] = {ImVec2(Tip.x - std::cos(Angle - 0.5f) * 8 * Scale, Tip.y - std::sin(Angle - 0.5f) * 8 * Scale), Tip,
                                         ImVec2(Tip.x - std::cos(Angle + 0.5f) * 8 * Scale, Tip.y - std::sin(Angle + 0.5f) * 8 * Scale)};
-                Ink->AddPolyline(Head, 3, WithAlpha(Colour, GlowAlpha), 0, 5.8f * Scale);
                 Ink->AddPolyline(Head, 3, Colour, 0, 1.8f * Scale);
             }
         }
-        const float DotRadius = (Source.Selected ? 5.5f : 4.2f) * Scale;
-        Ink->AddCircleFilled(Centre, DotRadius + 3.0f * Scale, WithAlpha(Colour, GlowAlpha), 20);
-        Ink->AddCircleFilled(Centre, DotRadius, Colour, 16);
+        Ink->AddCircleFilled(Centre, (Source.Selected ? 5.5f : 4.2f) * Scale, Colour, 16);
         if (Source.Selected) Ink->AddCircle(Centre, 9 * Scale, IM_COL32_WHITE, 24, 1.6f * Scale);
         // 📝 At large spans a source smaller than a few pixels keeps its dot but not its label, so a 100 km view stays legible.
         const bool Tiny = PixelsPerMetre > 0 && Source.Shape != FieldOutlineShape::Everywhere &&
@@ -1048,22 +981,19 @@ std::vector<FieldSourceOutline> ForceFieldVisualization::DescribeSources(const F
     for (size_t Index = 0; Index < Prepared.size(); ++Index)
     {
         const PreparedForceSource&      Entry    = Prepared[Index];
-        const ForceSourceConfiguration& Source     = Entry.Source;
-        const ForceSourceDescriptor&    Descriptor = ResolveForceSourceDescriptor(Source.Category);
-        const SpatialVector             Authored   = ConvertSceneToFieldAxes(Source.CentreMetres);
+        const ForceSourceConfiguration& Source   = Entry.Source;
+        const SpatialVector             Authored = ConvertSceneToFieldAxes(Source.CentreMetres);
         FieldSourceOutline              Outline;
         Outline.Index        = static_cast<int32_t>(Index);
         Outline.X            = Entry.CentreMetres.X;
         Outline.Y            = Entry.CentreMetres.Y;
         Outline.Z            = Entry.CentreMetres.Z;
         Outline.Contribution = Entry.Contribution;
-        Outline.ColourRgb    = Descriptor.ColourRgb;
-        Outline.Label        = Index < Names.size() ? Names[Index] : std::string(Descriptor.Name);
+        Outline.Label        = Index < Names.size() ? Names[Index] : std::string(ResolveForceSourceDescriptor(Source.Category).Name);
         Outline.Active       = Entry.Activation.Envelope;
         Outline.Selected     = static_cast<int32_t>(Index) == Selected;
         Outline.Dim          = Entry.Contribution != Shown;
         Outline.Radius       = Source.ReachMetres;
-        Outline.BaseY        = Entry.CentreMetres.Y;
         if (Source.Category == ForceSourceCategory::GustFront)
         {
             const double Turn = Source.BearingDegrees * π / 180.0;
@@ -1110,26 +1040,8 @@ std::vector<FieldSourceOutline> ForceFieldVisualization::DescribeSources(const F
         if (Source.Category == ForceSourceCategory::TornadoColumn || Source.Category == ForceSourceCategory::ThermalUpdraft ||
             Source.Category == ForceSourceCategory::Microburst)
         {
-            const double ColumnFoot = Source.Category == ForceSourceCategory::Microburst ? Field.GroundPlaneYMeters() : Entry.CentreMetres.Y;
-            const double ColumnHeight = Source.Category == ForceSourceCategory::Microburst
-                                            ? std::max(Source.HeightMetres, (Entry.CentreMetres.Y - ColumnFoot) * 1.4)
-                                            : Source.HeightMetres;
-            Outline.BaseY        = ColumnFoot;
-            Outline.Height       = ColumnHeight * 1.3;
-            Outline.InnerRadius  = Source.InnerRadiusMetres;
-            Outline.TopRadius    = Source.Category == ForceSourceCategory::TornadoColumn ? Source.CollarRadiusMetres
-                                   : Source.Category == ForceSourceCategory::ThermalUpdraft ? Source.InnerRadiusMetres * 1.45
-                                                                                            : Source.RingRadiusMetres;
-        }
-        else if (Source.Category == ForceSourceCategory::GustFront)
-        {
-            Outline.Height = Source.HeightMetres * 1.25;
-        }
-        else if (Source.Reach == ForceReach::Box)
-        {
-            Outline.Height = Source.Category == ForceSourceCategory::JetCorridor ? Entry.CentreMetres.Y + Source.InnerRadiusMetres * 3.2
-                               : Source.Category == ForceSourceCategory::VehicleWake ? Source.HeightMetres * 2.4
-                                                                                      : Source.HeightMetres;
+            Outline.InnerRadius = Source.InnerRadiusMetres;
+            Outline.Height      = Source.HeightMetres;
         }
         if (Source.Category == ForceSourceCategory::GustPuff)
         {
@@ -1547,13 +1459,8 @@ bool ForceFieldVisualization::ConstructMinimap(const char* Id, ImDrawList* Ink, 
         return ImVec2(Minimum.x + static_cast<float>((X - E[0]) / SpanX) * Wide, Minimum.y + static_cast<float>((Z - E[1]) / SpanZ) * Tall);
     };
     for (const FieldSourceOutline& Source : Options.Sources)
-    {
-        const ImVec2 Position = ToMap(Source.X, Source.Z);
-        const ImU32  Colour   = SourceColour(Source, 1.0f);
-        const float  Radius   = (Source.Selected ? 3.2f : 2.2f) * Scale;
-        Ink->AddCircleFilled(Position, Radius + 2.0f * Scale, WithAlpha(Colour, Source.Selected ? 0.38f : 0.24f), 12);
-        Ink->AddCircleFilled(Position, Radius, Source.Selected ? IM_COL32_WHITE : Colour, 10);
-    }
+        Ink->AddCircleFilled(ToMap(Source.X, Source.Z), (Source.Selected ? 3.2f : 2.2f) * Scale,
+                             Source.Selected ? IM_COL32_WHITE : ContributionColour(Source.Contribution, 1.0f), 10);
     ImVec2       Outline[4];
     bool         Complete   = true;
     const ImVec2 Corners[4] = {Origin_, ImVec2(Origin_.x + Width_, Origin_.y), ImVec2(Origin_.x + Width_, Origin_.y + Height_),

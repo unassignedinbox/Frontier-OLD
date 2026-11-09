@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace Frontier
@@ -66,10 +65,6 @@ class NetworkingSpace
     [[nodiscard]] const std::vector<NetworkPeer>& QueryPeers() const noexcept { return Peers; }
     [[nodiscard]] bool                            QueryHosting() const noexcept;
 
-    // 📝 A peer's provider identity (an EOS product-user string its greeting carried); null when unregistered.
-    void                            RegisterPeerIdentity(uint32_t Identifier, std::string Identity);
-    [[nodiscard]] const std::string* QueryPeerIdentity(uint32_t Identifier) const noexcept;
-
     // 📝 Queues a message from the local peer (sequence and sender filled in).
     void Post(NetworkTopic Topic, std::string Payload, uint32_t To = 0);
     // 📝 The queued outgoing messages, emptied.
@@ -82,10 +77,9 @@ class NetworkingSpace
     [[nodiscard]] const NetworkTally& QueryTally() const noexcept { return Tally; }
 
   private:
-    std::vector<NetworkPeer>                 Peers;
-    std::vector<NetworkMessage>              Outgoing;
-    std::vector<NetworkMessage>              Incoming;
-    std::unordered_map<uint32_t, std::string> Identities;   // peer identifier → the identity its greeting carried
+    std::vector<NetworkPeer>    Peers;
+    std::vector<NetworkMessage> Outgoing;
+    std::vector<NetworkMessage> Incoming;
     uint32_t                    LocalIdentifier = 0;
     uint32_t                    NextIdentifier  = 1;
     uint64_t                    NextSequence    = 1;

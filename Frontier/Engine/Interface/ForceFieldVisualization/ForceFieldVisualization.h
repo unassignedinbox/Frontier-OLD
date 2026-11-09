@@ -69,13 +69,10 @@ struct FieldSourceOutline
     double                             OutlineX = 0, OutlineZ = 0;
     bool                               OutlineOffset  = false; // the box is centred away from the handle
     double                             InnerRadius    = 0.0;
-    double                             BaseY          = 0.0;   // field-axis bottom of the 3D reach shape
-    double                             Height         = 0.0;   // vertical reach extent in Oblique / Camera views
-    double                             TopRadius      = 0.0;   // tapered column radius at BaseY + Height (0 keeps Radius)
+    double                             Height         = 0.0;   // a column standing on the slice (Oblique)
     double                             BearingDegrees = 0.0;
     bool                               ShowBearing    = false;
     ForceContribution                  Contribution   = ForceContribution::Flow;
-    uint32_t                           ColourRgb      = 0;   // stable ForceSourceCategory palette (0 falls back to contribution)
     std::string                        Label;
     double                             Active         = 1.0;
     bool                               Selected       = false;

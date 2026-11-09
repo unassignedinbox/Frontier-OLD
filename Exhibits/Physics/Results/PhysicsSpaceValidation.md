@@ -17,10 +17,7 @@ JoltPhysics 5.6.0 behind `Frontier/Extensions/Physics` (cross-platform determini
 | 🟢 | a record with six copies is held, not turned into one body for all of them |
 | 🟢 | the crate record lands on the pedestal record: origin at 2.500 m (2.5 expected) |
 | 🟢 | stopping puts the crate back at 5 m |
-| 🟢 | engine shapes + 2-copy triangle-mesh barrier build 4 moving shapes, 3 fixed colliders, and 0 held |
-| 🟢 | Sphere (1.50 m), Cylinder (1.50 m), Cone (1.50 m), and hollow Torus (1.16 m) collide and rest on Plane (z=1.005 m) |
-| 🟢 | live-spawned Cube synchronizes into Jolt mid-run and rests on Plane at 1.50 m |
-| 🟢 | 1000 falling boxes: 1.31 ms per 1/60 s step on 1 workers (this sandbox, Debug build of the extension) |
+| 🟢 | 1000 falling boxes: 23.10 ms per 1/60 s step on 1 workers (this sandbox, Debug build of the extension) |
 | 🟢 | capture written: PhysicsSpaceFalling.png |
 
-18 / 18 assertions.
+15 / 15 assertions.

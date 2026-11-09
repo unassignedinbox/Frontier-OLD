@@ -2,14 +2,6 @@
 
 Single progress and violation tracker. Detailed evidence belongs in Exhibits, not competing progress reports.
 
-## Fluid Plume Editor parity pass (2026-11-07, branch `arena/8ff1f043-frontier`)
-
-- `FluidPlumeInspector` now occupies the inspector column and uses the shared page controls. `FluidPlumeEditor` retains the GPU solver/raymarch path, four document slots, orbit/brush/burst/collider interaction, sidecar/TOML I/O, undo/redo, and RGBA flipbook export.
-- Replaced the rejected default ImGui combo/checkbox/slider/selectable/menu-bar controls with the shared dropdown surface, ControlKit switches/palette, and custom native selection rows. SVG glyphs/panels route through `PanelChrome` → `PixelSpace`/`GlyphSpace`.
-- Modal layout now includes document/preset controls, outliner visibility cards and preset cards, viewport chrome, transport/timeline, and a named inspector header. Both `D` and legacy `E` detonate shortcuts are supported.
-- **Verified:** `FluidDynamicsValidation` passes; `FluidEditorCapture --modal-only` verifies all 8 upstream sample TOML round trips and refreshes captures `02`, `03`, and `06`; shader archive audit reports 0 failures across all 7 sets; `FrontierSceneEditorUI` builds on Linux and Windows Zig; Windows Frontier preview package rebuilt (40.2 MiB, SHA-256 `fdd5fdcd82932f164e42190e5d88bee0bb00c95d4d587d2085b6c8568d78bd29`).
-- **Parity remains open:** inspector sliders now use the shared ControlKit range + value-pill treatment, each inspector section is independently padded/card-backed, and the viewport uses a neutral black-to-gray background/grid instead of blue. Exact pixel comparison is still blocked because the matching Fluid Editor HTML/reference file is not present in this checkout (the tracked `FluidNodeEditor.html` is a different node-graph prototype). The full root CTest set (150 registered tests) was attempted but most unrelated test executables were not built in this fresh host tree; the fluid-specific CTest passes. Windows runtime was not launched here; the package is unsigned and not antivirus-scanned.
-
 ## EngineUpdate status
 
 | ID  | Finding or task                        | Status      | Next action                            |
@@ -1673,75 +1665,3 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 | Texture Workspace control reuse | Existing authoring surface and PanelChrome compiled once for both workspaces |
 | Guides and browser opening | Native guide plus Exhibits/SolidArc/CurveRebuildingGuide.md; existing browser hand-off retained |
 | Windows runtime / destination merge | Still pending; source checks are not a product binary or completed merge |
-
-## Vehicle physics on Jolt: Project Drive, three carcasses, inspectors, captures (2026-11-04)
-
-- **Requested (21st):** Jolt with vehicle physics, tested so the slip and tyre dynamics are correct, the missing
-  pieces completed (supercharger, tyre pressure, tyre temperature and the rest), three tyre soft-body models on the
-  vehicle shown deforming while the car runs, the vehicle inspector, a register of every world object, an adapter
-  that brings every object into Jolt, and a physics thread with sub-steps. Plan:
-  `Documentation/Plans/Ongoing/VehiclePhysics.md`, steps 1–10, all done.
-- **Solver:** Project Drive (`SultanAladin/Frontier-` `3f14808`) renamed to the naming rules in
-  `Engine/PhysicalDynamics/Vehicle/`; `RunProjectDriveIdentity.sh` prints bit-identical numbers (126/126 PASS, the
-  169,380-number force/slip/drivetrain trace identical). Two source findings fixed behind switches (off keeps
-  Project Drive exactly): the load factor applies above Fz0 only, and combined slip uses MF6.1 G functions.
-- **Missing pieces:** twin-screw supercharger with bypass, parasitic drag and charge-air temperature; enclosed-gas
-  tyre pressure following deformation and temperature; three-capacity tyre thermal model with a cold-grip window;
-  wear; fuel mass in binary64; coolant/oil temperatures; traction control; Ackermann steering.
-- **Carcasses:** one seam in the contact step, three load-carrying formulations — Spring (radial spring on the
-  contact fan), XPBD (84-particle lattice with enclosed gas volume), 3D FEM (Hex8 Neo-Hookean + prestress +
-  Coulomb tangential shear). Calibrated to the spring at the 15 mm / 110 kPa operating point (0.95 / 0.96 of its
-  load); the car settles at 12.3 / 12.8 / 13.8 mm; 0.09 / 0.69 / 0.20 ms per vehicle step.
-- **Thread, adapter, register:** `PhysicsThread` at fixed 240 Hz with input mailbox and published snapshot;
-  `PhysicsAdapter`/`JoltAdapter` with coupled `CollisionSteps`/`SolverSubsteps`; `WorldRegister` surveys every
-  record (vehicle, moving, fixed, held, fracture-as-static-bounds, tyre, none) and writes
-  `<Level>.WorldRegister.md` beside the level on save.
-- **Viewport and editor:** body and wheels follow the physics through occupant relocation (occupants 0–4);
-  `VehicleVisual.slang` deforms the tyres (analytic path for Spring, 32 × 5 nodal field for XPBD/FEM); driving
-  input and chase camera; `VehicleInspector` (9 tabs, curve authoring, four-corner pit bay, live telemetry) and
-  `TyreInspector`; Vehicle/Tyre in the Outliner and construct catalogue; `fit-tyres` action; AnalyticIllumination
-  SPIR-V archives rebuilt (`StoreShaderArchives.py --verify` 6/6).
-- **Validated (Linux host, Release, SwiftShader):**
-
-  | Check | Result |
-  |---|---|
-  | `RunProjectDriveIdentity.sh` | ✔️ 126/126 PASS, 169,380 trace numbers identical |
-  | `VehicleDynamicsValidation` | ✔️ 45/45: Pacejka, MF6.1, launch/braking/cornering, powertrain, thread, register |
-  | `TyreCarcassValidation` | ✔️ 17/17: all three carcasses, gas law, shear, the car on each |
-  | `VehicleWorkspaceCapture` | ✔️ 5 workspace screenshots, 4 Inspector sections, 32 + 48 animation frames |
-  | Viewport/interface regression | ✔️ SceneGeometry, SceneViewportPick, SceneViewportFlight, EverestInterface, ForceFieldCatalogue, EverestShipping, StoredShaderArchive |
-  | Naming/format audit | ✔️ branch diff rescanned; `DrawProgressBar`→`RasterizeProgressBar`, `ComposeColumnMajor`→`AssembleColumnMajor`, `TrialDeflection`→`EstimatedDeflection`, `PeakNodeMm`→`PeakFieldMm`, `SpatialItem`→`SpatialRecord`, `Frame`→`Step` |
-
-- **Evidence:** `Exhibits/VehiclePhysics/README.md`, `VehicleRunningProvingGround.gif` (32 frames),
-  `TyreDeformationAllThree.gif` (16 synchronized frames), `Results/` (screenshots, `TyreCarcassComparison.png`,
-  `VehicleDynamics.txt`, `TyreCarcass.txt`, curve/trace CSVs),
-  `Projects/Everest/Content/Levels/ProvingGroundVehicle.levelspace` (+ `.WorldRegister.md`) and
-  `Default.WorldRegister.md` (`Default.levelspace` untouched).
-- **Windows cross-build:** `FrontierVehicleDynamics`, `FrontierPhysicsExtension`, `EverestProjectRuntime`,
-  `EverestProjectEditor`, `TyreCarcassValidation`, `VehicleDynamicsValidation`, `VehicleWorkspaceCapture`
-  cross-compile to x86_64-windows-gnu with Zig 0.13.0 (`Automation/WindowsToolchain.cmake`), 604/604 build steps;
-  not launched on Windows here.
-- **Limits:**
-  - No electric motor/battery, aquaplaning, GPU tyre solvers, or per-triangle static colliders yet.
-  - Fractured objects stay static bounds until the fracture work.
-  - Capture GIFs are SwiftShader renders, not Windows GPU captures.
-- **Commits:** the commit with this entry.
-
-#### Networking / collision / portal workstreams (2026-11-04, branch `arena/c8d71a98-frontier`)
-
-- **Scope (owner answers 2026-11-04):** (1) merge Project-Networking providers into Frontier behind
-  `NetworkTransport`, Quick Actions toggle named "Networking" (Enabled/Disabled), one PR at the end;
-  (2) polygon-accurate colliders replacing box approximations, collision-debug visibility toggle, drivable ramp;
-  (3) full portal system (recursive faces, split in/out rendering, object scaling, partial physics,
-  far-side transparency) on a format-agnostic polygon-surface base (no format readers yet).
-- **Naming mapping (SKILL-Naming):** `Object`/`Actor`/`Mesh` are banned; the "base class" is the existing
-  `RecordEntry` + modular configurations with a new `PolygonSurfaceReader` intake interface and a
-  `SurfaceFormatRegistry` keyed by extension. "Quick Actions" is the Control Centre Quick Controls grid
-  (`ControlCentreQuickAction`, configured per workspace in e.g. `EverestWorkspace.cpp`).
-- **Phase A (provider networking):** engine owns `ReplicationCodec` (FP1 wire form, unchanged),
-  `EosAdapter` (real EOS P2P relay), `PhotonAdapter` (Photon events + receive queue), `NetworkingSession`
-  (owns Space + transport, `Enabled` toggle, per-frame `Advance`); Project-Networking transports become shims
-  over the adapters; Everest ticks the session and hosts the Quick Actions toggle.
-- **Deviation:** the post-commit sync rule (`SultanAladin/Frontier arena/11f31835-frontier`) conflicts with
-  Arena session-branch discipline; all work stays on `arena/c8d71a98-frontier` until the final PR.
-- **Evidence:** `Exhibits/Networking/` (this entry's validation ledger).

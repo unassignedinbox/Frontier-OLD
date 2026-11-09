@@ -1,7 +1,7 @@
 {
   "format": 1,
   "set": "ParticleSimulation",
-  "compiler": "unrecorded",
+  "compiler": "slangc 2026.14.1",
   "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets ParticleSimulation",
   "entries": [
     {

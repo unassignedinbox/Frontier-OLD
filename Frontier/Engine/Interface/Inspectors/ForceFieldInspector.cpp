@@ -225,8 +225,6 @@ void ForceFieldInspector::ConstructInspector()
     }
     if (NextButton::Construct(Page, "FieldWind", "Open the Wind guest \xE2\x86\x97", Reading.Access->Wind != nullptr, "Add a Wind record first"))
         InspectorRuntime::Instance().RequestSelection("Wind");
-    if (NextButton::Construct(Page, "FieldWorkspace", "Open Force Field / Wind workspace \xE2\x86\x97"))
-        InspectorRuntime::Instance().RequestWorkspaceAction("field-workspace:on");
     FooterRow::Construct(Page, "Levelspace records \xC2\xB7 Force Field \xC2\xB7 Wind \xC2\xB7 forces", "Saved with the level");
     Page.Finalize();
     if (Changed) Parameters.AdvanceRevision();

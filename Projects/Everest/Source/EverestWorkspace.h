@@ -8,8 +8,6 @@
 #include "Engine/Diagnostics/BuildConfiguration.h"
 #include "EverestApplication.h"
 #include "EverestSimulationRecords.h"
-#include "Frontier/Engine/Rendering/SceneViewport/VehicleCameraSolver.h"
-#include "Session/LobbySession.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 struct ImDrawList;
@@ -21,12 +19,10 @@ struct ImVec2;
 #include "Engine/Interface/PanelDockspace.h"
 #include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
-#include "Engine/PhysicalDynamics/Vehicle/DriverInputIntegrator.h"
 #include "UI/Editor/ControlCentrePanel.h"
 namespace Frontier
 {
 class ForceFieldVisualization;
-class NetworkingSession;
 class PhysicsExtension;
 }
 #endif
@@ -44,7 +40,6 @@ class PhysicsExtension;
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace Everest
 {
@@ -146,16 +141,6 @@ class EverestWorkspace
     EverestWorkspace& operator=(const EverestWorkspace&) = delete;
 
     void IntegrateSimulation(double DeltaSeconds);
-    bool OpenLevel(const std::filesystem::path& LevelPath, bool StartDrivingSimulation = false);
-    void BeginLevelTransition(const std::filesystem::path& LevelPath, bool StartDrivingSimulation = false);
-
-    [[nodiscard]] bool                                 QueryLobbyActive() const noexcept;
-    [[nodiscard]] LobbySession&                        AccessLobbySession() noexcept { return Lobby; }
-    [[nodiscard]] const LobbySession&                  QueryLobbySession() const noexcept { return Lobby; }
-    [[nodiscard]] Frontier::VehicleCameraSolver&       AccessVehicleCamera() noexcept { return VehicleCamera; }
-    [[nodiscard]] const Frontier::VehicleCameraSolver& QueryVehicleCamera() const noexcept { return VehicleCamera; }
-    [[nodiscard]] bool                                 QueryGameCameraMode() const noexcept { return StudioCameraEngaged; }
-    void                                               ConfigureGameCameraMode(bool Enabled);
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
     bool ConfigurePlatform() noexcept;
@@ -177,7 +162,6 @@ class EverestWorkspace
     struct FieldViewport
     {
         bool                                               Shown = false;
-        bool                                               CameraPreview = false; // [-] temporary live editor-camera projection in the Force Field workspace
         std::unique_ptr<Frontier::ForceFieldVisualization> Slice;
         std::unique_ptr<Frontier::ForceFieldVisualization> Overlay;
         bool                                               Hovering = false;
@@ -199,12 +183,6 @@ class EverestWorkspace
     //    record type; and duplicates a scene object (its copies from the reserve). The dialog and the keys call these too.
     void                  ServiceConstructOrder(const Frontier::ConstructOrder& Order);
     Frontier::RecordToken DuplicateGeometryRecord(Frontier::RecordToken Token);
-    void                  ToggleSimulation();
-    // 📝 The Quick Controls "Networking" toggle: enables the session's replication (loopback until a provider links).
-    void                  ToggleNetworking();
-    [[nodiscard]] bool    QueryNetworkingEnabled() const noexcept;
-    [[nodiscard]] Frontier::PhysicsExtension* AccessPhysics() noexcept { return Physics.get(); }
-    [[nodiscard]] Frontier::NetworkingSession* AccessNetworking() noexcept { return Network.get(); }
 #endif
 
     [[nodiscard]] EverestApplication&          AccessApplication() noexcept { return Application; }
@@ -218,14 +196,8 @@ class EverestWorkspace
 
   private:
     void InitializeWorld();
-    void SynchronizeActiveLevelState(bool ResetOutdoorEditorCamera, bool StartDrivingSimulation);
-    void CheckExternalLevelReload();
-    [[nodiscard]] Frontier::VehicleSubjectKinematics ResolveVehicleKinematics(double AspectRatio = 16.0 / 9.0) const;
-    void ApplyVehicleCameraSolution(const Frontier::VehicleCameraSolution& Solution);
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
-    void CaptureEditorCameraState() noexcept;
-    void RestoreEditorCameraState() noexcept;
     void ServiceDynamicSceneRequests();
     void SaveActiveLevel();
     // 📝 Scene objects (the Project Zero editor's tools): the Construct dialog's catalogue and orders, duplicates, renames, the
@@ -243,14 +215,13 @@ class EverestWorkspace
     void ReleasePointerConstraint();
     void ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale);
-    void ConstructSessionViewportOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
     void ConstructViewportFooter(float Scale);
     SceneCameraSubject ResolveCameraSubject() const;
     void ConstructFullscreenViewport(float Scale);
     void ToggleViewportOverlay(int Overlay);
-    void IntegrateDrivingControls(double DeltaSeconds);
-    void IntegrateChaseCamera(double DeltaSeconds);
-    [[nodiscard]] bool QueryVehicleDrivingActive() const;
+    // 📝 Simulate (Alt+S, the viewport bar's Play): the level's PhysicsSpace steps the objects with Physics on; stopping puts every
+    //    moved object back.
+    void ToggleSimulation();
     void AnnounceViewportNotice(std::string Text);
     // 📝 The Force Field in the viewport (EverestFieldViewport.cpp): the timeline clock, one slice from the level's records,
     //    the Field view with its timeline lanes, its bar, and the slice over the scene.
@@ -260,8 +231,6 @@ class EverestWorkspace
     //    Force Field record.
     [[nodiscard]] std::optional<std::array<double, 3>> SampleLevelFlow(const std::array<double, 3>& LevelMetres);
     void ConstructFieldViewport(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
-    void ConstructForceFieldWorkspace(float Scale);
-    void ConstructVehicleWorkbench(float Scale);
     void ConstructFieldTimeline(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructFieldOverlay(const ImVec2& StageMin, const ImVec2& StageMax, float Scale);
@@ -278,19 +247,13 @@ class EverestWorkspace
     Frontier::LogStreamPanel      LogPanel;
     uint64_t                      ObservedLayoutRevision = 0;
     SceneViewportFlight           Flight{};
-    SceneViewportNavigation       Navigation{};
-    Frontier::CameraMotionBlurComponent EditorCameraMotionBlur{};
-    // The editor flight/navigation state is independent of VehicleCameraSolver and is restored on mode changes.
-    SceneViewportFlight           SavedEditorFlight{};
-    SceneViewportNavigation       SavedEditorNavigation{};
-    bool                          SavedEditorCameraReady = false;
+    SceneViewportNavigation Navigation{};
     double                        ViewportDeltaSeconds   = 0.0;
     void*                         ConstrainedWindow      = nullptr;   // [-] platform window holding the pointer, or null
     int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock
     SceneViewportOverlays         Overlays{};
     SceneViewportReadout          LastReadout{};
     uint64_t                      PublishedGeometryGeneration = 0;   // [-] the geometry resolutions last copied into the records
-    bool                          PendingAutoSimulation       = false; // [-] start simulation once geometry resolutions publish
     std::array<float, 240>        FrameDurations{};                   // [ms] the last 240 interface ticks (1 % low)
     size_t                        FrameDurationCursor    = 0;
     double                        FrameSeconds           = 0.0;       // [s] smoothed tick (0.9 / 0.1)
@@ -307,26 +270,15 @@ class EverestWorkspace
     std::array<double, 2>         PickPoint{};                        // [-] the last click, as a fraction of the stage
     bool                          GizmoPress             = false;     // [-] that press began on a handle
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
-    FieldViewport                                Field{};
-    std::unique_ptr<Frontier::PhysicsExtension>  Physics;
-    std::vector<Frontier::SceneImpactSpark>      PendingImpactSparks{};
-    std::unique_ptr<Frontier::NetworkingSession> Network;   // [-] - the replication session the Networking toggle drives
-    Frontier::Vehicle::DriverInputIntegrator     DriverControls{};
+    FieldViewport                 Field{};
+    std::unique_ptr<Frontier::PhysicsExtension> Physics;
 #endif
 
-    std::filesystem::path          ProjectRoot;
-    std::filesystem::path          ActiveLevelPath;
-    EverestApplication             Application;
-    LobbySession                   Lobby{};
-    Frontier::VehicleCameraSolver  VehicleCamera{};
-    bool                           StudioCameraEngaged      = false;
-    std::array<double, 3>          LastAppliedStudioEye     = {0.0, 0.0, 0.0};
-    double                         ActiveNearClipMetres     = 0.05;
-    double                         ActiveVeilOpacity        = 0.0;
-    std::filesystem::path          PendingTransitionLevel{};
-    bool                           PendingTransitionDrive   = false;
-    std::string                    Diagnostic;
-    double                         ElapsedSeconds           = 0.0;
+    std::filesystem::path ProjectRoot;
+    std::filesystem::path ActiveLevelPath;
+    EverestApplication    Application;
+    std::string           Diagnostic;
+    double                ElapsedSeconds = 0.0;
 };
 
 } // namespace Everest

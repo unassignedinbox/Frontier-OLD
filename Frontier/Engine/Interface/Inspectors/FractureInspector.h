@@ -23,8 +23,8 @@ class FractureInspector final : public RecordInspector
   public:
     explicit FractureInspector(FractureConfiguration& InParameters) noexcept : Parameters(InParameters) {}
 
-    [[nodiscard]] const char* QueryEyebrowText() const noexcept override { return "AUTHORING · VORONOI FRACTURE"; }
-    [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "Convex cell geometry preview"; }
+    [[nodiscard]] const char* QueryEyebrowText() const noexcept override { return "SOLVER · VORONOI FRACTURE"; }
+    [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "Convex hull decomposition"; }
     [[nodiscard]] const char* QueryEditorButtonLabel() const noexcept override { return "Fracture Editor"; }
     void                      ConstructEditor(RecordToken Token) override;
     [[nodiscard]] bool        QueryToggleSupported() const noexcept override { return true; }

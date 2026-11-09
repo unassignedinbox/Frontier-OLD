@@ -66,15 +66,6 @@ ParticleViewportOutcome ParticleExtension::Render(const ParticleViewportRequest&
     Outcome.Image.Extent              = Sequence_->QueryExtent();
     Outcome.Image.RefreshMilliseconds = Sequence_->QueryRefreshMilliseconds();
     Outcome.Image.StoreBytes          = Sequence_->QueryStoreBytes();
-    Outcome.Image.LightningSegmentCount = Request.Plan->SegmentCount;
-    Outcome.Image.LensingHoleCount = Request.Plan->LensingCounts.HoleCount;
-    Outcome.Image.HeatShimmerCount = Request.Plan->LensingCounts.ShimmerCount;
-    for (const ParticleRefreshJob& Job : Request.Plan->Jobs)
-    {
-        if (!Job.Rasterize || !Job.Shards || Job.EffectIndex >= Request.Effects->size()) continue;
-        ++Outcome.Image.ShardRasterEffectCount;
-        Outcome.Image.ShardRasterParticleCapacity += ResolveParticleCapacity((*Request.Effects)[Job.EffectIndex].Parameters);
-    }
     for (const ParticleEffectInstance& Effect : *Request.Effects)
     {
         const ParticleSimulation::ParticleCensus* Census = Sequence_->QueryCensus(Effect.Token);

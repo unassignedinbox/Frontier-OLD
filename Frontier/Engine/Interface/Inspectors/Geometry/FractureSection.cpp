@@ -44,24 +44,6 @@ bool GeometryFractureSection::Construct(ControlColumn& Page, GeometryConfigurati
         Changed |= SliderRow::ConstructInteger(Page, "Cells", "Voronoi cells", Fracture.VoronoiCellCount, 4u, 256u, "cells", !Parameters.Locked);
         Changed |= SliderRow::Construct(Page, "Impulse", "Impulse threshold", Fracture.ImpulseThresholdNs, 1.0f, 500.0f, 0.5f, "N\xC2\xB7s", 1.0f,
                                         !Parameters.Locked);
-        Changed |= SliderRow::Construct(Page, "ImpactBias", "Impact radial bias", Fracture.ImpactRadialBias, 0.0f, 1.0f, 0.01f, "", 1.0f,
-                                        !Parameters.Locked);
-        Changed |= SliderRow::Construct(Page, "DebrisLife", "Debris lifetime", Fracture.DebrisLifetimeSeconds, 1.0f, 60.0f, 0.5f, "s", 1.0f,
-                                        !Parameters.Locked);
-        Changed |= SliderRow::Construct(Page, "SleepSpeed", "Sleep linear speed", Fracture.SleepLinearVelocity, 0.01f, 2.0f, 0.01f, "m/s", 1.0f,
-                                        !Parameters.Locked);
-        bool Armed = Fracture.FractureArmed;
-        if (!Parameters.Locked && SwitchRow::Construct(Page, "Armed", "Fracture armed", Armed))
-        {
-            Fracture.FractureArmed = Armed;
-            Changed = true;
-        }
-        bool Dust = Fracture.ImpactDustBurst;
-        if (!Parameters.Locked && SwitchRow::Construct(Page, "ImpactDust", "Impact dust burst", Dust))
-        {
-            Fracture.ImpactDustBurst = Dust;
-            Changed = true;
-        }
     }
     char Note[260];
     if (Resolved.Breakable)

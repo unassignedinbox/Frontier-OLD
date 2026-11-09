@@ -37,31 +37,7 @@ float3 ExpandRange(float3 Colour)
     return Colour / max(1.0 - ResolveLuminance(Colour), 1.0e-4);
 }
 
-// 📝 Current-frame bounded blur before temporal reprojection: the motion buffer's xy is camera + object, zw camera-only.
-float3 ResolveCameraMotionBlur(int2 Pixel, float3 Current)
-{
-    let Mode = ResolveCameraMotionBlurMode(Refresh);
-    if (Mode == 0u || Mode > 2u || Refresh.InspectionMode != 0u) return Current;
-    let Strength = ResolveCameraMotionBlurStrength(Refresh);
-    if (Strength <= 0.0) return Current;
-
-    let MotionChannels = LoadTexel(SurfaceMotion, Pixel, 0);
-    var Motion = SelectBranch(MotionChannels.zw, MotionChannels.xy, Mode == 2u);
-    let MotionLength = length(Motion);
-    if (MotionLength <= 0.5) return Current;
-    if (MotionLength > 24.0) Motion *= 24.0 / MotionLength;
-    Motion *= Strength;
-
-    var Accumulated = float3(0.0);
-    for (var Tap = 0u; Tap < 5u; Tap++)
-    {
-        let Offset = float(Tap) * 0.25 - 0.5;
-        let SamplePixel = float2(Pixel) + 0.5 - Motion * Offset;
-        Accumulated += RecombinedRadiance.SampleLevel(LinearClamp, SamplePixel * Refresh.InverseScreenExtent, 0.0).rgb;
-    }
-    return Accumulated / 5.0;
-}
-
+ 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void IntegrateAntialias(uint3 Invocation : SV_DispatchThreadID)
@@ -71,8 +47,7 @@ void IntegrateAntialias(uint3 Invocation : SV_DispatchThreadID)
     {
         return;
     }
-    let CurrentRadiance = LoadTexel(RecombinedRadiance, Pixel, 0).rgb;
-    let Current = CompressRange(ResolveCameraMotionBlur(Pixel, CurrentRadiance));
+    let Current = CompressRange(LoadTexel(RecombinedRadiance, Pixel, 0).rgb);
     if (!FeatureEnabled(Refresh, FeatureTemporalAntialias) || Refresh.InspectionMode == 6u || Refresh.InspectionMode == 7u)
     {
         AntialiasTarget[Pixel] = float4(ExpandRange(Current), 1.0);

@@ -57,11 +57,7 @@ class NetworkingExtension
   public:
     NetworkingExtension(NetworkingSpace& Space, NetworkTransport& Transport) noexcept : Space(Space), Transport(Transport) {}
 
-    // 📝 The local peer's provider identity (an EOS product-user string): Greet carries it so the far side can address
-    //    this peer on the provider relay. Empty: greetings carry name and role only, as before.
-    void ConfigureLocalIdentity(std::string Identity) { LocalIdentity = std::move(Identity); }
-
-    // 📝 Introduces the local peer to the others (name, role, and the configured identity).
+    // 📝 Introduces the local peer to the others (name and role).
     void Greet();
 
     // 📝 Host: every record whose level TOML changed since the last call leaves as one RecordConfiguration message; records gone from
@@ -77,13 +73,9 @@ class NetworkingExtension
 
     [[nodiscard]] size_t QueryMatchedRecords() const noexcept { return Matched.size(); }
 
-    // 📝 The provider identity a peer's greeting carried (null when it carried none or never greeted).
-    [[nodiscard]] const std::string* QueryPeerIdentity(uint32_t Peer) const noexcept { return Space.QueryPeerIdentity(Peer); }
-
   private:
     NetworkingSpace&                          Space;
     NetworkTransport&                         Transport;
-    std::string                               LocalIdentity{};   // [-] - carried by Greet when non-empty
     std::unordered_map<uint64_t, std::string> Sent;      // host record token → the payload last sent
     std::unordered_map<uint64_t, RecordToken> Matched;   // host record token → local record
 };

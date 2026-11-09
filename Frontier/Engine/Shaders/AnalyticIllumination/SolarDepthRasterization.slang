@@ -11,12 +11,6 @@ float4 SolarDepthVertex([[vk::location(0)]] float3 Position : LOCATION0, [[vk::l
                         [[vk::location(2)]] float3 Normal : LOCATION2, [[vk::location(3)]] uint OccupantOffset : LOCATION3,
                         [[vk::location(4)]] uint OccupantIndex : LOCATION4) : SV_Position
 {
-    let Index = OccupantIndex + OccupantOffset;
-    if (Index == 0u && Family == VehicleGlassFamily && VehicleState[0].Cabin.y > 0.5)
-    {
-        return float4(0.0, 0.0, 0.0, 0.0);
-    }
-    let Moved = DeformAnalyticVehicleVertex(Index, Family, Position, Normal);
-    let World = mul(float4(Moved.Position, 1.0), Occupants[Index].LocalToWorld);
+    let World = mul(float4(Position, 1.0), Occupants[OccupantIndex + OccupantOffset].LocalToWorld);
     return mul(World, Analytic.SolarViewProjection);
 }

@@ -17,8 +17,12 @@ namespace Frontier
 
 inline std::string EncodeUtf8Path(const std::filesystem::path& Path)
 {
-    const auto Utf8 = Path.u8string();
+#if __cplusplus >= 202002L
+    const std::u8string Utf8 = Path.u8string();
     return std::string(reinterpret_cast<const char*>(Utf8.data()), Utf8.size());
+#else
+    return Path.u8string();
+#endif
 }
 
 inline std::filesystem::path DecodeUtf8Path(std::string_view Path)

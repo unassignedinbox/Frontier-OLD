@@ -8,7 +8,6 @@
 
 #include "Engine/Scene/EngineConfigurations.h"
 #include "Engine/Scene/EnvironmentDiagnostics.h"
-#include "Engine/Rendering/SceneViewport/CameraEffects.h"
 
 #include <array>
 #include <cstdint>
@@ -16,27 +15,9 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace Frontier
 {
-
-enum class SceneImpactSurface : uint32_t
-{
-    Metal,
-    Concrete,
-};
-
-// 📝 One newly drained Jolt hard-impact event. The renderer emits a packet from its contact velocity; it is not itself a sprite.
-struct SceneImpactSpark
-{
-    SceneImpactSurface    Surface = SceneImpactSurface::Metal;
-    std::array<double, 3> PointMetres{};
-    std::array<double, 3> Normal{0.0, 0.0, 1.0};      // [-] outward from the hard surface toward the vehicle
-    std::array<double, 3> RelativeVelocityMps{};       // [m/s] vehicle contact-point velocity relative to the surface
-    float                 ClosingSpeedMps = 0.0f;
-    uint32_t              EventSeed = 0;              // [-] stable seed from Jolt's debounced contact
-};
 
 // 📝 What the Scene Viewport asks the host application to render and present each interface tick; the host owns the device
 //    and the renderer, the workspace owns the camera (orbit, pan, dolly, fly) and the level records the host reads.
@@ -48,15 +29,12 @@ struct SceneViewportRequest
     std::array<double, 3> CameraPosition      = {0.0, 0.0, 0.0};      // [m] z-up world of the scene
     std::array<double, 3> CameraTarget        = {1.0, 0.0, 0.0};      // [m]
     double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
-    double                CameraNear          = 0.05;                 // [m] near clip distance (0.01 m in HMI rig, 0.02 m cockpit)
     double                DeltaSeconds        = 0.0;                  // [s]
     std::array<double,3> CameraUp = {0,0,1};
-    CameraMotionBlurComponent CameraMotionBlur{}; // [-] camera-owned; Off by default
     // 📝 GPU picking: a click on the stage asks for the record drawn under it in the image the click was made on; the readout's
     //    Pick answers the serial one interface tick later.
     uint64_t              PickSerial          = 0;                    // [-] advances with every click; 0 = nothing asked
     std::array<double, 2> PickPoint           = {0.0, 0.0};           // [-] fraction of the stage's width and height, from the top-left
-    std::vector<SceneImpactSpark> ImpactSparks{};                    // [-] newly generated Jolt hard-impact effects
 };
 
 // 📝 The answer to the stage's last click (GPU picking, PickProjection): the Geometry record drawn at the clicked pixel, or the

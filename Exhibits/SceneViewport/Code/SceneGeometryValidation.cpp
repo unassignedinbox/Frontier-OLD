@@ -570,30 +570,6 @@ int main(int ArgumentCount, char** Arguments)
                    "cube beside it); off any record the nearest within 4 px (1, 2 before 3, 0); none at (4, 1), outside the reach, or on the sky");
         }
 
-        // ㉓ Multi-copy environment collision meshes: every visible Geometry record in Default.levelspace emits WorldTriangles
-        {
-            Frontier::WorldSpace FreshWorld;
-            if (!FreshWorld.LoadLevelSpace(Project / "Content" / "Levels" / "Default.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
-            Frontier::SceneGeometryOccupancy FreshOccupancy;
-            FreshOccupancy.Reset(&Scene, Materials);
-            (void)FreshOccupancy.ResolvePlacements(FreshWorld);
-            const auto Resolutions = FreshOccupancy.QueryResolutions();
-            size_t     WithMesh    = 0;
-            size_t     TotalTris   = 0;
-            for (const Frontier::SceneRecordBase* Entry : FreshWorld.FindAllByType("Geometry"))
-            {
-                const auto It = Resolutions->find(Entry->QueryToken().Value);
-                if (It != Resolutions->end() && It->second.WorldTriangles.size() >= 3u)
-                {
-                    ++WithMesh;
-                    TotalTris += It->second.WorldTriangles.size() / 3u;
-                }
-            }
-            Report(WithMesh == Records,
-                   "environment collision meshes: " + std::to_string(WithMesh) + " of " + std::to_string(Records) +
-                       " proving-ground Geometry records emit per-instance WorldTriangles (" + std::to_string(TotalTris) + " triangles total)");
-        }
-
         std::printf("SceneGeometryValidation: %d of %d checks passed\n", Checks - Failures, Checks);
         return Failures == 0 ? 0 : 1;
     }

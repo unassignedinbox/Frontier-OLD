@@ -97,69 +97,60 @@ void ParticleEditor::ConstructInterface(RecordToken Token, ParticleConfiguration
     const InspectorPalette Palette = InspectorPalette::Resolve();
     const EditorTypefaces  Faces   = EditorTypefaces::Resolve();
     const float            Scale   = Runtime.ResolveInterfaceScale();
-    const ImGuiViewport* Main = ImGui::GetMainViewport();
-    const ImVec2 Margin(28.0f * Scale, 24.0f * Scale);
-    const ImVec2 Position(Main->WorkPos.x + Margin.x, Main->WorkPos.y + Margin.y);
-    const ImVec2 Size(std::max(1100.0f, Main->WorkSize.x - Margin.x * 2.0f), std::max(640.0f, Main->WorkSize.y - Margin.y * 2.0f));
+    const ImGuiViewport*   Main    = ImGui::GetMainViewport();
+    const ImVec2           Margin(28.0f * Scale, 24.0f * Scale);
+    const ImVec2           Position(Main->WorkPos.x + Margin.x, Main->WorkPos.y + Margin.y);
+    const ImVec2           Size(std::max(1100.0f, Main->WorkSize.x - Margin.x * 2.0f), std::max(640.0f, Main->WorkSize.y - Margin.y * 2.0f));
 
-    // 📝 A normal in-app docking window rather than a modal popup: it can live beside the scene, inspector or log panels while
-    //    the record's inspector remains its entry point. The editor contents and file contract are unchanged.
-    constexpr const char* WindowName = "Frontier \xC2\xB7 Particle editor###FrontierParticleEditor";
-    ImGui::SetNextWindowPos(Position, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(Size, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowViewport(Main->ID);
+    // 📝 A modal popup: it stays above the workspace, dims it and keeps the pointer from the panels behind it, as long as the
+    //    record's editor is the active one.
+    constexpr const char* WindowName = "##ParticleEditorWindow";
+    if (!ImGui::IsPopupOpen(WindowName)) ImGui::OpenPopup(WindowName);
+    ImGui::SetNextWindowPos(Position, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(Size, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f * Scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 16.0f * Scale);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(Palette.ViewportBg));
-    bool Open = true;
-    const bool Shown = ImGui::Begin(WindowName, &Open, ImGuiWindowFlags_NoCollapse);
-    ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImGui::ColorConvertU32ToFloat4(Palette.ViewportBg));
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0.02f, 0.02f, 0.03f, 0.55f));
+    const bool Shown = ImGui::BeginPopupModal(WindowName, nullptr,
+                                              ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                                  ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(3);
-
-    bool Closing = false;
     if (Shown)
     {
-        ImDrawList* Ink = ImGui::GetWindowDrawList();
-        const ImVec2 HeaderMin = ImGui::GetCursorScreenPos();
-        const ImVec2 Available = ImGui::GetContentRegionAvail();
+        ImDrawList* Ink    = ImGui::GetWindowDrawList();
         const float Header = 50.0f * Scale;
-        const ImVec2 HeaderMax(HeaderMin.x + Available.x, HeaderMin.y + Header);
-        Ink->AddRectFilled(HeaderMin, HeaderMax, Palette.InspectorTopBg);
-        Ink->AddLine(ImVec2(HeaderMin.x, HeaderMax.y), ImVec2(HeaderMax.x, HeaderMax.y), Palette.EdgeBorder, 1.0f);
-        ConstructEditorGlyph(Ink, ImVec2(HeaderMin.x + 24.0f * Scale, HeaderMin.y + 25.0f * Scale), 8.0f * Scale, Palette.ThemeAccent, "Sparkles", 1.5f);
-        Ink->AddText(Faces.Medium, 14.0f * Scale, ImVec2(HeaderMin.x + 42.0f * Scale, HeaderMin.y + 16.5f * Scale), Palette.TextPrimary,
-                     "Frontier \xC2\xB7 Particle editor");
-
-        const float CloseW = 108.0f * Scale;
-        const ImVec2 CloseMin(HeaderMax.x - CloseW - 14.0f * Scale, HeaderMin.y + 10.0f * Scale);
+        Ink->AddRect(Position, ImVec2(Position.x + Size.x, Position.y + Size.y), Palette.EdgeBorder, 16.0f * Scale, 0, 1.5f);
+        Ink->AddRectFilled(Position, ImVec2(Position.x + Size.x, Position.y + Header), Palette.InspectorTopBg, 16.0f * Scale, ImDrawFlags_RoundCornersTop);
+        Ink->AddLine(ImVec2(Position.x, Position.y + Header), ImVec2(Position.x + Size.x, Position.y + Header), Palette.EdgeBorder, 1.0f);
+        ConstructEditorGlyph(Ink, ImVec2(Position.x + 24.0f * Scale, Position.y + 25.0f * Scale), 8.0f * Scale, Palette.ThemeAccent, "Sparkles", 1.5f);
+        Ink->AddText(Faces.Medium, 14.0f * Scale, ImVec2(Position.x + 42.0f * Scale, Position.y + 16.5f * Scale), Palette.TextPrimary, "Frontier \xC2\xB7 Particle editor");
+        char Readout[256];
+        const std::string File = Workspace.QuerySpaceFile().empty() ? std::string("no level file") : Workspace.QuerySpaceFile().filename().string();
+        std::snprintf(Readout, sizeof(Readout), "LIVE \xC2\xB7 %s \xC2\xB7 %zu EFFECTS \xC2\xB7 %zu FIELDS \xC2\xB7 %s%s", SceneDirectory::Instance().QueryName(Token).c_str(),
+                      Workspace.AccessSpace().Effects.size(), Workspace.AccessSpace().Fields.size(), File.c_str(), Workspace.QuerySpaceChanged() ? " \xC2\xB7 UNSAVED" : "");
+        Ink->AddText(Faces.Monospace, 10.5f * Scale, ImVec2(Position.x + 300.0f * Scale, Position.y + 19.5f * Scale), Palette.LiveGreen, Readout);
+        const float  CloseW = 108.0f * Scale;
+        const ImVec2 CloseMin(Position.x + Size.x - CloseW - 14.0f * Scale, Position.y + 10.0f * Scale);
         ImGui::SetCursorScreenPos(CloseMin);
-        Closing = ImGui::InvisibleButton("##CloseParticleEditor", ImVec2(CloseW, 30.0f * Scale));
+        const bool Closing = ImGui::InvisibleButton("##CloseParticleEditor", ImVec2(CloseW, 30.0f * Scale));
         const bool Hovered = ImGui::IsItemHovered();
-        Ink->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale),
-                           Hovered ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f * Scale);
+        Ink->AddRectFilled(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Hovered ? Palette.SegmentedActiveBg : Palette.CountCardBg, 9.0f * Scale);
         Ink->AddRect(CloseMin, ImVec2(CloseMin.x + CloseW, CloseMin.y + 30.0f * Scale), Palette.InsetFieldBorder, 9.0f * Scale);
         Ink->AddText(Faces.Medium, 11.0f * Scale, ImVec2(CloseMin.x + 18.0f * Scale, CloseMin.y + 8.5f * Scale), Palette.TextPrimary, "Close Editor");
 
-        char Readout[256];
-        const std::string File = Workspace.QuerySpaceFile().empty() ? std::string("no level file") : Workspace.QuerySpaceFile().filename().string();
-        std::snprintf(Readout, sizeof(Readout), "LIVE \xC2\xB7 %s \xC2\xB7 %zu EFFECTS \xC2\xB7 %zu FIELDS \xC2\xB7 %s%s",
-                      SceneDirectory::Instance().QueryName(Token).c_str(), Workspace.AccessSpace().Effects.size(), Workspace.AccessSpace().Fields.size(),
-                      File.c_str(), Workspace.QuerySpaceChanged() ? " \xC2\xB7 UNSAVED" : "");
-        const float ReadoutRight = CloseMin.x - 16.0f * Scale;
-        if (ReadoutRight > HeaderMin.x + 310.0f * Scale)
-            Ink->AddText(Faces.Monospace, 10.5f * Scale, ImVec2(HeaderMin.x + 300.0f * Scale, HeaderMin.y + 19.5f * Scale), Palette.LiveGreen, Readout);
-
-        const ImVec2 BodyMin(HeaderMin.x + 12.0f * Scale, HeaderMin.y + Header + 12.0f * Scale);
-        const ImVec2 BodyMax(HeaderMin.x + Available.x - 12.0f * Scale, HeaderMin.y + Available.y - 12.0f * Scale);
-        if (BodyMax.x > BodyMin.x && BodyMax.y > BodyMin.y)
-            Workspace.Construct(BodyMin, BodyMax, Scale, ImGui::GetIO().DeltaTime);
-    }
-    ImGui::End();
-    if (Closing || !Open)
-    {
-        (void)Workspace.SaveSpaceFile();
-        Runtime.CloseActiveEditor();
+        const ImVec2 BodyMin(Position.x + 12.0f * Scale, Position.y + Header + 12.0f * Scale);
+        const ImVec2 BodyMax(Position.x + Size.x - 12.0f * Scale, Position.y + Size.y - 12.0f * Scale);
+        Workspace.Construct(BodyMin, BodyMax, Scale, ImGui::GetIO().DeltaTime);
+        if (Closing)
+        {
+            (void)Workspace.SaveSpaceFile();
+            ImGui::CloseCurrentPopup();
+            Runtime.CloseActiveEditor();
+        }
+        ImGui::EndPopup();
     }
 }
 

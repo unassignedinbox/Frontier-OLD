@@ -1,110 +1,166 @@
 /*==========================================================================================================================================
                                                               PHYSICSSPACE.CPP
 ==========================================================================================================================================*/
-// 🧩 The PhysicsSpace over its PhysicsAdapter: the descriptors it was given, the simulated time, and every call passed through.
+// 🧩 The PhysicsSpace on Jolt: one Jolt solver with the extension's layers, box and sphere bodies, contact tally and stepping.
 
 #include "Frontier/Extensions/Physics/PhysicsSpace.h"
 
+#include "Frontier/Extensions/Physics/JoltExtension.h"
+
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <limits>
 
 namespace Frontier
 {
 
-PhysicsSpace::PhysicsSpace(const PhysicsSpaceSettings& Settings) : Adapter(ConstructJoltAdapter(Settings))
+namespace
 {
+
+// 📝 Counts the contacts Jolt adds (callbacks arrive on the job threads).
+class ContactTally final : public JPH::ContactListener
+{
+  public:
+    void OnContactAdded(const JPH::Body&, const JPH::Body&, const JPH::ContactManifold&, JPH::ContactSettings&) override
+    {
+        Added.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    std::atomic<uint64_t> Added{ 0 };
+};
+
+JPH::Vec3 ToVector(const std::array<double, 3>& Value)
+{
+    return JPH::Vec3(static_cast<float>(Value[0]), static_cast<float>(Value[1]), static_cast<float>(Value[2]));
 }
 
-PhysicsSpace::~PhysicsSpace() = default;
+} // namespace
+
+struct PhysicsSpace::Implementation
+{
+    JoltExtension          Backend;
+    JPH::PhysicsSystem     Solver;
+    ContactTally           Contacts;
+    std::vector<JPH::BodyID> Bodies;
+
+    explicit Implementation(uint32_t Workers) : Backend(Workers) {}
+};
+
+PhysicsSpace::PhysicsSpace(const PhysicsSpaceSettings& Settings) : Detail(std::make_unique<Implementation>(Settings.Workers))
+{
+    const JPH::uint Bodies = std::max<JPH::uint>(16, Settings.MaximumBodies);
+    Detail->Solver.Init(Bodies, 0, Bodies, Bodies, Detail->Backend.QueryLayers(), Detail->Backend.QueryLayerFilter(), Detail->Backend.QueryPairFilter());
+    Detail->Solver.SetGravity(ToVector(Settings.GravityMps2));
+    Detail->Solver.SetContactListener(&Detail->Contacts);
+}
+
+PhysicsSpace::~PhysicsSpace()
+{
+    JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterface();
+    for (const JPH::BodyID& Body : Detail->Bodies)
+    {
+        Interface.RemoveBody(Body);
+        Interface.DestroyBody(Body);
+    }
+}
 
 uint32_t PhysicsSpace::AddBody(const PhysicsBodyDescriptor& Descriptor)
 {
-    const uint32_t Index = Adapter->AddBody(Descriptor);
-    if (Index == PhysicsNoBody) return PhysicsNoBody;
+    constexpr uint32_t Refused = std::numeric_limits<uint32_t>::max();
+    JPH::RefConst<JPH::Shape> Shape;
+    if (Descriptor.Shape == PhysicsShape::Sphere)
+    {
+        if (!(Descriptor.HalfExtentMetres[0] > 1.0e-3)) return Refused;
+        Shape = new JPH::SphereShape(static_cast<float>(Descriptor.HalfExtentMetres[0]));
+    }
+    else
+    {
+        const JPH::Vec3 Half = ToVector(Descriptor.HalfExtentMetres);
+        if (!(Half.ReduceMin() > 1.0e-3f)) return Refused;
+        // 📝 The convex radius rounds the box's edges; it must stay below half the smallest side.
+        Shape = new JPH::BoxShape(Half, std::min(JPH::cDefaultConvexRadius, 0.5f * Half.ReduceMin()));
+    }
+    const bool                Moving = Descriptor.Motion == PhysicsMotion::Moving;
+    JPH::BodyCreationSettings Settings(Shape, JPH::RVec3(ToVector(Descriptor.PositionMetres)),
+                                       JPH::Quat(static_cast<float>(Descriptor.Orientation[0]), static_cast<float>(Descriptor.Orientation[1]),
+                                                 static_cast<float>(Descriptor.Orientation[2]), static_cast<float>(Descriptor.Orientation[3]))
+                                           .Normalized(),
+                                       Moving ? JPH::EMotionType::Dynamic : JPH::EMotionType::Static, Moving ? JoltLayers::Moving : JoltLayers::Fixed);
+    Settings.mFriction       = static_cast<float>(Descriptor.Friction);
+    Settings.mRestitution    = static_cast<float>(Descriptor.Restitution);
+    Settings.mLinearDamping  = static_cast<float>(Descriptor.LinearDamping);
+    Settings.mUserData       = Descriptor.Record;
+    if (Moving)
+    {
+        Settings.mLinearVelocity  = ToVector(Descriptor.LinearVelocityMps);
+        Settings.mAngularVelocity = ToVector(Descriptor.AngularVelocityRads);
+        if (Descriptor.MassKilograms > 0.0)
+        {
+            Settings.mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
+            Settings.mMassPropertiesOverride.mMass = static_cast<float>(Descriptor.MassKilograms);
+        }
+    }
+    JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterface();
+    const JPH::BodyID   Body      = Interface.CreateAndAddBody(Settings, Moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+    if (Body.IsInvalid()) return Refused;
+    Detail->Bodies.push_back(Body);
     Descriptors.push_back(Descriptor);
-    // 📝 The descriptor keeps its shape figures, not the hull points or triangles (the solver holds those).
-    Descriptors.back().Points.clear();
-    Descriptors.back().Points.shrink_to_fit();
-    Descriptors.back().Triangles.clear();
-    Descriptors.back().Triangles.shrink_to_fit();
-    return Index;
-}
-
-void PhysicsSpace::RemoveBody(uint32_t Index)
-{
-    Adapter->RemoveBody(Index);
+    return static_cast<uint32_t>(Descriptors.size() - 1);
 }
 
 void PhysicsSpace::Prepare()
 {
-    Adapter->Prepare();
+    Detail->Solver.OptimizeBroadPhase();
 }
 
 void PhysicsSpace::Step(double DeltaSeconds, uint32_t CollisionSteps)
 {
     if (!(DeltaSeconds > 0.0)) return;
-    Adapter->Step(DeltaSeconds, CollisionSteps);
+    (void)Detail->Solver.Update(static_cast<float>(DeltaSeconds), static_cast<int>(std::max(1u, CollisionSteps)), &Detail->Backend.AccessTemporary(),
+                                &Detail->Backend.AccessJobs());
     SimulatedSeconds += DeltaSeconds;
 }
 
 PhysicsBodyReading PhysicsSpace::ReadBody(uint32_t Index) const
 {
-    return Adapter->ReadBody(Index);
-}
-
-void PhysicsSpace::PlaceBody(uint32_t Index, const PhysicsBodyReading& Pose)
-{
-    Adapter->PlaceBody(Index, Pose);
-}
-
-void PhysicsSpace::ApplyForce(uint32_t Index, const std::array<double, 3>& Force, const std::array<double, 3>& Point)
-{
-    Adapter->ApplyForce(Index, Force, Point);
-}
-
-void PhysicsSpace::ApplyTorque(uint32_t Index, const std::array<double, 3>& Torque)
-{
-    Adapter->ApplyTorque(Index, Torque);
-}
-
-bool PhysicsSpace::CastRay(const PhysicsRay& Ray, PhysicsRayHit& Hit) const
-{
-    return Adapter->CastRay(Ray, Hit);
-}
-
-void PhysicsSpace::AssignMass(uint32_t Index, double MassKilograms, const std::array<double, 3>& InertiaKgm2)
-{
-    Adapter->AssignMass(Index, MassKilograms, InertiaKgm2);
-}
-
-void PhysicsSpace::Dispatch(uint32_t Count, const std::function<void(uint32_t)>& Task)
-{
-    Adapter->Dispatch(Count, Task);
+    PhysicsBodyReading Reading;
+    if (Index >= Detail->Bodies.size()) return Reading;
+    const JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterfaceNoLock();
+    const JPH::BodyID         Body      = Detail->Bodies[Index];
+    JPH::RVec3                Position;
+    JPH::Quat                 Rotation;
+    Interface.GetPositionAndRotation(Body, Position, Rotation);
+    const JPH::Vec3 Linear  = Interface.GetLinearVelocity(Body);
+    const JPH::Vec3 Angular = Interface.GetAngularVelocity(Body);
+    Reading.PositionMetres      = { Position.GetX(), Position.GetY(), Position.GetZ() };
+    Reading.Orientation         = { Rotation.GetX(), Rotation.GetY(), Rotation.GetZ(), Rotation.GetW() };
+    Reading.LinearVelocityMps   = { Linear.GetX(), Linear.GetY(), Linear.GetZ() };
+    Reading.AngularVelocityRads = { Angular.GetX(), Angular.GetY(), Angular.GetZ() };
+    Reading.Awake               = Interface.IsActive(Body);
+    return Reading;
 }
 
 size_t PhysicsSpace::QueryAwakeCount() const
 {
-    return Adapter->QueryAwakeCount();
+    return Detail->Solver.GetNumActiveBodies(JPH::EBodyType::RigidBody);
 }
 
 uint64_t PhysicsSpace::QueryContactsAdded() const noexcept
 {
-    return Adapter->QueryContactsAdded();
-}
-
-std::vector<PhysicsImpactEvent> PhysicsSpace::DrainImpactEvents()
-{
-    return Adapter->DrainImpactEvents();
+    return Detail->Contacts.Added.load(std::memory_order_relaxed);
 }
 
 uint32_t PhysicsSpace::QueryWorkers() const noexcept
 {
-    return Adapter->QueryWorkers();
-}
-
-const char* PhysicsSpace::QuerySolverName() const noexcept
-{
-    return Adapter->QuerySolverName();
+    return Detail->Backend.QueryWorkers();
 }
 
 //------------------------------------------------------------------------------------------------------------------------

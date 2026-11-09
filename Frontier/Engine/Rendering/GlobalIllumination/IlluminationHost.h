@@ -9,10 +9,8 @@
 #include "DisplayProjection.h"
 #include "EnvironmentEncoding.h"
 #include "IlluminationConstants.h"
-#include "ImpactSparkGpuRecord.h"
 #include "LuminaireRegister.h"
 #include "OccupantDistanceSpace.h"
-#include "PlumeSpace.h"
 #include "RefreshEncoding.h"
 #include "RayTracingSpace.h"
 #include "ResamplingSequence.h"
@@ -24,7 +22,6 @@
 
 #include <filesystem>
 #include <functional>
-#include <span>
 
 namespace Frontier::GlobalIllumination
 {
@@ -139,8 +136,6 @@ class IlluminationHost
     // 📝 One refresh in the demo's recording order; the supplier runs after the host's own writes (later writes win).
     bool AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
                         std::string* OutDiagnostic = nullptr, const RefreshInterlude* Interlude = nullptr);
-    // 📝 Writes the current viewport's bounded, short-lived spark list to the GI display pass.
-    void AssignImpactSparks(std::span<const ImpactSparkGpuRecord> Sparks);
 
     // 📝 Street-lamp heads and lamp-post lanterns of the loaded scene, in placement order (LevelStructure.js); an inactive
     //    head or lantern keeps its slot unlit.
@@ -180,10 +175,9 @@ class IlluminationHost
     std::unique_ptr<VarianceIntegrator> Diffuse{};
     std::unique_ptr<VarianceIntegrator> Glossy{};
     std::unique_ptr<DisplayProjection>  Display{};
-    std::unique_ptr<PlumeSpace>         Plume{};
 
     std::shared_ptr<DeviceRegion>       VertexRegion{}, MaterialRegion{}, RefreshRegion{}, LuminaireRegion{}, OccupantRegion{};
-    std::shared_ptr<DeviceRegion>       VehicleRegion{}, EffectRegion{}, ImpactSparkRegion{}, CloudShadowParams{}, CloudParams{};
+    std::shared_ptr<DeviceRegion>       VehicleRegion{}, EffectRegion{}, CloudShadowParams{}, CloudParams{};
     std::shared_ptr<DeviceTexture>      MoonAtlasTexture{}, StarCatalogueTexture{}, TyreMarkTexture{}, CloudShadowTexture{}, CloudColourTexture{},
                                         CloudGuideTexture{}, CaptureTexture{};
     std::shared_ptr<DeviceTextureView>  CaptureView{};
@@ -201,7 +195,6 @@ class IlluminationHost
     CelestialSolution                   LastCelestial{};
     std::optional<std::pair<Vector3, double>> PriorLight{};   // [-] direction, summed illuminance of the previous refresh
     uint32_t                            MaterialFamilyCount = 0;   // [-] Materials.bin's families and the engine shapes'
-    uint32_t                            ImpactSparkInstanceCount = 0;
     uint32_t                            RefreshIndex = 0;
     uint32_t                            ScreenGeneration = 0;   // [-] advances whenever the screen targets are rebuilt
     bool                                PriorValid   = false;

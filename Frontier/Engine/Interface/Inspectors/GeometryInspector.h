@@ -8,6 +8,7 @@
 
 #include "Engine/Diagnostics/BuildConfiguration.h"
 #include "Engine/Interface/InspectorRuntime.h"
+#include "Engine/Interface/Inspectors/FractureInspector.h"
 #include "Engine/Scene/EngineConfigurations.h"
 
 #include <algorithm>
@@ -27,7 +28,7 @@ class ControlColumn;
 class GeometryInspector final : public RecordInspector
 {
   public:
-    explicit GeometryInspector(GeometryConfiguration& InParameters) noexcept : Parameters(InParameters) {}
+    explicit GeometryInspector(GeometryConfiguration& InParameters) noexcept : Parameters(InParameters), FractureView(InParameters.Fracture) {}
 
     [[nodiscard]] const char* QueryEyebrowText() const noexcept override { return "INSPECTOR / GEOMETRY"; }
     [[nodiscard]] const char* QuerySectionNote() const noexcept override { return "Geometry"; }
@@ -59,6 +60,7 @@ class GeometryInspector final : public RecordInspector
 
   private:
     GeometryConfiguration& Parameters;
+    FractureInspector      FractureView;            // [-] the Fracture editor's view of the object's fracture
     bool                   NotesOpen    = false;
     int                    MaterialSlot = 0;   // [-] the family shown in the material card
 };

@@ -1498,6 +1498,7 @@ bool DeviceExchange::Submit(CommandSequence& Sequence, std::string* OutDiagnosti
     // 🔍 FRONTIER_DEVICE_TRACE=1 names every submission on stderr before it runs (a driver crash then names its work).
     static const bool Trace = std::getenv("FRONTIER_DEVICE_TRACE") != nullptr;
     if (Trace) std::fprintf(stderr, "[DeviceExchange] submission %llu: %s\n", static_cast<unsigned long long>(CompletedSubmissions_ + 1), SubmissionLabel_.c_str());
+    const auto     SubmitStart = std::chrono::steady_clock::now();
     const VkResult Submitted = Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_);
     if (Submitted != VK_SUCCESS)
     {
@@ -1519,6 +1520,8 @@ bool DeviceExchange::Submit(CommandSequence& Sequence, std::string* OutDiagnosti
     }
     ++CompletedSubmissions_;
     CompletedLabel_ = SubmissionLabel_;
+    if (SubmissionTiming)
+        SubmissionTiming(SubmissionLabel_, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - SubmitStart).count());
     return true;
 }
 

@@ -8,7 +8,6 @@
 #include "IntrinsicParity.slang"
 #include "HostConstants.slang"
 #include "SceneLayouts.slang"
-#include "VehicleVisual.slang"
 
 // 📝 Written by AnalyticIlluminationSequence.cpp (EncodeAnalyticConstants), 76 floats in float4 rows.
 struct AnalyticConstants
@@ -30,24 +29,6 @@ struct AnalyticConstants
   [[vk::binding(2, 0)]] StructuredBuffer<MaterialProfile>  Materials;
   [[vk::binding(3, 0)]] Texture2D<float>                   SolarDepth;
   [[vk::binding(4, 0)]] SamplerComparisonState             SolarComparison;
-  [[vk::binding(5, 0)]] StructuredBuffer<VehicleProfile>   VehicleState;
 
-static const uint NoFamilyOverride     = 0xFFFFFFFFu;   // [-] OccupantProfile.MaterialOverride keeping the per-facet family
-static const uint FamilyBlockBit       = 0x80000000u;   // [-] beyond the demo: the override offsets the family into the object's material block
-static const uint VehicleOccupantCount = 5u;            // [-] occupant 0 = ControlVehicle body, occupants 1..4 = FL, FR, RL, RR wheels
-
-DeformedVertex DeformAnalyticVehicleVertex(uint Index, uint Family, float3 Position, float3 Normal)
-{
-    var Moved : DeformedVertex = {};
-    Moved.Position = Position;
-    Moved.Normal   = Normal;
-    if (Index >= 1u && Index < VehicleOccupantCount)
-    {
-        return ResolveWheelVertex(Index - 1u, Family, Position, Normal);
-    }
-    if (Index == 0u)
-    {
-        return DeformBodyVertex(Family, Position, Normal);
-    }
-    return Moved;
-}
+static const uint NoFamilyOverride = 0xFFFFFFFFu;   // [-] OccupantProfile.MaterialOverride keeping the per-facet family
+static const uint FamilyBlockBit   = 0x80000000u;   // [-] beyond the demo: the override offsets the family into the object's material block

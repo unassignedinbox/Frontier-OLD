@@ -18,10 +18,9 @@ namespace Frontier::GlobalIllumination
 namespace
 {
 constexpr uint32_t RefreshConstantsBytes = 1072;    // [B] RefreshConstants (268 floats)
-constexpr uint32_t VehicleProfileBytes    = 10448;   // [B] VehicleProfile
-constexpr uint32_t EffectProfileBytes     = 1120;    // [B] EffectProfile
-constexpr uint32_t ImpactSparkProfileBytes = 16 + ImpactSparkCapacity * 48;
-constexpr double   Pi                     = 3.141592653589793;
+constexpr uint32_t VehicleProfileBytes   = 10448;   // [B] VehicleProfile
+constexpr uint32_t EffectProfileBytes    = 1120;    // [B] EffectProfile
+constexpr double   Pi                    = 3.141592653589793;
 
 // 📝 The demo's EnvironmentSettings is one object: the keys AtmosphereIntegrator reads mirror the environment's own.
 void SynchronizeAtmosphere(EnvironmentSettings& Environment)
@@ -192,7 +191,6 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     auto DepositSampler = Exchange.ConstructSampler(DepositSampling);
     VehicleRegion     = Exchange.ConstructRegion(VehicleProfileBytes, "Vehicle record");
     EffectRegion      = Exchange.ConstructRegion(EffectProfileBytes, "Effect record");
-    ImpactSparkRegion = Exchange.ConstructRegion(ImpactSparkProfileBytes, "Jolt impact sparks");
     CloudShadowParams = Exchange.ConstructRegion(48, "Projected cloud shadows");
     CloudParams       = Exchange.ConstructRegion(544, "Cloud renderer v2");
     TextureSpecification CloudShadow;
@@ -221,10 +219,8 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Glossy = std::make_unique<VarianceIntegrator>(Exchange, Shaders, "Glossy", VarianceSettings{0.12f, 12, 2, 3.0f});
     Glossy->ConstructPrograms(RefreshRegion);
     Display = std::make_unique<DisplayProjection>(Exchange, Shaders);
-    Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb, ImpactSparkRegion);
+    Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb);
     Display->ConstructInspection(Distance->MarchLayout, Cards->SamplingLayout, RayTracing->MarchLayout);
-    Plume = std::make_unique<PlumeSpace>(Exchange, Shaders);
-    Plume->ConstructPrograms(RefreshRegion, OccupantRegion, Distance->MarchLayout);
     for (const auto& [Offset, Bytes] : Assets.MaterialRewrites)
     {
         Exchange.WriteRegion(MaterialRegion, Offset, Bytes.data(), Bytes.size());
@@ -253,14 +249,8 @@ void IlluminationHost::ReconstructScreenTargets(std::array<uint32_t, 2> Extent)
     Diffuse->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->IrradianceView, Resampling->IrradianceView}, Resampling->GuideViews);
     Glossy->ConstructTargets(TraceExtent, ScreenExtent, *Surface, {Resampling->ReflectionView, Resampling->ReflectionView}, Resampling->GuideViews,
                              Resampling->MirrorView);
-    if (Plume)
-    {
-        Plume->ResizeTargets(TraceExtent[0], TraceExtent[1], Surface->DepthView, Shadow->LayeredView, Shadow->ComparisonSampler,
-                             Shadow->ReceiverRegion, Atmosphere->SkyView, Atmosphere->SkySampler);
-    }
     auto CloudColour = Exchange.ConstructView(CloudColourTexture);
-    DisplayNeutralResources Neutral{CloudParams, CloudColour, Exchange.ConstructView(CloudGuideTexture), CloudColour,
-                                    Plume ? Plume->MarchView : nullptr};
+    DisplayNeutralResources Neutral{CloudParams, CloudColour, Exchange.ConstructView(CloudGuideTexture), CloudColour};
     Display->ConstructTargets(ScreenExtent, *Surface, *Resampling, *Diffuse, *Glossy, *Cards, Neutral);
     PriorValid = false;
     TextureSpecification Capture;
@@ -370,24 +360,6 @@ bool IlluminationHost::WriteMaterialBlock(uint32_t Block, const std::vector<uint
     const size_t Bytes = std::min<size_t>(Records.size(), static_cast<size_t>(MaterialFamilyCount) * MaterialStride);
     Exchange.WriteRegion(MaterialRegion, static_cast<VkDeviceSize>(QueryMaterialBlockBase(Block)) * MaterialStride, Records.data(), Bytes);
     return true;
-}
-
-void IlluminationHost::AssignImpactSparks(std::span<const ImpactSparkGpuRecord> Sparks)
-{
-    ImpactSparkInstanceCount = 0;
-    if (!ImpactSparkRegion) return;
-    struct alignas(16) ImpactSparkProfile
-    {
-        std::array<uint32_t, 4> Header{};
-        std::array<ImpactSparkGpuRecord, ImpactSparkCapacity> Sparks{};
-    } Profile;
-    static_assert(sizeof(ImpactSparkGpuRecord) == 48);
-    static_assert(sizeof(ImpactSparkProfile) == ImpactSparkProfileBytes);
-    const size_t Count = std::min<size_t>(Sparks.size(), ImpactSparkCapacity);
-    Profile.Header[0] = static_cast<uint32_t>(Count);
-    std::copy_n(Sparks.begin(), Count, Profile.Sparks.begin());
-    ImpactSparkInstanceCount = static_cast<uint32_t>(Count);
-    Exchange.WriteRegion(ImpactSparkRegion, 0, &Profile, sizeof(Profile));
 }
 
 bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
@@ -501,7 +473,6 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     if (Inputs != nullptr)
     {
         Distance->RecordUnion(Begin("distance union"), Scene.QueryUnionCount(), RefreshIndex);
-        if (Plume && Plume->Active()) Plume->RecordTransport(Begin("plume transport"), Distance->MarchGroup);
     }
     else
     {
@@ -555,11 +526,9 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         Surface->Virtualized->RecordInspectionView(Begin("cluster inspection"), Display->InspectionView, Inputs->Toggles.Inspection);
     else if (Surface->Virtualized)
         Surface->Virtualized->DismissInspectionStatus();
-    if (Plume && Plume->Active()) Plume->RecordMarch(Begin("plume march"));
     if (Interlude == nullptr)
     {
         Display->RecordResolve(Begin("resolve"), Parity);
-        Display->RecordImpactSparks(Begin("impact sparks"), Parity, ImpactSparkInstanceCount);
         Display->RecordPresent(Begin("present"), Parity, CaptureView);
         if (!SubmitSeries()) return false;
     }
@@ -579,7 +548,6 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         CommandSequence& Presentation = Begin("antialias and present");
         if (Interlude->BeforeAntialias) Interlude->BeforeAntialias(Presentation, Parity);
         Display->RecordAntialias(Presentation, Parity, Interlude->AntialiasSource);
-        Display->RecordImpactSparks(Presentation, Parity, ImpactSparkInstanceCount);
         Display->RecordPresent(Presentation, Parity, CaptureView);
         Presentation.OrderAfterEarlierWork();
         if (!SubmitSeries()) return false;

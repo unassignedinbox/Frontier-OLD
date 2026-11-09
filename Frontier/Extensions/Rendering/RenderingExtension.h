@@ -10,15 +10,12 @@
 #include "Frontier/Engine/Interface/SceneViewportPresentation.h"
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
-#include "Frontier/Engine/Rendering/SceneViewport/ImpactSparkSequence.h"
 #include "Frontier/Engine/Scene/SolarPlacement.h"
 
 #include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace Frontier
 {
@@ -56,15 +53,11 @@ class RenderingExtension
     [[nodiscard]] const SceneGeometryOccupancy&                QueryGeometry() const noexcept { return Geometry_; }
 
   private:
-    void SynchronizeVehicleVisuals(const Frontier::WorldSpace& World);
-    void SynchronizePlumeSources(const Frontier::WorldSpace& World, float DeltaSeconds, double ElapsedSeconds);
-
     std::filesystem::path                                        ProjectRoot_;
     std::filesystem::path                                        ShaderRoot_;
     bool                                                         HostDeviceAttached_ = false;
     Frontier::VulkanDeviceAccess                                 Device_{};
     std::unique_ptr<Frontier::GlobalIllumination::SceneViewport> Viewport_{};
-    std::string                                                  SceneArchive_{};
     std::string                                                  Quality_{};
     bool                                                         RayTracing_ = true;
     std::string                                                  Failure_{};
@@ -75,13 +68,6 @@ class RenderingExtension
     SceneGeometryOccupancy                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
     const Frontier::GlobalIllumination::SceneStructure*          GeometryScene_ = nullptr;    // [-] the scene Geometry_ was reset with
     SceneViewportPick                                            Pick_{};                     // [-] the answer to the last pick serial
-    ImpactSparkSequence                                           ImpactSparks_{};             // [-] ballistic particles emitted from newly drained Jolt contacts
-    bool                                                         VehicleShown_       = false; // [-] occupants 0..4 currently active
-    RecordToken                                                  ActiveVehicleToken_{};       // [-] shown vehicle record for viewport picking
-    std::array<RecordToken, 4>                                   ActiveCornerTokens_{};       // [-] enclosed FL/FR/RL/RR tyre tokens
-    uint64_t                                                     AuthoringSignature_ = 0;     // [-] memoized revision digest while stopped
-    FluidDynamics::PlumeSourceProjector                          PlumeProjector_{};
-    std::unordered_map<std::string, FluidDynamics::FluidSceneDocument> LoadedFluidSpaces_{};
 };
 
 } // namespace Frontier

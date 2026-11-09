@@ -155,17 +155,6 @@ float ResolveHmiScale(RefreshConstants Refresh)
     return SelectBranch(1.0, float(Encoded) / 1000.0, Encoded > 0u);
 }
 
-uint ResolveCameraMotionBlurMode(RefreshConstants Refresh)
-{
-    return Refresh.PresentationControl & 3u;
-}
-
-float ResolveCameraMotionBlurStrength(RefreshConstants Refresh)
-{
-    let Encoded = (Refresh.PresentationControl >> 2u) & 63u;
-    return float(Encoded) / 63.0;
-}
-
 //------------------------------------------------------------------------------------------------------------------------
 //                                                   OCCUPANT RECORD
 //------------------------------------------------------------------------------------------------------------------------

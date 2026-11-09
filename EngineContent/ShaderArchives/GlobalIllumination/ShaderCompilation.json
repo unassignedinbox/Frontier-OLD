@@ -42,7 +42,7 @@
     },
     {
       "file": "DisplayAntialias.IntegrateAntialias.spv",
-      "spirv_sha256": "2db7893f3e1a4402af715cbddf4f0dd77f8f66d202891d07063211f3eeb4e2d6"
+      "spirv_sha256": "77717e11d95cf71450c87cdd9fd9eb3122f90f46fa6212e4e6dd113a4e67db66"
     },
     {
       "file": "DisplayExposure.IntegrateExposure.spv",
@@ -93,14 +93,6 @@
       "spirv_sha256": "58b58b3ba880588a38ba79332ec22b098e77b9d687e1ebe9c40bc7b93b5eba2a"
     },
     {
-      "file": "ImpactSpark.ImpactSparkFragment.spv",
-      "spirv_sha256": "308dc904d6f809c23d756aa17173ed7632e2eb232feae14608d173c023d4e48c"
-    },
-    {
-      "file": "ImpactSpark.ImpactSparkVertex.spv",
-      "spirv_sha256": "6386648d81f0440fb4549a5a94c75593b8cf33d1561ba3812a71e6a85f7840d0"
-    },
-    {
       "file": "InspectionMarch.MarchInspection.spv",
       "spirv_sha256": "764937835a688f430d780455e9adc3a635ef0544a3a6714bd5ecd0c526ff8552"
     },
@@ -115,42 +107,6 @@
     {
       "file": "PickRaster.PickVertex.spv",
       "spirv_sha256": "dd778364384146f84e7ce1a4fe2c0a9e75d7ea0ce6f00a60ef1cb1e13f8f34ad"
-    },
-    {
-      "file": "PlumeAdvection.AdvectThermo.spv",
-      "spirv_sha256": "8814514a56084c8d6b43c705894cf1455e7e09020f0ed6b826461042c29b050a"
-    },
-    {
-      "file": "PlumeAdvection.AdvectVelocity.spv",
-      "spirv_sha256": "ba8c4eeacbb599991fc6c4b4259b28ea8bf7a4afaa00819f5583005fc086d1c6"
-    },
-    {
-      "file": "PlumeAdvection.ResolveSunTransmittance.spv",
-      "spirv_sha256": "b383a393eec2b3536625c89bb97e94bef28dffb97639cb698d0027fd08156ee2"
-    },
-    {
-      "file": "PlumeMarch.MarchPlume.spv",
-      "spirv_sha256": "6c8c1daafb18c23bbcf4a770e5163d9d9545ddd1a44080de1c70e9be8f5f53e4"
-    },
-    {
-      "file": "PlumePressure.ProjectVelocity.spv",
-      "spirv_sha256": "ffb3120a7f3ade051d8949de5d10599378fcb0e58493244f10d09bd3a65949dd"
-    },
-    {
-      "file": "PlumePressure.RelaxPressure.spv",
-      "spirv_sha256": "50324b2cced43961e09e005ad274ac8778f367005ee4adfe9f1d3a30d1d429cf"
-    },
-    {
-      "file": "PlumePressure.ResolveDivergence.spv",
-      "spirv_sha256": "8d8ef198a0b5822dc6fa1025b016a7a3b35aaad8de7b44e1f487bd4e504c1faf"
-    },
-    {
-      "file": "PlumeVorticity.ConfineVorticity.spv",
-      "spirv_sha256": "1dadb9a04def6de19e25974a260f19e27aad993fde510bc215995b6accb7aa27"
-    },
-    {
-      "file": "PlumeVorticity.ResolveCurl.spv",
-      "spirv_sha256": "c415f5e631280d7e0f6a36364d00dade437ba770e3b4e372de34aac6f18c341b"
     },
     {
       "file": "ReflectionTrace.TraverseMirrorReflection.spv",
@@ -186,11 +142,11 @@
     },
     {
       "file": "SurfaceRaster.SurfaceFragment.spv",
-      "spirv_sha256": "3bda2573a0a74c53dfd2f949669c3ace72375581b1dcb5033397e01c46af818a"
+      "spirv_sha256": "064323d0426578aef63b66068d654470daec620f95fced1fa295543cb65ded83"
     },
     {
       "file": "SurfaceRaster.SurfaceVertex.spv",
-      "spirv_sha256": "964774532af03445463247b6f42c17b649ecdee08839feb3d7e909702d81f49d"
+      "spirv_sha256": "ae12067111d3ec9cbff467838ada652a426abd93a0bfa6f0eef28056cb3c322c"
     },
     {
       "file": "VarianceTemporal.IntegrateTemporal.spv",
@@ -288,7 +244,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayAntialias.slang",
-      "sha256": "90d02b1bd7e47f5a10bae843d9488922d0dcc91a3068a242a9a18f02568608b1"
+      "sha256": "774467520e1d699d9685d9fcb8fd83905918ffa7c08fde149c1a73c9734e20b6"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayExposure.slang",
@@ -351,14 +307,6 @@
       "sha256": "e7db94f4ed7070df8437a5462c47a95ddabf41c3498825c44675364fd631b3f1"
     },
     {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/ImpactSpark.slang",
-      "sha256": "5dc231b1451de1a753cbed11ac6573d832b363d355c315db163adee43bf447ee"
-    },
-    {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/ImpactSparkLayouts.slang",
-      "sha256": "4ca31f2f882c9a50faef61ef0dea776b859af5c528f105bb8f67dd22fa680764"
-    },
-    {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/InspectionMarch.slang",
       "sha256": "503faa7e76043ef0ec7f773a64a9422cdb2de33a221f38febb7fd2cd0bf2776d"
     },
@@ -387,26 +335,6 @@
       "sha256": "be18b160a14a5ec5a900289a128010e55107a12f11a988b2406973a6aadb9d4d"
     },
     {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumeAdvection.slang",
-      "sha256": "43bd3170b528426a5727a0f3b3b54f80d6b4e9e35d43546c4627f9d0c427543a"
-    },
-    {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumeLayouts.slang",
-      "sha256": "b79bdeec049db7c27266c22219e966e7d85bbc0fd1b31e90b300b4ca2c324f58"
-    },
-    {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumeMarch.slang",
-      "sha256": "194c8dec180a79ab9cb70d25a402ba3194c37189910b0f1d0fb9cee9146b3d46"
-    },
-    {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumePressure.slang",
-      "sha256": "bf8afabf1f493cbb649a387117b7b193a9cea28fa673401707bea1ffac1e5e3b"
-    },
-    {
-      "file": "Frontier/Engine/Shaders/GlobalIllumination/PlumeVorticity.slang",
-      "sha256": "062d46d88a94bbb55de3116eaa9649fe70b0a239f1ca09768895f45324dbf1dc"
-    },
-    {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/RayIntersection.slang",
       "sha256": "b1d101b355b6dfa541741486afdf305f3dc57a00db86c59f6db9cdf6b5f28f43"
     },
@@ -432,7 +360,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "547887f714a9db65f628273ae2331e76b21eb2d82f7c19aa414877d373f5955c"
+      "sha256": "773d4e1b24f6c4256334c63c5cfa7fb77a733a28c0d5926be7e1b27aaaf560e2"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ShadowRaster.slang",
@@ -444,7 +372,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SurfaceRaster.slang",
-      "sha256": "49b882061e5505429d7fa9734d147223cf347278e6cef71dc410fc9e346124ff"
+      "sha256": "310b7f92ddf23ab4a5b9074c4d3686cd45d83e049446200a424fceb55220978e"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SurfaceReflectance.slang",

@@ -5,8 +5,6 @@
 //    environment records at day, low sun, dusk fog and night, and checks what each image must show.
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
-#include "Frontier/Engine/Rendering/SceneViewport/ImpactSparkSequence.h"
-#include "ImpactSparkFixture.h"
 
 #include "stb_image_write.h"
 
@@ -177,7 +175,7 @@ ImageStatistics Measure(const std::vector<uint8_t>& Rgba, uint32_t Width, uint32
                 const double Around = (Luminance(&Rgba[(static_cast<size_t>(Y) * Width + X - 1) * 4]) +
                                        Luminance(&Rgba[(static_cast<size_t>(Y) * Width + X + 1) * 4]) +
                                        Luminance(&Rgba[(static_cast<size_t>(Y - 1) * Width + X) * 4])) / 3.0;
-                if (L > 0.25 && L > Around + 0.08) ++Result.StarPixels;
+                if (L > 0.25 && L > Around + 0.15) ++Result.StarPixels;
             }
         }
     }
@@ -255,22 +253,6 @@ int main(int ArgumentCount, char** Arguments)
         LowSun.BracketShafts                      = true;
         LowSun.Camera.Position = {-62.0, -48.0, 3.0};
         LowSun.Camera.Target   = {-62.0 + 60.0 * std::cos(28.0 * 3.14159265358979 / 180.0), -48.0 + 60.0 * std::sin(28.0 * 3.14159265358979 / 180.0), 8.0};
-        // 📝 The sun-cascade test needs a scattering medium in the camera view; global height fog alone has no local shaft volume.
-        LocalFogEnvironment ShaftFog;
-        ShaftFog.Token = 1;
-        ShaftFog.Parameters.CentreMetres[0] = -10.0f;
-        ShaftFog.Parameters.CentreMetres[1] = -20.0f;
-        ShaftFog.Parameters.CentreMetres[2] = 6.0f;
-        ShaftFog.Parameters.HalfExtentsMetres[0] = 36.0f;
-        ShaftFog.Parameters.HalfExtentsMetres[1] = 36.0f;
-        ShaftFog.Parameters.HalfExtentsMetres[2] = 16.0f;
-        ShaftFog.Parameters.LocalDensity = 0.035f;
-        ShaftFog.Parameters.Absorption = 0.08f;
-        ShaftFog.Parameters.PhaseAnisotropy = 0.65f;
-        ShaftFog.Parameters.Heterogeneity = 0.0f;
-        ShaftFog.Parameters.NoiseScaleMetres = 12.0f;
-        ShaftFog.Parameters.LocalSamples = 48;
-        LowSun.Environment.LocalFogVolumes.push_back(ShaftFog);
         Scenarios.push_back(LowSun);
     }
     {
@@ -344,175 +326,34 @@ int main(int ArgumentCount, char** Arguments)
         ReportCheck(Measured.Brightest > 0.05, std::string(Case.Name) + " presented a lit image");
         if (Case.BracketShafts)
         {
-            // 🔍 A stable A/B/A of the actual local fog medium: disable GI, TAA and auto exposure, hold the sky clock, then toggle
-            //    only Fog.ReceiveRayShadow. The prior check had global height fog but no local scattering volume for the cascade shadows.
-            ViewportRendering ShaftRendering;
-            ShaftRendering.GlobalIllumination = false;
-            ShaftRendering.TemporalAntiAliasing = false;
-            ShaftRendering.Toggles.RayTracing = false;
-            ShaftRendering.Toggles.Reflection = false;
-            ShaftRendering.Toggles.CardRadiosity = false;
-            ShaftRendering.Toggles.AutoExposure = false;
-            ShaftRendering.Toggles.RadianceRefresh = false;
+            // 🔍 Sun shafts A/B on the settled scenario: Fog.ReceiveRayShadow off for one refresh between two shafted ones, all at the
+            //    clock of the last refresh. The refresh's own image, history and eye adaptation never see the overlay, so only the
+            //    fog differs between the three, and a drift of the history brackets out.
             std::vector<float> Radiance;
             EnvironmentOverlay* Overlay = Viewport.AccessOverlay();
-            for (uint32_t Step = 0; Step < 3; ++Step)
+            ShaftBracket[0] = Overlay != nullptr && Overlay->ReadOverlaidRadiance(Radiance) ? MeanLinearLuminance(Radiance) : 0.0;
+            for (uint32_t Step = 1; Step < 3; ++Step)
             {
                 SceneEnvironment Environment     = Case.Environment;
                 Environment.ElapsedSeconds       = (std::max(Refreshes, 1u) - 1) / 30.0;
                 Environment.Fog.ReceiveRayShadow = Step != 1;
-                if (!Viewport.Refresh(Case.Camera, Environment, ShaftRendering, 0.0, {Width, Height}, &Diagnostic))
+                if (!Viewport.Refresh(Case.Camera, Environment, {}, 1.0 / 30.0, {Width, Height}, &Diagnostic))
                 {
                     ReportCheck(false, std::string(Case.Name) + " shaft bracket refresh " + std::to_string(Step), Diagnostic);
                     return 1;
                 }
                 ShaftBracket[Step] = Overlay != nullptr && Overlay->ReadOverlaidRadiance(Radiance) ? MeanLinearLuminance(Radiance) : 0.0;
-                if (Viewport.ReadPresented(Rgba) && Rgba.size() == static_cast<size_t>(Width) * Height * 4)
+                if (Step == 1 && Viewport.ReadPresented(Rgba) && Rgba.size() == static_cast<size_t>(Width) * Height * 4)
                 {
-                    const std::string Suffix = Step == 1 ? "UnshadowedFog" : "FogShafted" + std::to_string(Step);
-                    const std::string Path = (OutFolder / (std::string(Case.Name) + Suffix + ".png")).string();
-                    stbi_write_png(Path.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Rgba.data(), static_cast<int>(Width * 4));
+                    const std::string Unshadowed = (OutFolder / (std::string(Case.Name) + "UnshadowedFog.png")).string();
+                    stbi_write_png(Unshadowed.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Rgba.data(), static_cast<int>(Width * 4));
                 }
             }
-            std::printf("  local-fog sun shafts: overlaid mean luminance %.5f shafted, %.5f unshadowed, %.5f shafted (%.2f %% of the unshadowed)\n",
+            std::printf("  fog sun shafts: overlaid mean luminance %.5f shafted, %.5f unshadowed, %.5f shafted (%.2f %% of the unshadowed)\n",
                         ShaftBracket[0], ShaftBracket[1], ShaftBracket[2],
                         100.0 * std::max(ShaftBracket[0], ShaftBracket[2]) / std::max(ShaftBracket[1], 1.0e-12));
         }
     }
-    // 📝 The production impact-particle raster is a separate depth-tested additive layer after resolve/AA. Replay two real Jolt
-    //    chassis contacts in a focused near-field view, then compare the same settled view with their moving streaks.
-    ViewportCamera SparkCamera;
-    SparkCamera.Position = {-44.80, 0.0, 2.80};
-    SparkCamera.Target = {-44.0, 0.0, 2.3786};
-    SparkCamera.VerticalFieldOfView = 0.7853981633974483;
-    ViewportRendering SparkRendering;
-    SparkRendering.GlobalIllumination = false;
-    SparkRendering.TemporalAntiAliasing = false;
-    SparkRendering.Toggles.RayTracing = false;
-    SparkRendering.Toggles.Reflection = false;
-    SparkRendering.Toggles.CardRadiosity = false;
-    SparkRendering.Toggles.DirectShadow = false;
-    SparkRendering.Toggles.AutoExposure = false;
-    SparkRendering.Toggles.RadianceRefresh = false;
-    SceneEnvironment SparkEnvironment = Level;
-    SparkEnvironment.ElapsedSeconds = 0.25;
-    std::vector<uint8_t> SparkBaseline, SparkImage;
-    if (!Viewport.Refresh(SparkCamera, SparkEnvironment, SparkRendering, 0.0, {Width, Height}, &Diagnostic) ||
-        !Viewport.ReadPresented(SparkBaseline) || SparkBaseline.size() != static_cast<size_t>(Width) * Height * 4)
-    {
-        ReportCheck(false, "impact-spark baseline refresh/readback", Diagnostic);
-        return 1;
-    }
-    const std::vector<SceneImpactSpark> ReplayImpacts = FrontierExhibit::ConstructImpactReplay();
-    ReportCheck(ReplayImpacts.size() == 2, "impact raster is driven by real Jolt metal and concrete contacts",
-                std::to_string(ReplayImpacts.size()) + " contact events");
-    ImpactSparkSequence SparkSequence;
-    SparkSequence.Advance(1.0 / 60.0, ReplayImpacts);
-    SparkRendering.ImpactSparks = SparkSequence.BuildGpuRecords();
-    ReportCheck(SparkRendering.ImpactSparks.size() >= 12, "contact replay emitted ballistic GPU streak records",
-                std::to_string(SparkRendering.ImpactSparks.size()) + " live filings");
-    if (!Viewport.Refresh(SparkCamera, SparkEnvironment, SparkRendering, 0.0, {Width, Height}, &Diagnostic) ||
-        !Viewport.ReadPresented(SparkImage) || SparkImage.size() != SparkBaseline.size())
-    {
-        ReportCheck(false, "impact-spark refresh/readback", Diagnostic);
-        return 1;
-    }
-    const std::string SparkPath = (OutFolder / "ImpactSparkRaster.png").string();
-    const bool SparkSaved = stbi_write_png(SparkPath.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4,
-                                           SparkImage.data(), static_cast<int>(Width * 4)) != 0;
-    uint32_t ChangedSparkPixels = 0, HotSparkPixels = 0;
-    for (size_t Pixel = 0; Pixel < static_cast<size_t>(Width) * Height; ++Pixel)
-    {
-        const int Red   = static_cast<int>(SparkImage[Pixel * 4]) - SparkBaseline[Pixel * 4];
-        const int Green = static_cast<int>(SparkImage[Pixel * 4 + 1]) - SparkBaseline[Pixel * 4 + 1];
-        const int Blue  = static_cast<int>(SparkImage[Pixel * 4 + 2]) - SparkBaseline[Pixel * 4 + 2];
-        const int Peak  = std::max({Red, Green, Blue});
-        if (Peak >= 8) ++ChangedSparkPixels;
-        if (Red >= 8 && Red > Green + 2) ++HotSparkPixels;
-    }
-    std::printf("impact particles: %u changed pixels, %u incandescent pixels → %s\n",
-                ChangedSparkPixels, HotSparkPixels, SparkPath.c_str());
-    ReportCheck(SparkSaved, "impact-particle raster capture saved");
-    ReportCheck(ChangedSparkPixels >= 8, "moving impact streaks change the presented raster", std::to_string(ChangedSparkPixels) + " pixels");
-    ReportCheck(HotSparkPixels > 0, "particle streaks preserve incandescent blackbody colour",
-                std::to_string(HotSparkPixels) + " hot pixels");
-
-    // 📝 Camera-only and full-scene motion blur use the same camera move and current radiance, with history/jitter disabled so
-    //    the A/B compares the actual bounded post-process rather than a changing temporal history.
-    ViewportCamera BlurPrevious = SparkCamera;
-    ViewportCamera BlurCurrent = SparkCamera;
-    BlurCurrent.Position[1] += 0.45;
-    BlurCurrent.Target[1] += 0.45;
-    ViewportRendering BlurRendering;
-    BlurRendering.GlobalIllumination = false;
-    BlurRendering.TemporalAntiAliasing = false;
-    BlurRendering.Toggles.RayTracing = false;
-    BlurRendering.Toggles.Reflection = false;
-    BlurRendering.Toggles.CardRadiosity = false;
-    BlurRendering.Toggles.AutoExposure = false;
-    BlurRendering.Toggles.RadianceRefresh = false;
-    BlurRendering.Toggles.TemporalReuse = false;
-    BlurRendering.Toggles.SpatialReuse = false;
-    BlurRendering.Toggles.VisibilityReuse = false;
-    BlurRendering.Toggles.VarianceFilter = false;
-    const Transform BlurPreviousProjection = SceneViewport::ResolveViewProjection(BlurPrevious, {Width, Height});
-    const uint32_t BlurRefreshIndex = Host.RefreshIndex;
-    std::vector<uint8_t> BlurNoMotion, BlurCameraImage, BlurSceneImage;
-    Host.Encoder.PreviousUnjittered = BlurPreviousProjection;
-    if (!Viewport.Refresh(BlurCurrent, SparkEnvironment, BlurRendering, 0.0, {Width, Height}, &Diagnostic) ||
-        !Viewport.ReadPresented(BlurNoMotion) || BlurNoMotion.size() != static_cast<size_t>(Width) * Height * 4)
-    {
-        ReportCheck(false, "motion-blur Off baseline refresh/readback", Diagnostic);
-        return 1;
-    }
-    BlurRendering.CameraMotionBlur.Mode = CameraMotionBlurMode::Camera;
-    BlurRendering.CameraMotionBlur.Strength = 1.0f;
-    Host.RefreshIndex = BlurRefreshIndex;
-    Host.Encoder.PreviousUnjittered = BlurPreviousProjection;
-    if (!Viewport.Refresh(BlurCurrent, SparkEnvironment, BlurRendering, 0.0, {Width, Height}, &Diagnostic) ||
-        !Viewport.ReadPresented(BlurCameraImage) || BlurCameraImage.size() != BlurNoMotion.size())
-    {
-        ReportCheck(false, "camera-only motion-blur refresh/readback", Diagnostic);
-        return 1;
-    }
-    const std::vector<float> MotionVectors = ReadHalfTexture(Host.Exchange, Host.Surface->MotionTexture);
-    uint32_t CameraMotionPixels = 0;
-    for (size_t Texel = 0; Texel + 3 < MotionVectors.size(); Texel += 4)
-        if (std::hypot(MotionVectors[Texel + 2], MotionVectors[Texel + 3]) > 0.5f) ++CameraMotionPixels;
-
-    BlurRendering.CameraMotionBlur.Mode = CameraMotionBlurMode::Scene;
-    Host.RefreshIndex = BlurRefreshIndex;
-    Host.Encoder.PreviousUnjittered = BlurPreviousProjection;
-    if (!Viewport.Refresh(BlurCurrent, SparkEnvironment, BlurRendering, 0.0, {Width, Height}, &Diagnostic) ||
-        !Viewport.ReadPresented(BlurSceneImage) || BlurSceneImage.size() != BlurNoMotion.size())
-    {
-        ReportCheck(false, "full-scene motion-blur refresh/readback", Diagnostic);
-        return 1;
-    }
-    const auto SaveBlurImage = [&](const char* Name, const std::vector<uint8_t>& Image) {
-        const std::string Path = (OutFolder / Name).string();
-        return stbi_write_png(Path.c_str(), static_cast<int>(Width), static_cast<int>(Height), 4, Image.data(), static_cast<int>(Width * 4)) != 0;
-    };
-    const auto ChangedPixels = [](const std::vector<uint8_t>& A, const std::vector<uint8_t>& B) {
-        uint32_t Changed = 0;
-        for (size_t Pixel = 0; Pixel < A.size() / 4; ++Pixel)
-        {
-            const int Red = std::abs(static_cast<int>(A[Pixel * 4]) - static_cast<int>(B[Pixel * 4]));
-            const int Green = std::abs(static_cast<int>(A[Pixel * 4 + 1]) - static_cast<int>(B[Pixel * 4 + 1]));
-            const int Blue = std::abs(static_cast<int>(A[Pixel * 4 + 2]) - static_cast<int>(B[Pixel * 4 + 2]));
-            if (std::max({Red, Green, Blue}) >= 2) ++Changed;
-        }
-        return Changed;
-    };
-    const uint32_t CameraBlurChanged = ChangedPixels(BlurNoMotion, BlurCameraImage);
-    const uint32_t SceneBlurChanged = ChangedPixels(BlurNoMotion, BlurSceneImage);
-    ReportCheck(CameraMotionPixels > 8, "surface pass emits camera-only motion vectors", std::to_string(CameraMotionPixels) + " moving pixels");
-    ReportCheck(CameraBlurChanged > 4, "camera-only mode changes the current-frame raster", std::to_string(CameraBlurChanged) + " pixels");
-    ReportCheck(SceneBlurChanged > 4, "full-scene mode changes the current-frame raster", std::to_string(SceneBlurChanged) + " pixels");
-    ReportCheck(SaveBlurImage("MotionBlurOff.png", BlurNoMotion) && SaveBlurImage("MotionBlurCamera.png", BlurCameraImage) &&
-                    SaveBlurImage("MotionBlurScene.png", BlurSceneImage),
-                "motion-blur A/B captures saved");
-
     // 🔍 what the images must show relative to each other
     ReportCheck(Statistics[0].SkyLuminance > 0.35, "daylight sky is bright", std::to_string(Statistics[0].SkyLuminance));
     ReportCheck(Statistics[1].Brightest > 0.97, "low sun saturates the disc and flare", std::to_string(Statistics[1].Brightest));

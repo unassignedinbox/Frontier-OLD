@@ -1,9 +1,9 @@
 # Particle editor (C++): evidence
 
-The approved Particle editor prototype (`Experimental/ParticleEditor`) is in the C++ Frontier editor. Its simulation runs on
-Vulkan and Slang; the current authoring host is a normal dockable in-app window, opened from a **Particles** record in the
-Everest workspace: *Construct* (Ctrl+A) → *Solver · GPU Particles*, then the Inspector's *Particle Editor* button. *Close Editor*
-returns to the scene without changing the accepted Fluid Editor. Particle physics algorithms remain unchanged in this work.
+The approved Particle editor prototype (`Experimental/ParticleEditor`) is now in the C++ Frontier editor. It runs the
+eos engine (`549c477`), ported to C++, Vulkan and Slang without changing its behaviour. The editor opens from a
+**Particles** record in the Everest workspace: *Construct* (Ctrl+A) → *Solver · GPU Particles*, then the Inspector's
+*Particle Editor* button. It fills the workspace as a modal window, and *Close Editor* returns to the scene.
 
 | Part | Content |
 |---|---|
@@ -20,15 +20,12 @@ repulsor, a drag volume and a current) are added from the Force Field page and d
 
 ## Results
 
-The green entries below are previously recorded results from an earlier source snapshot. They are historical baselines, not a
-claim that the current, expanded authoring/capture code has been built or tested.
-
 | Check | Program | Result |
 |---|---|---|
 | Library, packing, lightning, taxonomy against the prototype | `ParticleLibraryValidation` (ctest) | 🟢 343 of 343 |
 | Slang port by the pinned slangc; stored archives | `StoreShaderArchives.py --verify` | 🟢 30 archives, 0 failures |
 | The engine on Vulkan: 15 scenes | `ParticleSimulationCapture` | 🟢 15 of 15, 213 s |
-| The editor in the workspace: historical modal-host capture set | `ParticleEditorCapture` | 🟡 8/8 in the prior source snapshot; the current dockable-host captures have not been rerun |
+| The editor in the workspace: 8 captures, open and close | `ParticleEditorCapture` | 🟢 8 of 8, 107 s |
 
 `ParticleLibraryValidation` compares with `Results/PackingReference.toml`, written from the prototype's own modules by
 `Code/ExportPackingReference.mjs`:
@@ -42,28 +39,19 @@ claim that the current, expanded authoring/capture code has been built or tested
 | Force taxonomy, 72 readings × 14 fields | worst error 0 |
 | Lightning bolts | exact |
 
-`ParticleEditorCapture` now asserts:
+`ParticleEditorCapture` asserts:
 
 - the record's editor opens through `InspectorRuntime`, the library decodes (52 presets), and the default scene holds 4
   effects and 4 fields;
 - every capture has the engine's image with no failure. The opening capture has more than 500 particles alive and
   the wind lattice read back;
-- the Lightning capture submits GPU segments; the Derez cube reaches the GPU census and shard raster pass; the Black hole
-  reaches the census and lensing pass, with both effect images compared against an empty-scene baseline;
 - `add-force:attract` adds the attractor, the library sheet opens, and `add:tornado` adds the preset and closes the
   sheet;
 - closing (`CloseActiveEditor`, what *Close Editor* calls) clears the active editor; the workspace runs on.
 
-These checks are implementation-stage changes and have **not** been built or run on the current branch. The current capture names
-include `LightningPage`, `DerezCubeTransition`, and `BlackHoleLensing`. Derez cube raster telemetry reports effect draws and
-particle-instance capacity, not a count of live shards. The shard vertex shader now indexes each instanced particle slot rather
-than reusing slot zero; the visual image-delta assertion is intended to exercise the GPU path after the next build.
+## Editor captures
 
-## Previously verified editor captures
-
-1920 × 1080, SwiftShader. The following images and measurements are historical results from the earlier modal-host source
-snapshot; they are not verification of the current dockable host or expanded capture scenarios. The viewport image was
-1124 × 744.
+1920 × 1080, SwiftShader. The viewport image is 1124 × 744.
 
 | Image | Shows | Alive | Refresh |
 |---|---|---|---|

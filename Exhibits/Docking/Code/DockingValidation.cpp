@@ -286,8 +286,6 @@ int main(int ArgumentCount, char **Arguments)
             Require(Panels.ConfigureOpen("notifications", true), "Stream reopen failed");
             Frame();
             Frame();
-            Require(Panels.QueryPresented("notifications") && Region->SelectedTabId == StreamWindow->TabId,
-                    "Programmatically reopening a docked panel did not select and present its tab");
 
             const auto *Reopened = ImGui::TabBarFindTabByID(Region->TabBar, StreamWindow->TabId);
             const float TabY     = Region->TabBar->BarRect.GetCenter().y;

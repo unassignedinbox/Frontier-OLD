@@ -69,55 +69,10 @@ const std::vector<LampPlacement>& QueryDefaultPointLamps()
     return Lamps;
 }
 
-const std::vector<LuminaireProfile>& QueryLobbyStudioLuminaires()
-{
-    static const std::vector<LuminaireProfile> StudioLights = [] {
-        std::vector<LuminaireProfile> Lights;
-        Lights.reserve(5u);
-
-        // Overhead central softbox flood aimed straight down onto the turntable.
-        LuminaireProfile Softbox{};
-        Softbox.Category  = LuminaireCategory::StreetLamp;
-        Softbox.Position  = {0.0, 0.0, 5.85};
-        Softbox.Direction = {0.0, 0.0, -1.0};
-        Softbox.Colour    = {1.0, 0.985, 0.955};
-        Softbox.Intensity = 950.0;
-        Softbox.Reach     = 26.0;
-        Softbox.Params    = {0.72, 0.14, 0.65, 1.0};
-        Lights.push_back(Softbox);
-
-        // Four cardinal cyclorama cove washes grazing the curved perimeter and ring stands.
-        constexpr std::array<std::array<double, 2>, 4> Coves = {{{14.5, 0.0}, {-14.5, 0.0}, {0.0, 14.5}, {0.0, -14.5}}};
-        for (const auto& Cove : Coves)
-        {
-            const double     Norm   = std::hypot(Cove[0], Cove[1]);
-            const Vector3    Inward = {-Cove[0] / Norm * 0.55, -Cove[1] / Norm * 0.55, -0.835};
-            LuminaireProfile Wash{};
-            Wash.Category  = LuminaireCategory::StreetLamp;
-            Wash.Position  = {Cove[0], Cove[1], 5.60};
-            Wash.Direction = Inward;
-            Wash.Colour    = {0.96, 0.98, 1.0};
-            Wash.Intensity = 430.0;
-            Wash.Reach     = 28.0;
-            Wash.Params    = {0.58, 0.08, 0.50, 1.0};
-            Lights.push_back(Wash);
-        }
-        return Lights;
-    }();
-    return StudioLights;
-}
-
 std::vector<uint8_t> LuminaireRegister::Update(const std::optional<Transform>& VehicleTransform, const std::vector<LampPlacement>& Poles,
                                             const std::vector<LampPlacement>& PointLamps, const std::optional<LuminaireProfile>& TransientLight)
 {
     Luminaires.clear();
-
-    // ⓪ explicit architectural studio luminaires (Studio Lobby softbox + cyclorama cove washes)
-    for (const LuminaireProfile& Studio : StudioLuminaires)
-    {
-        if (Luminaires.size() >= MaximumLuminaires - 8) break;
-        Luminaires.push_back(Studio);
-    }
 
     // ① roadway street lamp poles; the emitter sits 25 cm below the head so shadow rays never self-occlude
     for (const LampPlacement& Pole : Poles)

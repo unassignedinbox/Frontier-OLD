@@ -61,9 +61,9 @@ constexpr const char* ProjectionNames[] = {"Map", "Oblique"};
 constexpr const char* RateLabels[]      = {"\xC3\x97" "1", "\xC3\x97" "10", "\xC3\x97" "60"};
 constexpr float       RateValues[]      = {1.0f, 10.0f, 60.0f};
 
-ImU32 SourceTint(Frontier::ForceSourceCategory Category, int Alpha)
+ImU32 ContributionTint(Frontier::ForceContribution Contribution, int Alpha)
 {
-    const uint32_t Rgb = Frontier::ResolveForceSourceDescriptor(Category).ColourRgb;
+    const uint32_t Rgb = Frontier::ResolveForceContributionDescriptor(Contribution).ColourRgb;
     return IM_COL32((Rgb >> 16) & 255, (Rgb >> 8) & 255, Rgb & 255, Alpha);
 }
 
@@ -71,20 +71,6 @@ uint32_t FieldLogCategory()
 {
     static const uint32_t Category = Frontier::LogCategories().Register("Forces", Frontier::LogColour::Mint, true);
     return Category;
-}
-
-void ConfigureEditorFieldCamera(Frontier::FieldCamera& Camera, const SceneViewportFlight& Flight, const SceneViewportNavigation& Navigation)
-{
-    Camera.Eye     = Flight.Position;
-    Camera.Forward = Flight.ResolveForward();
-    const auto& F  = Camera.Forward;
-    const auto& U  = Navigation.Up;
-    Camera.Right   = {F[1] * U[2] - F[2] * U[1], F[2] * U[0] - F[0] * U[2], F[0] * U[1] - F[1] * U[0]};
-    const double Length = std::max(1e-8, std::hypot(Camera.Right[0], Camera.Right[1], Camera.Right[2]));
-    for (double& Axis : Camera.Right) Axis /= Length;
-    const auto& R = Camera.Right;
-    Camera.Up = {R[1] * F[2] - R[2] * F[1], R[2] * F[0] - R[0] * F[2], R[0] * F[1] - R[1] * F[0]};
-    Camera.VerticalFieldOfView = Flight.ResolveFieldOfView();
 }
 
 // 📝 A dark rounded panel of the viewport chrome (the prototype's .viewport-hud and .minimap).
@@ -187,8 +173,7 @@ bool EverestWorkspace::ConfigureFieldSlice(Frontier::ForceFieldVisualization& Sl
     Options.Extent       = {-Half, -Half, Half, Half};
     Options.MinimumSpan  = 40.0;
     Options.MaximumSpan  = 2.4e5;
-    Slice.View.Mode      = Camera ? Frontier::FieldViewMode::Camera
-                                  : Forces.Projection == Frontier::ForceFieldProjection::Oblique ? Frontier::FieldViewMode::Oblique : Frontier::FieldViewMode::Map;
+    if (!Camera) Slice.View.Mode = Forces.Projection == Frontier::ForceFieldProjection::Oblique ? Frontier::FieldViewMode::Oblique : Frontier::FieldViewMode::Map;
     return true;
 }
 
@@ -206,10 +191,8 @@ void EverestWorkspace::ConstructFieldViewport(const ImVec2& StageMin, const ImVe
         Field.Slice->View.Span = 6000.0;
     }
     Frontier::ForceFieldVisualization& Slice = *Field.Slice;
-    const bool                       Camera = Field.CameraPreview;
-    if (Camera) ConfigureEditorFieldCamera(Slice.View.Camera, Flight, Navigation);
     Ink->PushClipRect(StageMin, StageMax, true);
-    if (!ConfigureFieldSlice(Slice, Camera))
+    if (!ConfigureFieldSlice(Slice, false))
     {
         Ink->AddRectFilled(StageMin, StageMax, IM_COL32(5, 11, 18, 255));
         Frontier::ViewportChromeControls::ConstructOverlayNotice(Ink, Faces, StageMin, StageMax, "Add a Force Field record to see the field", Scale);
@@ -340,11 +323,9 @@ void EverestWorkspace::ConstructFieldViewport(const ImVec2& StageMin, const ImVe
         }
     }
     {
-        const char* Hint = Slice.View.Mode == Frontier::FieldViewMode::Camera
-                               ? "3D reach outlines \xC2\xB7 move the Editor camera in the scene viewport to inspect the field"
-                           : Slice.View.Mode == Frontier::FieldViewMode::Oblique
-                               ? "Drag to pan \xC2\xB7 wheel to zoom \xC2\xB7 drag a source to move it \xC2\xB7 right-drag turns and tilts"
-                               : "Drag to pan \xC2\xB7 wheel to zoom \xC2\xB7 drag a source to move it \xC2\xB7 double-click centres";
+        const char*  Hint = Slice.View.Mode == Frontier::FieldViewMode::Oblique
+                                ? "Drag to pan \xC2\xB7 wheel to zoom \xC2\xB7 drag a source to move it \xC2\xB7 right-drag turns and tilts"
+                                : "Drag to pan \xC2\xB7 wheel to zoom \xC2\xB7 drag a source to move it \xC2\xB7 double-click centres";
         const float  Size = 10.0f * Scale;
         const float  Wide = MeasureFace(Faces.Regular, Size, Hint);
         const ImVec2 Corner(MapMax.x - Wide - 32.0f * Scale, MapMax.y - 34.0f * Scale);
@@ -356,139 +337,6 @@ void EverestWorkspace::ConstructFieldViewport(const ImVec2& StageMin, const ImVe
     }
     Ink->PopClipRect();
     ConstructFieldTimeline(ImVec2(StageMin.x, MapMax.y), StageMax, Scale);
-}
-
-// 📝 A dockable Force Field/Wind workbench: the existing analytic slice and trigger timeline beside the currently selected
-//    ForceField, Wind or ForceSource inspector. Selecting a source in the map or lane keeps the Outliner/Inspector in sync.
-void EverestWorkspace::ConstructForceFieldWorkspace(float Scale)
-{
-    Field.Shown = false;
-    FieldRecords Records = ResolveFieldRecords(QueryWorldSpace());
-    ImGui::PushID("ForceFieldWorkspaceToolbar");
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9.0f * Scale, 5.0f * Scale));
-    const float ButtonWidth = 112.0f * Scale, ButtonHeight = 30.0f * Scale, Gap = 5.0f * Scale;
-    const Frontier::RecordToken SelectedToken = OutlinerPanel.QuerySelected();
-    auto SelectRecord = [&](Frontier::SceneRecordBase* Record) {
-        if (Record == nullptr) return;
-        OutlinerPanel.Select(Record->QueryToken());
-        OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
-    };
-    auto SelectButton = [&](const char* Label, Frontier::SceneRecordBase* Record) {
-        if (Record == nullptr) return;
-        const bool Selected = Record->QueryToken().Value == SelectedToken.Value;
-        if (Selected) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.36f, 0.36f, 1.0f));
-        if (ImGui::Button(Label, ImVec2(ButtonWidth, ButtonHeight))) SelectRecord(Record);
-        if (Selected) ImGui::PopStyleColor();
-    };
-
-    SelectButton("Force Field", Records.Field);
-    if (Records.Wind != nullptr)
-    {
-        ImGui::SameLine(0.0f, Gap);
-        SelectButton("Wind", Records.Wind);
-    }
-    else
-    {
-        ImGui::SameLine(0.0f, Gap);
-        if (ImGui::Button("Add Wind", ImVec2(ButtonWidth, ButtonHeight)) && Records.Field != nullptr)
-        {
-            const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord("Wind", ResolveUniqueName("Wind"), Records.Field->QueryToken());
-            Records.Wind = dynamic_cast<Frontier::WindRecord*>(QueryWorldSpace().FindRecord(Created));
-            OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
-            SelectRecord(Records.Wind);
-        }
-    }
-    if (!Records.Sources.empty())
-    {
-        ImGui::SameLine(0.0f, Gap);
-        auto* SelectedSource = dynamic_cast<Frontier::ForceSourceRecord*>(QueryWorldSpace().FindRecord(SelectedToken));
-        if (ImGui::Button(SelectedSource != nullptr ? "Selected source" : "First source", ImVec2(ButtonWidth + 18.0f * Scale, ButtonHeight)))
-            SelectRecord(SelectedSource != nullptr ? static_cast<Frontier::SceneRecordBase*>(SelectedSource) : Records.Sources.front());
-    }
-    ImGui::SameLine(0.0f, Gap);
-    if (Records.Field != nullptr)
-    {
-        if (ImGui::Button("Add force", ImVec2(82.0f * Scale, ButtonHeight))) ConstructDialog.Open("Forces");
-    }
-    else
-    {
-        ImGui::BeginDisabled();
-        (void)ImGui::Button("Add force", ImVec2(82.0f * Scale, ButtonHeight));
-        ImGui::EndDisabled();
-    }
-
-    if (Records.Field == nullptr)
-    {
-        ImGui::Separator();
-        ImGui::TextDisabled("No Force Field record is present in this level.");
-        if (ImGui::Button("Add Force Field"))
-        {
-            const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord("ForceField", ResolveUniqueName("Force Field"));
-            OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
-            SelectRecord(QueryWorldSpace().FindRecord(Created));
-        }
-        ImGui::PopStyleVar();
-        ImGui::PopID();
-        return;
-    }
-
-    ImGui::SameLine(0.0f, Gap);
-    ImGui::TextDisabled("VIEW");
-    ImGui::SameLine(0.0f, Gap);
-    Frontier::ForceFieldConfiguration& Forces = Records.Field->AccessConfiguration();
-    auto ViewButton = [&](const char* Label, bool Active) {
-        if (Active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.43f, 1.0f));
-        const bool Pressed = ImGui::Button(Label, ImVec2(58.0f * Scale, ButtonHeight));
-        if (Active) ImGui::PopStyleColor();
-        return Pressed;
-    };
-    if (ViewButton("Map", !Field.CameraPreview && Forces.Projection == Frontier::ForceFieldProjection::Map))
-    {
-        Field.CameraPreview = false;
-        Forces.Projection = Frontier::ForceFieldProjection::Map;
-        Forces.AdvanceRevision();
-        if (Field.Slice) Field.Slice->Invalidate();
-    }
-    ImGui::SameLine(0.0f, 3.0f * Scale);
-    if (ViewButton("Oblique", !Field.CameraPreview && Forces.Projection == Frontier::ForceFieldProjection::Oblique))
-    {
-        Field.CameraPreview = false;
-        Forces.Projection = Frontier::ForceFieldProjection::Oblique;
-        Forces.AdvanceRevision();
-        if (Field.Slice) Field.Slice->Invalidate();
-    }
-    ImGui::SameLine(0.0f, 3.0f * Scale);
-    if (ViewButton("3D", Field.CameraPreview))
-    {
-        Field.CameraPreview = true;
-        if (Field.Slice) Field.Slice->Invalidate();
-    }
-    ImGui::PopStyleVar();
-    ImGui::PopID();
-    ImGui::Separator();
-
-    const ImVec2 Available = ImGui::GetContentRegionAvail();
-    const bool   Compact = Available.x < 760.0f * Scale;
-    const float  GapWidth = 8.0f * Scale;
-    const float  DetailsWidth = Compact ? Available.x : std::min(std::clamp(Available.x * 0.34f, 260.0f * Scale, 410.0f * Scale),
-                                                                 std::max(220.0f * Scale, Available.x - 288.0f * Scale - GapWidth));
-    const float  CanvasWidth = Compact ? Available.x : std::max(220.0f * Scale, Available.x - DetailsWidth - GapWidth);
-    const float  CanvasHeight = Compact ? std::max(120.0f * Scale, (Available.y - GapWidth) * 0.54f) : Available.y;
-    const float  DetailsHeight = Compact ? std::max(80.0f * Scale, Available.y - CanvasHeight - GapWidth) : Available.y;
-    if (ImGui::BeginChild("##ForceFieldWorkspaceCanvas", ImVec2(CanvasWidth, CanvasHeight), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar))
-    {
-        const ImVec2 StageMin = ImGui::GetCursorScreenPos();
-        const ImVec2 StageSize = ImGui::GetContentRegionAvail();
-        ConstructFieldViewport(StageMin, ImVec2(StageMin.x + StageSize.x, StageMin.y + StageSize.y), Scale);
-    }
-    ImGui::EndChild();
-    if (!Compact) ImGui::SameLine(0.0f, GapWidth);
-    if (ImGui::BeginChild("##ForceFieldWorkspaceInspector", ImVec2(DetailsWidth, DetailsHeight), ImGuiChildFlags_Borders,
-                          ImGuiWindowFlags_NoScrollbar))
-    {
-        InspectorPanel.ConstructInterface();
-    }
-    ImGui::EndChild();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -578,16 +426,13 @@ void EverestWorkspace::ConstructFieldTimeline(const ImVec2& Min, const ImVec2& M
         if (Source.Activation == Frontier::ForceActivation::Always) continue;
         if (LaneTop + LaneHeight > PanelMax.y - 4.0f * Scale) break;
         ++Lanes;
-        const bool Selected = Record->QueryToken().Value == OutlinerPanel.QuerySelected().Value;
-        const ImU32 Tint = SourceTint(Source.Category, Source.Enabled ? 200 : 80);
+        const bool Selected     = Record->QueryToken().Value == OutlinerPanel.QuerySelected().Value;
+        const auto Contribution = Frontier::ResolveForceSourceDescriptor(Source.Category).Contribution;
         if (Selected)
             Ink->AddRectFilled(ImVec2(TracksLeft - 4.0f * Scale, LaneTop - 1.0f * Scale), ImVec2(PanelMax.x - 6.0f * Scale, LaneTop + LaneHeight),
                                IM_COL32(255, 255, 255, 12), 6.0f * Scale);
         Ink->AddText(Faces.Regular, 10.5f * Scale, ImVec2(TracksLeft, LaneTop + 3.0f * Scale), Selected ? IM_COL32_WHITE : IM_COL32(190, 196, 204, 255),
                      Record->QueryRecordName().c_str());
-        const ImVec2 Marker(TracksLeft - 8.0f * Scale, LaneTop + LaneHeight * 0.5f);
-        Ink->AddCircleFilled(Marker, 4.0f * Scale, SourceTint(Source.Category, Source.Enabled ? 54 : 24), 12);
-        Ink->AddCircleFilled(Marker, 2.0f * Scale, SourceTint(Source.Category, Source.Enabled ? 230 : 110), 12);
         Ink->AddRectFilled(ImVec2(RulerLeft, LaneTop + 7.0f * Scale), ImVec2(RulerRight, LaneTop + 11.0f * Scale), IM_COL32(255, 255, 255, 14), 2.0f * Scale);
         std::vector<std::pair<double, double>> Windows;
         if (Source.Activation == Frontier::ForceActivation::Window)
@@ -600,7 +445,7 @@ void EverestWorkspace::ConstructFieldTimeline(const ImVec2& Min, const ImVec2& M
             Windows.push_back({Source.TriggeredAtSeconds, Source.LastsSeconds > 0 ? std::min(Duration, Source.TriggeredAtSeconds + Source.LastsSeconds) : Duration});
         for (const auto& [Start, End] : Windows)
             Ink->AddRectFilled(ImVec2(At(Start), LaneTop + 5.0f * Scale), ImVec2(std::max(At(Start) + 3.0f * Scale, At(End)), LaneTop + 13.0f * Scale),
-                               Tint, 4.0f * Scale);
+                               ContributionTint(Contribution, Source.Enabled ? 200 : 80), 4.0f * Scale);
         ImGui::PushID(Record);
         ImGui::SetCursorScreenPos(ImVec2(TracksLeft, LaneTop));
         if (ImGui::InvisibleButton("##Lane", ImVec2(NameWidth, LaneHeight)))
@@ -727,7 +572,6 @@ void EverestWorkspace::ConstructFieldBar(const ImVec2& Min, const ImVec2& Max, f
                                                             ProjectionNames, 2, Projection, nullptr, nullptr, Scale))
         {
             Forces.Projection = Projection == 1 ? Frontier::ForceFieldProjection::Oblique : Frontier::ForceFieldProjection::Map;
-            Field.CameraPreview = false;
             Forces.AdvanceRevision();
         }
         Right -= ProjectionWidth + Gap;
@@ -758,8 +602,18 @@ void EverestWorkspace::ConstructFieldOverlay(const ImVec2& StageMin, const ImVec
     if (Record == nullptr || !Record->QueryConfiguration().SceneOverlay || !Record->QueryConfiguration().Enabled) return;
     if (!Field.Overlay) Field.Overlay = std::make_unique<Frontier::ForceFieldVisualization>();
     Frontier::ForceFieldVisualization& Overlay = *Field.Overlay;
-    Overlay.View.Mode = Frontier::FieldViewMode::Camera;
-    ConfigureEditorFieldCamera(Overlay.View.Camera, Flight, Navigation);
+    Overlay.View.Mode                          = Frontier::FieldViewMode::Camera;
+    Frontier::FieldCamera& Camera              = Overlay.View.Camera;
+    Camera.Eye                                 = Flight.Position;
+    Camera.Forward                             = Flight.ResolveForward();
+    const auto& F                              = Camera.Forward;
+    const auto& U                              = Navigation.Up;
+    Camera.Right        = {F[1] * U[2] - F[2] * U[1], F[2] * U[0] - F[0] * U[2], F[0] * U[1] - F[1] * U[0]};
+    const double Length = std::max(1e-8, std::hypot(Camera.Right[0], Camera.Right[1], Camera.Right[2]));
+    for (double& Axis : Camera.Right) Axis /= Length;
+    const auto& R              = Camera.Right;
+    Camera.Up                  = {R[1] * F[2] - R[2] * F[1], R[2] * F[0] - R[0] * F[2], R[0] * F[1] - R[1] * F[0]};
+    Camera.VerticalFieldOfView = Flight.ResolveFieldOfView();
     if (!ConfigureFieldSlice(Overlay, true)) return;
     Overlay.Render(ImGui::GetWindowDrawList(), Frontier::EditorTypefaces::Resolve(), StageMin, StageMax, Record->QueryConfiguration().TimelineSeconds, Scale);
 }
@@ -789,9 +643,8 @@ void EverestWorkspace::PublishFieldReadings(Frontier::EnvironmentEditAccess& Acc
         }
     }
     Frontier::ForceFieldReadings& Readings = Field.Readings;
-    const bool FieldVisible = Field.Shown || Dockspace.QueryOpen("ForceFieldWorkspace");
-    Readings.FieldShown = FieldVisible;
-    if (FieldVisible && Field.Slice && Field.Slice->QueryStatistics().Samples > 0)
+    Readings.FieldShown                    = Field.Shown;
+    if (Field.Shown && Field.Slice && Field.Slice->QueryStatistics().Samples > 0)
     {
         const Frontier::FieldStatistics& Statistics = Field.Slice->QueryStatistics();
         const char*                      Unit       = Field.Slice->QueryUnit();
@@ -873,37 +726,6 @@ void EverestWorkspace::ServiceFieldActions()
             OutlinerPanel.Select(Frontier::RecordToken{std::strtoull(Argument.c_str(), nullptr, 10)});
             OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
         }
-        else if (Verb == "fit-tyres")
-        {
-            const Frontier::RecordToken VehicleToken{std::strtoull(Argument.c_str(), nullptr, 10)};
-            const auto* VehicleRec = dynamic_cast<Frontier::VehicleRecord*>(QueryWorldSpace().FindRecord(VehicleToken));
-            if (VehicleRec == nullptr) continue;
-            std::array<bool, 4> Covered{};
-            for (const Frontier::SceneRecordBase* Existing : QueryWorldSpace().FindAllByType("Tyre"))
-            {
-                const auto* Tyre = dynamic_cast<const Frontier::TyreRecord*>(Existing);
-                if (Tyre != nullptr && Existing->QueryParentToken() == VehicleToken)
-                    Covered[Tyre->QueryConfiguration().Corner & 3u] = true;
-            }
-            static constexpr const char* CornerTags[4] = { "FL", "FR", "RL", "RR" };
-            const float DefaultCold = VehicleRec->QueryConfiguration().Specification.Solver.Tyre.InflationPressure;
-            for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
-            {
-                if (Covered[Corner]) continue;
-                const std::string           TyreName  = ResolveUniqueName(VehicleRec->QueryRecordName() + " Tyre " + CornerTags[Corner]);
-                const Frontier::RecordToken TyreToken = QueryWorldSpace().ConstructRecord("Tyre", TyreName, VehicleToken);
-                if (auto* CreatedTyre = dynamic_cast<Frontier::TyreRecord*>(QueryWorldSpace().FindRecord(TyreToken)))
-                {
-                    Frontier::TyreConfiguration& Fit = CreatedTyre->AccessConfiguration();
-                    Fit.Corner                       = Corner;
-                    Fit.Enclosed                     = true;
-                    Fit.Compound                     = "Medium";
-                    Fit.ColdPressure                 = DefaultCold;
-                    Fit.AdvanceRevision();
-                }
-            }
-            OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
-        }
         else if (Verb == "add-force" && Argument.empty())
             ConstructDialog.Open("Forces");
         else if (Verb == "add-force")
@@ -918,24 +740,12 @@ void EverestWorkspace::ServiceFieldActions()
         }
         else if (Verb == "field-view")
         {
-            Field.CameraPreview = false;
             Field.Shown = Argument != "off";
-            if (!Field.Shown) (void)Dockspace.ConfigureOpen("ForceFieldWorkspace", false);
             Frontier::WriteLogFormat(FieldLogCategory(), Frontier::LogSeverity::Info, Frontier::LogVerbosity::Log, "View", "%s",
                                      Field.Shown ? "Field view shown from the Force Field page" : "Back to the scene view");
         }
-        else if (Verb == "field-workspace")
-        {
-            if (Argument == "off") (void)Dockspace.ConfigureOpen("ForceFieldWorkspace", false);
-            else
-            {
-                Field.Shown = false;
-                (void)Dockspace.ConfigureDetached("ForceFieldWorkspace", false);
-            }
-        }
         else if (Verb == "field-span")
         {
-            Field.CameraPreview = false;
             Field.Shown = true;
             if (!Field.Slice)
             {

@@ -3,9 +3,7 @@ format = "frontier.projectspace.editor"
 version = 1
 content_roots = ["Content"]
 levels = [
-    { identity = "lobby-level", path = "Content/Levels/Lobby.levelspace" },
     { identity = "default-level", path = "Content/Levels/Default.levelspace" },
-    { identity = "proving-ground-vehicle", path = "Content/Levels/ProvingGroundVehicle.levelspace" },
 ]
 catalogue = []
 dependency_pins = []
@@ -18,7 +16,7 @@ template_revision = 1
 
 [engine]
 configuration_version = 1
-startup_level = "lobby-level"
+startup_level = "default-level"
 
 [engine.content_imports]
 entries = [
@@ -31,7 +29,6 @@ entries = [
     "Icons",
     "EnvironmentArchives/CelestialMaps",
     "EnvironmentArchives/ControlVehicle",
-    "EnvironmentArchives/Lobby",
     "EnvironmentArchives/ProvingGround",
     "MaterialArchives/TextureStudio",
 ]

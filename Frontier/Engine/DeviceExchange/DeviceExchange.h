@@ -474,6 +474,9 @@ class DeviceExchange
     [[nodiscard]] const std::vector<std::string>& Faults() const noexcept { return Faults_; }
     // 🔍 Sees each fault as it is recorded (the editor journals them).
     std::function<void(const std::string&)> FaultObserver{};
+    // 🔍 Label and wall time of every awaited submission, from vkQueueSubmit to its fence (stage costs on any driver when each stage
+    //    is a submission of its own, FRONTIER_ILLUMINATION_STAGED_SUBMISSIONS=1); unset = not measured.
+    std::function<void(const std::string&, double)> SubmissionTiming{};
     [[nodiscard]] uint64_t CompletedSubmissions() const noexcept { return CompletedSubmissions_; }
     void RecordFault(const std::string& Fault);
 

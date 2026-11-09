@@ -74,15 +74,11 @@ class LuminaireRegister
     RoofFixtureCategory           RoofFixture        = RoofFixtureCategory::SlimLed;
     bool                          RoofLightEnabled   = false;
     bool                          CullEnabled        = true;
-    std::vector<LuminaireProfile> StudioLuminaires{};
     std::vector<LuminaireProfile> Luminaires{};
     uint32_t                      ActiveClusterCells = 0;
 };
 
 // 📝 The demo's DefaultPointLamps, used when no lantern placements are supplied.
 [[nodiscard]] const std::vector<LampPlacement>& QueryDefaultPointLamps();
-
-// 📝 Studio Lobby architectural flood + 4 cove washes (VehicleHMI LobbyLuminaires).
-[[nodiscard]] const std::vector<LuminaireProfile>& QueryLobbyStudioLuminaires();
 
 } // namespace Frontier::GlobalIllumination

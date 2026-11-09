@@ -20,7 +20,6 @@
 #include "UI/Editor/ProjectBrowserPanel.h"
 #include "EverestWorkspace.h"
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
-#include "Frontier/Extensions/Fluid/FluidExtension.h"
 #include "Frontier/Extensions/Particle/ParticleExtension.h"
 #include "Frontier/Extensions/Interface/ViewportTexture.h"
 #include "Engine/Interface/InspectorRuntime.h"
@@ -233,9 +232,6 @@ int main()
     std::unique_ptr<Frontier::ParticleExtension> ParticleView;
     Frontier::ViewportTexture ParticleViewTexture;
     int ParticleViewJournalEntries = 0;
-    std::unique_ptr<Frontier::FluidExtension> FluidView;
-    Frontier::ViewportTexture FluidViewTexture;
-    int FluidViewJournalEntries = 0;
     const auto RetireSceneView = [&]()
     {
         SceneView.reset(); // 📝 Waits for the device before releasing anything the interface could still sample.
@@ -243,9 +239,6 @@ int main()
         Frontier::InspectorRuntime::Instance().RegisterParticleViewportPresenter({});
         ParticleView.reset(); // 📝 Drains the queue as the scene viewport does.
         ParticleViewTexture.Retire();
-        Frontier::InspectorRuntime::Instance().RegisterFluidViewportPresenter({});
-        FluidView.reset();
-        FluidViewTexture.Retire();
     };
     const auto ResolveBesideExecutable = [](const std::filesystem::path &Relative)
     {
@@ -538,33 +531,6 @@ int main()
                     {
                         Image.Failure = std::string("Particle viewport failed: ") + Failure.what();
                         Frontier::DiagnosticJournal::Append("ParticleViewportRefused", Failure.what());
-                    }
-                    return Image;
-                });
-            Frontier::InspectorRuntime::Instance().RegisterFluidViewportPresenter(
-                [&](const Frontier::FluidViewportRequest &Request)
-                {
-                    Frontier::FluidViewportImage Image;
-                    try
-                    {
-                        if (!FluidView)
-                        {
-                            const Frontier::VulkanDeviceAccess Device = Presentation ? Presentation->QueryDeviceAccess() : Frontier::VulkanDeviceAccess{};
-                            FluidView = std::make_unique<Frontier::FluidExtension>(ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
-                        }
-                        Frontier::FluidViewportOutcome Outcome = FluidView->Render(Request);
-                        Image = std::move(Outcome.Image);
-                        if ((FluidViewTexture.QueryChanged(Outcome.View) || !Image.Failure.empty()) && FluidViewJournalEntries < 16)
-                        {
-                            Frontier::DiagnosticJournal::Append("FluidViewport", Outcome.View ? "image on " + Image.Adapter : "no image: " + Image.Failure);
-                            ++FluidViewJournalEntries;
-                        }
-                        Image.Texture = FluidViewTexture.Resolve(Outcome.View);
-                    }
-                    catch (const std::exception &Failure)
-                    {
-                        Image.Failure = std::string("Fluid viewport failed: ") + Failure.what();
-                        Frontier::DiagnosticJournal::Append("FluidViewportRefused", Failure.what());
                     }
                     return Image;
                 });

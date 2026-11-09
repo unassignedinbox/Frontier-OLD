@@ -107,8 +107,6 @@ int main(int Count, char **Arguments)
             auto &Centre = *static_cast<ControlCentrePanel *>(Ownership.get());
             Require(Centre.Initialize() && Centre.Activate(), "Native UI initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
-            Require(Workspace.QueryLobbyActive(), "Everest starts in Studio Lobby by default");
-            Require(Workspace.OpenLevel(Project / "Content/Levels/Default.levelspace"), "Opened outdoor Default.levelspace");
             auto &World = Workspace.QueryWorldSpace();
             Require(World.QueryRecordCount() == 67 && World.FindAllByType("Geometry").size() == 37 && World.FindAllByType("ForceSource").size() == 14,
                     "Clean default retains only rendered environment, the one Render settings record, the 37 scene objects and the 14 forces");
@@ -195,7 +193,7 @@ int main(int Count, char **Arguments)
             Require(Workspace.QueryOutliner().QueryTotal() == 67,
                     "Outliner lists the fifteen rendered scene entries, the one Render settings component, the 37 scene objects and "
                     "the 14 localized forces under the Force Field");
-            Require(Centre.QueryQuickActionCount() >= 3, "Render settings remain available from the Control Centre too");
+            Require(Centre.QueryQuickActionCount() == 3, "Render settings remain available from the Control Centre too");
             int RenderSettingsRows = 0;
             for (const auto &Row : Workspace.QueryOutliner().QueryRows())
             {

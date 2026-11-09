@@ -30,21 +30,10 @@ being ported 1:1. Two regions are in:
 | **Dusk — fog lit by the street lamps** | **Night — Luna, Ember, Jupiter, Mars, stars** |
 | ![Dusk](Images/DuskFogLamps.png) | ![Night](Images/NightMoonsPlanetsStars.png) |
 
-The four environment images come from the same `SceneViewport` the editor uses, with the environment lighting the scene. They were
+The four images come from the same `SceneViewport` the editor uses, with the environment lighting the scene. They were
 rendered offscreen on SwiftShader at 480 × 270 (quality `low`, 12 refreshes each) from the stored SPIR-V in
-`EngineContent/ShaderArchives`. The cameras and records are listed in `Code/SceneViewportValidation.cpp`. The separate impact-particle
-capture below uses the same native viewport and the production depth-tested streak raster:
-
-![Jolt-driven metal and concrete moving spark streaks in the native scene viewport](Images/ImpactSparkRaster.png)
-
-`ImpactSparkRaster.png` replays actual fast Jolt chassis contacts against metal and concrete; each event supplies the world-space contact
-velocity, outward normal and deterministic emission seed. `ImpactSparkSequence` emits and integrates a bounded packet of ballistic
-filings, with drag, gravity, cooling and finite blackbody radiance, before the viewport rasterizes their current-head/prior-head streaks.
-The capture compares the result with an otherwise identical no-particle frame. The SwiftShader 480 × 270 smoke run submitted 66 filings,
-changing 60 presented pixels (50 incandescent). `ImpactSparkValidation` checks deterministic replay, particle motion/cooling, real contact
-inputs and the 1024-instance limit; `VehicleImpactEventValidation` checks the underlying physics event.
-
-The environment-fed inputs for each scenario:
+`EngineContent/ShaderArchives`. The cameras and records are listed in `Code/SceneViewportValidation.cpp`. What the
+environment fed each refresh:
 
 | Scenario | Key light (refresh units) | Sky view, zenith | Cloud shadow map | Image: sky / ground |
 |---|---|---|---|---|
@@ -647,9 +636,8 @@ in double precision:
 
 ## Checks
 
-`Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 23 checks, 0 failing in the low-quality
-480 × 270 / 1-refresh smoke run) checks the following. The new `ImpactSparkValidation` CTest independently verifies the CPU particle
-sequence against deterministic Jolt metal/concrete contacts, including motion, cooling, repeatability and the 1024-record bound.
+`Code/SceneViewportValidation.cpp` (log: `Results/SceneViewportValidation.txt`, 18 checks, 0 failing) checks the
+following:
 
 - the environment is overlaid on the illumination device;
 - the vehicle is deactivated;
@@ -658,9 +646,8 @@ sequence against deterministic Jolt metal/concrete contacts, including motion, c
 - the daylight sky is bright;
 - the low sun saturates;
 - the night sky is darker than the day and shows stars;
-- real Jolt contacts emit ballistic particles whose depth-tested streak raster changes the no-particle image and retains incandescent radiance;
-- a local fog volume's sun shafts are shadowed by the scene's sun cascades: the unshadowed refresh carries more than 0.1 % more
-  light than both shafted refreshes around it, with GI/TAA/auto-exposure disabled for this stable A/B/A;
+- the fog's sun shafts are shadowed by the scene's sun cascades: the unshadowed refresh carries more than 0.1 % more
+  light than both shafted refreshes around it;
 - what the environment fed the refresh (read back from the port's own inputs):
   - the daylight sky view is the environment's blue sky;
   - the clouds shade the ground: more than 1 % of the projected cloud shadow map shaded (optical depth above 0.05),
@@ -707,25 +694,6 @@ synthetic input and reads directions from the renderer's own view basis:
 - Alt orbits and dollies about a fixed pivot and tracks camera and pivot together;
 - Z widens the view and it recoils after release, and F frames the starting view and keeps the speed.
 
-## Camera effects
-
-`Frontier/Engine/Rendering/SceneViewport/CameraEffects.h` defines the native camera components. The `VehicleCameraSolver`
-owns a `CameraShakeComponent`: its seeded phase is deterministic, velocity changes feed a smoothed attack/release envelope, and the
-subtle default is a 1.5 mm high-speed baseline with a hard 6 mm displacement cap. The viewport's Camera FX popup exposes enable,
-amplitude, frequency, attack and release. Shake applies to the driven Chase, Cockpit, Passenger and Hood rigs; it does not shake the
-Editor, Lobby orbit, HMI tablet or tyre inspection views. These settings currently live in the workspace/session, not a persisted camera record.
-
-`CameraMotionBlurComponent` is attached to the active Editor or Vehicle camera. The popup dropdown deliberately has exactly three choices:
-**Off**, **Camera only**, and **Full scene (camera + objects)**. It is Off by default; strength defaults to 0.35. The surface pass stores total
-camera-plus-object motion in RG and camera-only motion in BA; temporal AA still reads RG unchanged. The display pass takes five current-frame
-samples along the selected vector, clamped to 24 px before strength scaling. Motion blur runs in the normal GI display path; inspection and
-analytic views stay clean. Camera settings remain session-only until the planned `CameraRecord`/codec exists.
-
-`CameraEffectsValidation` (CTest) checks deterministic seeding, transient release, the 6 mm cap, solver integration and three-mode encoding.
-The GPU `SceneViewportValidation` A/B renders Off, Camera-only and Full-scene at the same moved camera on SwiftShader (low, 480 × 270): at
-strength 1, the two enabled modes changed 55,963 and 61,028 pixels respectively from the no-blur image. It writes the three A/B PNGs under
-the build output's `motion-blur-validation` directory.
-
 ## Build and run it yourself (Windows)
 
 1. Fonts, once: `python -m pip install -r Automation/FontRequirements.txt`, then `python Automation/PrepareFonts.py`.
@@ -754,8 +722,6 @@ python3 Exhibits/SceneViewport/Code/ExportProvingGround.py <capture> EngineConte
 # Offscreen images (SwiftShader: FRONTIER_VULKAN_DRIVER / VK_ICD_FILENAMES as in the parity README)
 build/SceneViewportValidation EngineContent/ShaderArchives/GlobalIllumination EngineContent/ShaderArchives/Environment \
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out low 480 270 12
-# Physics-backed ballistic particle replay (CTest: ImpactSparkValidation)
-build/ImpactSparkValidation
 # Everest workspace with the live viewport
 build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/EverestLiveSceneViewport.png 12
 # The fifteen inspection views (then 1 10 14 at the end for the virtualized cluster views; view 6 on the GTX path:

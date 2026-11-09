@@ -10,7 +10,6 @@
 #include "Engine/Scene/SceneDirectory.h"
 #include "Engine/Scene/SolarPlacement.h"
 #include "Engine/Interface/EnvironmentEditAccess.h"
-#include "Engine/Interface/FluidEditor/FluidViewportPresentation.h"
 #include "Engine/Interface/ParticleEditor/ParticleViewportPresentation.h"
 
 #include <array>
@@ -141,9 +140,6 @@ class InspectorRuntime
     void                                    RegisterParticleViewportPresenter(ParticleViewportPresenter Presenter);
     [[nodiscard]] const ParticleViewportPresenter& QueryParticleViewportPresenter() const noexcept { return ParticlePresenter; }
 
-    void                                    RegisterFluidViewportPresenter(FluidViewportPresenter Presenter);
-    [[nodiscard]] const FluidViewportPresenter& QueryFluidViewportPresenter() const noexcept { return FluidPresenter; }
-
     void RequestSkyFocus(float Azimuth, float Elevation, float Diameter) noexcept { SkyFocus = {Azimuth,Elevation,Diameter}; SkyFocusPending = true; }
     bool ConsumeSkyFocus(std::array<float,3>& Focus) noexcept
     {
@@ -194,7 +190,6 @@ class InspectorRuntime
     RecordToken          InspectedToken{};
     SolarPlacementSolver SolarSolver    = nullptr;
     ParticleViewportPresenter ParticlePresenter;
-    FluidViewportPresenter    FluidPresenter;
     float                InterfaceScale = 1.0f;
     EnvironmentEditAccess EnvironmentAccess{};
     float                SolarElevation = 38.0f;   // [°]
