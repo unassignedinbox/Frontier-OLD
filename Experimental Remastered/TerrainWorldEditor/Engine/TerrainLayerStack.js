@@ -799,6 +799,7 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
     const CellAreaM2 = StepX * StepZ;
     const LandAreaKm2 = (LandCells * CellAreaM2) / 1e6;
 
+    const PrevRuntime = Region.runtime;
     Region.runtime = {
         nx: Nx, nz: Nz, stepX: StepX, stepZ: StepZ,
         slabBottom: SlabBottom, baseTop: BaseTop,
@@ -806,6 +807,10 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
         falloffMap: FalloffPreview, waterChannel: WaterChannel,
         hasLand: true, maxHeight: MaxHeight, landAreaKm2: LandAreaKm2
     };
+    // Preserve live erosion state + data-map lens across stack re-evaluations
+    // (baked erosion persists via the 'Erosion Baked Surface' sculpt deltas).
+    if (PrevRuntime && PrevRuntime.erosion) Region.runtime.erosion = PrevRuntime.erosion;
+    if (PrevRuntime && PrevRuntime.mapLensData) Region.runtime.mapLensData = PrevRuntime.mapLensData;
     Region.dirty = false;
     return Region.runtime;
 }
@@ -1041,12 +1046,45 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
 
             const Litho = ComputeFlatLithologyColor(H, SeaLevel, SlopeDeg, Rt.waterChannel[Cell], D2, SlabBottom);
 
+            // ---- Erosion overlays (live simulated surface state) ----
+            let CR = Litho[0], CG = Litho[1], CB = Litho[2];
+            const Er = Rt.erosion;
+            if (Er && Cell < Er.nx * Er.nz)
+            {
+                // Aeolian sand sheet
+                const SandT = Clamp(Er.sand[Cell] / 0.6, 0, 1) * 0.85;
+                CR = Mix(CR, 0.82, SandT); CG = Mix(CG, 0.68, SandT); CB = Mix(CB, 0.42, SandT);
+                // Chemical staining (Fe rust / Cu patina / Mn varnish / salt crust)
+                CR = Mix(CR, 0.55, Clamp(Er.fe[Cell], 0, 1) * 0.32); CG = Mix(CG, 0.26, Clamp(Er.fe[Cell], 0, 1) * 0.28); CB = Mix(CB, 0.16, Clamp(Er.fe[Cell], 0, 1) * 0.28);
+                CR = Mix(CR, 0.22, Clamp(Er.cu[Cell], 0, 1) * 0.26); CG = Mix(CG, 0.58, Clamp(Er.cu[Cell], 0, 1) * 0.32); CB = Mix(CB, 0.48, Clamp(Er.cu[Cell], 0, 1) * 0.3);
+                CR = Mix(CR, 0.24, Clamp(Er.mn[Cell], 0, 1) * 0.3); CG = Mix(CG, 0.2, Clamp(Er.mn[Cell], 0, 1) * 0.28); CB = Mix(CB, 0.26, Clamp(Er.mn[Cell], 0, 1) * 0.3);
+                const SaltT = Clamp(Er.salt[Cell], 0, 1) * 0.5;
+                CR = Mix(CR, 0.9, SaltT); CG = Mix(CG, 0.88, SaltT); CB = Mix(CB, 0.82, SaltT);
+                // Snow / glacier ice
+                const SnowT = Clamp(Er.snow[Cell] / 0.5, 0, 1);
+                CR = Mix(CR, 0.86, SnowT); CG = Mix(CG, 0.88, SnowT); CB = Mix(CB, 0.94, SnowT);
+                const IceT = Clamp(Er.ice[Cell] / 1.2, 0, 1) * 0.85;
+                CR = Mix(CR, 0.55, IceT); CG = Mix(CG, 0.76, IceT); CB = Mix(CB, 0.9, IceT);
+            }
+
+            // ---- Data-map diagnostic lens: false-color turbo ramp per cell ----
+            if (Rt.mapLensData && Cell < Rt.mapLensData.length)
+            {
+                const T = Clamp(Rt.mapLensData[Cell], 0, 1);
+                CR = TurboRampJS(T, 0); CG = TurboRampJS(T, 1); CB = TurboRampJS(T, 2);
+            }
+
             const VId = PosList.length / 3;
             TopVertIdx[Cell] = VId;
             PosList.push(Wx, H, Wz);
             NormList.push(NxVal, NyVal, NzVal);
-            ColList.push(Litho[0], Litho[1], Litho[2]);
-            AuxList.push(Rt.falloffMap[Cell], Clamp(SlopeDeg / 90.0, 0.0, 1.0));
+            ColList.push(CR, CG, CB);
+            // aux = [falloffWeight, slopeNorm, waterDepthM, wetness] — vec4!
+            AuxList.push(
+                Rt.falloffMap[Cell], Clamp(SlopeDeg / 90.0, 0.0, 1.0),
+                Er && Cell < Er.w.length ? Clamp(Er.w[Cell], 0, 8) : 0,
+                Er && Cell < Er.wetness.length ? Clamp(Er.wetness[Cell], 0, 1) : Rt.waterChannel[Cell] * 0.4
+            );
         }
     }
 
@@ -1083,7 +1121,7 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
             PosList.push(Wx, SlabBottom, Wz);
             NormList.push(0, -1, 0);
             ColList.push(0.055, 0.058, 0.064); // Clean dark basalt slab underside
-            AuxList.push(0.0, 0.0);
+            AuxList.push(0.0, 0.0, 0.0, 0.0);
             return BId;
         };
 
@@ -1104,7 +1142,7 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
             {
                 NormList.push(OutNx, 0, OutNz);
                 ColList.push(0.105, 0.098, 0.088);
-                AuxList.push(0.0, 1.0);
+                AuxList.push(0.0, 1.0, 0.0, 0.0);
             }
             IdxList.push(BaseV, BaseV + 3, BaseV + 2, BaseV, BaseV + 2, BaseV + 1);
         };
@@ -1156,6 +1194,29 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
 /**
  * Calibrated linear-space dark-studio geological lithology palette (rich, grounded, non-blinding!).
  */
+/*==========================================================================================================================================
+                                        TURBO FALSE-COLOR RAMP (data-map lens)
+==========================================================================================================================================*/
+export function TurboRampJS(T, Channel)
+{
+    const X = Clamp(T, 0, 1);
+    // Compact turbo-like ramp: blue → cyan → green → yellow → red.
+    const Stops = Channel === 0
+        ? [[0, 0.05], [0.35, 0.08], [0.7, 0.58], [1, 0.62]]
+        : Channel === 1
+            ? [[0, 0.20], [0.35, 0.42], [0.7, 0.42], [1, 0.14]]
+            : [[0, 0.42], [0.35, 0.28], [0.7, 0.10], [1, 0.09]];
+    for (let S = 0; S < Stops.length - 1; ++S)
+    {
+        if (X >= Stops[S][0] && X <= Stops[S + 1][0])
+        {
+            const K = (X - Stops[S][0]) / Math.max(1e-9, Stops[S + 1][0] - Stops[S][0]);
+            return Mix(Stops[S][1], Stops[S + 1][1], K);
+        }
+    }
+    return Stops[Stops.length - 1][1];
+}
+
 function ComputeFlatLithologyColor(HeightM, SeaLevelM, SlopeDeg, RiverWeight, Sdf2D, SlabBottom)
 {
     const RelH = HeightM - SeaLevelM;
@@ -1280,7 +1341,7 @@ function Append3DSplineTubeMeshes(Region, PosList, NormList, ColList, AuxList, I
                 NormList.push(Nx, Ny, Nz);
                 const TopTint = Clamp(Ny * 0.5 + 0.5, 0.0, 1.0);
                 ColList.push(Mix(0.13, 0.18, TopTint), Mix(0.12, 0.17, TopTint), Mix(0.11, 0.14, TopTint));
-                AuxList.push(1.0, Math.acos(Clamp(Ny, -1, 1)) / (Math.PI * 0.5));
+                AuxList.push(1.0, Math.acos(Clamp(Ny, -1, 1)) / (Math.PI * 0.5), 0.0, 0.0);
             }
         }
 
@@ -1321,7 +1382,7 @@ function Append3DOverhangCapsulesMesh(Region, PosList, NormList, ColList, AuxLis
                 const L = Math.hypot(Nx, Ny, Nz) || 1;
                 NormList.push(Nx / L, Ny / L, Nz / L);
                 ColList.push(0.38, 0.34, 0.31);
-                AuxList.push(1.0, 0.85);
+                AuxList.push(1.0, 0.85, 0.0, 0.0);
             }
         }
         const RowStride = Segs + 1;

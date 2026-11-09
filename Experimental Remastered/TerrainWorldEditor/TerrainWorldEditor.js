@@ -22,6 +22,21 @@ import {
 import { WorldMap2DCanvas } from './Engine/WorldMap2DCanvas.js';
 import { TerrainOceanViewport } from './Engine/TerrainOceanViewport.js';
 import {
+    CreateClimateGroup, CreateErosionState, StepErosionDay, BakeErosionYears,
+    ApplyErosionToRegion, ErosionStateSummary, SampleClimate, AdvanceClimateDay,
+    CLIMATE_REGIMES, EROSION_DEFAULTS
+} from './Engine/ErosionPhysicsEngine.js';
+import {
+    EROSION_PRESETS, GetErosionPreset, BuildPresetWorld,
+    CreateSimulationGroup, InitSimulationGroup, StepSimulationGroupDay,
+    BakeSimulationGroup, ApplySimulationGroup
+} from './Engine/ErosionPresets.js';
+import {
+    DATA_MAP_CATALOG, ComputeDataMaps, STAMP_CATALOG, SampleStamp,
+    SATMAP_RAMPS, ComposeSurfaceColors, ExportMapPngBytes, ExportSurfacePngBytes,
+    ExportMapRawBytes
+} from './Engine/GaeaTexturingAndStamps.js';
+import {
     ConstructGlyph,
     MakeEl,
     MakePropertyGroup,
@@ -49,9 +64,27 @@ class TerrainWorldStudioApp
         SeedThreeDemoTerrains(this.world);
 
         this.workspaceMode = 'split'; // '2d' | '3d' | 'split'
-        this.inspectorTab = 'layers'; // 'layers' | 'spline' | 'slab' | 'stage'
+        this.inspectorTab = 'layers'; // 'layers' | 'spline' | 'slab' | 'stage' | 'sim' | 'texturing'
         this.outlinerFilter = 'all';  // 'all' | 'terrains' | 'splines' | 'masks'
         this.outlinerSearch = '';
+
+        // ---- Physically based erosion simulation state (solo OR shared-weather group) ----
+        this.sim = {
+            group: null,              // SimulationGroup (shared weather across 2+ terrains)
+            playing: false,
+            stepRate: 4,              // simulated days per real second while playing
+            accumulator: 0,
+            presetId: 'icelandic-highlands',
+            climateRegimeId: 'alpine-continental',
+            latitudeDeg: 46,
+            startDay: 120,
+            bakeYears: 2,
+            mapLensId: null,          // active Gaea data-map lens
+            rampId: 'satelliteDesert',
+            stampId: 'crossBeddedSandstone',
+            stampStrength: 1.0,
+            shareWeather: false       // false = solo (1-by-1) · true = shared climate group
+        };
 
         this.activeRegionId = this.world.regions[0]?.id || null;
         this.selectedRegionIds = new Set(this.activeRegionId ? [this.activeRegionId] : []);
@@ -223,6 +256,7 @@ class TerrainWorldStudioApp
         this._buildQuickAddLibrary();
         this._buildPresetStrip();
         this._bindHeaderAndTransport();
+        this._populateMapLensOptions();
         this.refreshChrome();
         this.rebuildInspector();
 
@@ -784,7 +818,18 @@ class TerrainWorldStudioApp
         });
         document.getElementById('lens-select')?.addEventListener('change', E =>
         {
-            this.view3D.lensMode = Number(E.target.value);
+            const Val = E.target.value;
+            if (Val.startsWith('map:'))
+            {
+                this.sim.mapLensId = Val.slice(4);
+                this._applyMapLens();
+            }
+            else
+            {
+                this.sim.mapLensId = null;
+                this._clearMapLens();
+                this.view3D.lensMode = Number(Val);
+            }
         });
         document.getElementById('toggle-ocean-btn')?.addEventListener('click', () =>
         {
@@ -1366,6 +1411,14 @@ class TerrainWorldStudioApp
         {
             this._buildStageAndExportTab(Content, Region);
         }
+        else if (this.inspectorTab === 'sim')
+        {
+            this._buildSimulationTab(Content, Region);
+        }
+        else if (this.inspectorTab === 'texturing')
+        {
+            this._buildTexturingTab(Content, Region);
+        }
         else
         {
             this._buildLayersAndFalloffTab(Content, Region);
@@ -1814,18 +1867,502 @@ class TerrainWorldStudioApp
     }
 
     /*======================================================================================================================================
+                            SIMULATION — PHYSICS EROSION ENGINE CONTROLS
+    ======================================================================================================================================*/
+    _simTargetRegions()
+    {
+        if (this.sim.shareWeather)
+        {
+            // Shared Weather Group: every multi-selected terrain evolves under ONE cycle.
+            const Targets = this.world.regions.filter(R => this.selectedRegionIds.has(R.id) && R.enabled);
+            return Targets.length >= 2 ? Targets : this.world.regions.filter(R => R.enabled).slice(0, 2);
+        }
+        // Solo 1-by-1: only the active region simulates.
+        const Solo = this.world.getRegion?.(this.activeRegionId) || this.world.regions.find(R => R.id === this.activeRegionId);
+        return Solo ? [Solo] : [this.world.regions[0]].filter(Boolean);
+    }
+
+    _simEnsureGroup(Force = false)
+    {
+        const Targets = this._simTargetRegions();
+        if (!Targets.length) return null;
+        const SameTargets = this.sim.group
+            && this.sim.group.members.length === Targets.length
+            && this.sim.group.members.every((M, IX) => M.region === Targets[IX]);
+        if (this.sim.group && SameTargets && !Force) return this.sim.group;
+
+        this.sim.group = CreateSimulationGroup(
+            this.sim.shareWeather ? 'Shared Weather Group' : 'Solo Simulation',
+            Targets,
+            {
+                regimeId: this.sim.climateRegimeId,
+                latitudeDeg: this.sim.latitudeDeg,
+                startDayOfYear: this.sim.startDay,
+                seed: 4029
+            },
+            {}
+        );
+        InitSimulationGroup(this.world, this.sim.group, 4029);
+        return this.sim.group;
+    }
+
+    _simStepDays(Days)
+    {
+        const Group = this._simEnsureGroup();
+        if (!Group) return;
+        for (const Member of Group.members)
+        {
+            if (!Member.region.runtime || Member.region.dirty) EvaluateTerrainRegion(this.world, Member.region, this.activeLayerId);
+        }
+        if (Group.members.some(M => !M.state)) InitSimulationGroup(this.world, Group, 4029);
+        for (let D = 0; D < Days; ++D) StepSimulationGroupDay(this.world, Group);
+        for (const Member of Group.members)
+        {
+            ApplyErosionToRegion(this.world, Member.region, Member.state);
+            this.map2D.invalidateRegionPreview(Member.region.id);
+        }
+        this._simRefreshHud();
+        if (this.sim.mapLensId) this._applyMapLens();
+    }
+
+    _simBakeYears(Years)
+    {
+        const Group = this._simEnsureGroup();
+        if (!Group) return;
+        for (const Member of Group.members)
+        {
+            if (!Member.region.runtime || Member.region.dirty) EvaluateTerrainRegion(this.world, Member.region, this.activeLayerId);
+        }
+        InitSimulationGroup(this.world, Group, 4029);
+        BakeSimulationGroup(this.world, Group, Years, null);
+        ApplySimulationGroup(this.world, Group);
+        for (const Member of Group.members) this.map2D.invalidateRegionPreview(Member.region.id);
+        this._simRefreshHud();
+        if (this.sim.mapLensId) this._applyMapLens();
+        this.refreshChrome();
+    }
+
+    _simReset()
+    {
+        this.sim.playing = false;
+        const Group = this.sim.group;
+        if (!Group) return;
+        for (const Member of Group.members)
+        {
+            Member.state = null;
+            Member.region.dirty = true;
+        }
+        this._scheduleDirtyRegionsEvaluation();
+        this._simRefreshHud();
+    }
+
+    _simRefreshHud()
+    {
+        const Set = (Id, Txt) => { const E = document.getElementById(Id); if (E) E.textContent = Txt; };
+        const Group = this.sim.group;
+        const Member = Group?.members.find(M => M.region.id === this.activeRegionId) || Group?.members[0];
+        const State = Member?.state;
+        const Climate = Group ? Group.climate.lastSample || SampleClimate(Group.climate) : null;
+        if (Climate)
+        {
+            Set('sim-hud-date', `Day ${Group.climate.dayOfYear} · Year ${Group.climate.year + 1}`);
+            Set('sim-hud-season', Climate.seasonName);
+            Set('sim-hud-temp', `${Climate.tempC.toFixed(1)} °C`);
+            Set('sim-hud-precip', `${Climate.rainMm.toFixed(1)} mm rain · ${Climate.snowMm.toFixed(1)} mm snow`);
+            Set('sim-hud-wind', `${Climate.windSpeedMs.toFixed(1)} m/s @ ${Math.round(Climate.windAzimuthDeg)}°`);
+            Set('sim-hud-regime', CLIMATE_REGIMES.find(R => R.id === this.sim.climateRegimeId)?.label || '—');
+        }
+        if (State)
+        {
+            const S = ErosionStateSummary(State);
+            Set('sim-hud-stats', `Incised ${S.incisedM.toFixed(1)} m · Deposited ${S.depositedM.toFixed(1)} m · Pits ${S.pitCells} · Flood risk ${S.floodedCells}`);
+            Set('sim-hud-day', `${State.day} sim-days baked`);
+        }
+        Set('sim-hud-mode', this.sim.shareWeather ? `Shared weather · ${Group?.members.length || 0} terrains` : 'Solo · 1-by-1');
+    }
+
+    _populateMapLensOptions()
+    {
+        const GroupEl = document.getElementById('lens-map-group');
+        if (!GroupEl) return;
+        for (const Meta of DATA_MAP_CATALOG)
+        {
+            const Opt = document.createElement('option');
+            Opt.value = `map:${Meta.id}`;
+            Opt.textContent = `Map · ${Meta.label}`;
+            GroupEl.appendChild(Opt);
+        }
+    }
+
+    _applyMapLens()
+    {
+        const MapId = this.sim.mapLensId;
+        if (!MapId) return;
+        for (const R of this.world.regions)
+        {
+            if (!R.runtime) continue;
+            const Er = R.runtime.erosion;
+            const Maps = ComputeDataMaps(R, Er || null);
+            const M = Maps[MapId];
+            if (M)
+            {
+                R.runtime.mapLensData = M.data;
+                R.meshDirty = true;
+            }
+        }
+    }
+
+    _clearMapLens()
+    {
+        for (const R of this.world.regions)
+        {
+            if (R.runtime && R.runtime.mapLensData)
+            {
+                R.runtime.mapLensData = null;
+                R.meshDirty = true;
+            }
+        }
+    }
+
+    /*--------------------------------------------------------------------------------------------------------------------------------------
+                                        TAB 5: SIMULATION & SEASONAL CLIMATE
+    --------------------------------------------------------------------------------------------------------------------------------------*/
+    _buildSimulationTab(Content, Region)
+    {
+        // ---------- Preset Gallery ----------
+        const PresetGroup = MakePropertyGroup('Geological Landscape Presets', 'Planet', `${EROSION_PRESETS.length} PRESETS`, true,
+            'All c7egoist/Frontier landscapes, re-engineered for the physically based multi-process erosion solver.');
+        PresetGroup.Body.appendChild(MakeSelectRow('Erosion Preset', EROSION_PRESETS.map(P => [P.name, P.id]), this.sim.presetId, Val =>
+        {
+            this.sim.presetId = Val;
+            const P = GetErosionPreset(Val);
+            this.sim.climateRegimeId = P.climate.regimeId;
+            this.sim.latitudeDeg = P.climate.latitudeDeg;
+            this.sim.startDay = P.climate.startDayOfYear;
+            this.sim.rampId = P.texture.rampId;
+            this.sim.stampId = P.texture.stampIds[0];
+            this.rebuildInspector();
+        }));
+        const LoadBtn = MakeEl('button', 'button export-button', 'Load Preset World (replaces demo masks)');
+        LoadBtn.type = 'button';
+        LoadBtn.style.width = '100%';
+        LoadBtn.style.justifyContent = 'center';
+        LoadBtn.addEventListener('click', () =>
+        {
+            const Built = BuildPresetWorld(this.world, this.sim.presetId, { resolution: 148 });
+            this.activeRegionId = Built.region.id;
+            this.selectedRegionIds = new Set([Built.region.id]);
+            this.sim.group = null;
+            for (const R of this.world.regions) R.dirty = true;
+            this._evaluateDirtyRegionsNow();
+            this.map2D.frameAllRegions?.();
+            this.view3D.frameVisibleWorld?.();
+            this.refreshChrome();
+            this.rebuildInspector();
+        });
+        PresetGroup.Body.appendChild(LoadBtn);
+        Content.appendChild(PresetGroup.Group);
+
+        // ---------- Shared Weather / Solo Mode ----------
+        const ModeGroup = MakePropertyGroup('Simulation Grouping', 'Layers', this.sim.shareWeather ? 'SHARED' : 'SOLO', true,
+            'Simulate terrains 1-by-1 (solo) — or bind 2+ similar mask layers to ONE shared weather / pattern / seasonal cycle.');
+        ModeGroup.Body.appendChild(MakeSelectRow('Simulation Mode', [
+            ['Solo · 1-by-1 (active terrain only)', 'solo'],
+            ['Shared Weather Group (2+ terrains, same cycle)', 'shared']
+        ], this.sim.shareWeather ? 'shared' : 'solo', Val =>
+        {
+            this.sim.shareWeather = Val === 'shared';
+            this.sim.group = null;
+            this.rebuildInspector();
+        }));
+        const Targets = this._simTargetRegions();
+        const ShareInfo = MakeEl('div', 'studio-btn-row');
+        ShareInfo.appendChild(MakeEl('span', 'dock-readout', `Members: ${Targets.map(R => R.name).join(' · ') || '—'}`));
+        ModeGroup.Body.appendChild(ShareInfo);
+        Content.appendChild(ModeGroup.Group);
+
+        // ---------- Seasonal Climate ----------
+        const ClimGroup = MakePropertyGroup('Seasonal Climate Forcing', 'Sun', 'DAY-OF-YEAR', true,
+            'Latitude + 9 climate regimes drive temperature, rain-vs-snow partitioning, freeze-thaw nights, spring melt floods & dry-season wind cycles.');
+        ClimGroup.Body.appendChild(MakeSelectRow('Climate Regime', CLIMATE_REGIMES.map(R => [R.label, R.id]), this.sim.climateRegimeId, Val =>
+        {
+            this.sim.climateRegimeId = Val;
+            this.sim.group = null;
+            this._simRefreshHud();
+        }));
+        ClimGroup.Body.appendChild(MakeSliderPillRow('Latitude', -82, 82, 1, this.sim.latitudeDeg, 0, '°', V =>
+        {
+            this.sim.latitudeDeg = V;
+            this.sim.group = null;
+        }));
+        ClimGroup.Body.appendChild(MakeSliderPillRow('Start Day of Year', 1, 365, 1, this.sim.startDay, 0, 'doy', V =>
+        {
+            this.sim.startDay = V;
+            this.sim.group = null;
+        }));
+        ClimGroup.Body.appendChild(MakeSliderPillRow('Playback Speed', 1, 40, 1, this.sim.stepRate, 0, 'd/s', V => { this.sim.stepRate = V; }));
+        Content.appendChild(ClimGroup.Group);
+
+        // ---------- Transport ----------
+        const RunGroup = MakePropertyGroup('Erosion Simulation Transport', 'Layers', 'LIVE / BAKE', true,
+            'Play live day-by-day, single-step, or bake whole years in one click. All six physics processes run every simulated day.');
+        const Row1 = MakeEl('div', 'studio-btn-row');
+        const PlayBtn = MakeEl('button', 'button export-button' + (this.sim.playing ? ' accent' : ''), this.sim.playing ? '⏸ Pause' : '▶ Play');
+        PlayBtn.type = 'button';
+        PlayBtn.addEventListener('click', () =>
+        {
+            this.sim.playing = !this.sim.playing;
+            this.sim.accumulator = 0;
+            this.rebuildInspector();
+        });
+        const StepBtn = MakeEl('button', 'button', '+1 Day');
+        StepBtn.type = 'button';
+        StepBtn.addEventListener('click', () => { this._simStepDays(1); this.rebuildInspector(); });
+        const MonthBtn = MakeEl('button', 'button', '+30 Days');
+        MonthBtn.type = 'button';
+        MonthBtn.addEventListener('click', () => { this._simStepDays(30); this.rebuildInspector(); });
+        Row1.append(PlayBtn, StepBtn, MonthBtn);
+        RunGroup.Body.appendChild(Row1);
+
+        const Row2 = MakeEl('div', 'studio-btn-row');
+        const BakeInput = MakeEl('input', 'pill-range');
+        BakeInput.type = 'number'; BakeInput.min = '1'; BakeInput.max = '200'; BakeInput.value = String(this.sim.bakeYears);
+        BakeInput.style.width = '68px';
+        BakeInput.addEventListener('change', E => { this.sim.bakeYears = Clamp(Number(E.target.value) || 1, 1, 200); });
+        const BakeBtn = MakeEl('button', 'button export-button accent', 'Bake Years');
+        BakeBtn.type = 'button';
+        BakeBtn.addEventListener('click', () =>
+        {
+            this.sim.playing = false;
+            this._simBakeYears(this.sim.bakeYears);
+            this.rebuildInspector();
+        });
+        const ResetBtn = MakeEl('button', 'button', 'Reset');
+        ResetBtn.type = 'button';
+        ResetBtn.addEventListener('click', () => { this._simReset(); this.rebuildInspector(); });
+        Row2.append(MakeEl('span', 'dock-readout', 'Years:'), BakeInput, BakeBtn, ResetBtn);
+        RunGroup.Body.appendChild(Row2);
+        Content.appendChild(RunGroup.Group);
+
+        // ---------- Seasonal HUD ----------
+        const HudGroup = MakePropertyGroup('Seasonal Calendar HUD', 'Layers', 'LIVE WEATHER', true);
+        const HudGrid = MakeEl('div', 'sim-hud-grid');
+        const HudItem = (Id, Label, Initial) =>
+        {
+            const Cell = MakeEl('div', 'sim-hud-cell');
+            Cell.append(MakeEl('small', '', Label), MakeEl('b', 'tabular', Initial));
+            Cell.querySelector('b').id = Id;
+            return Cell;
+        };
+        HudGrid.append(
+            HudItem('sim-hud-date', 'Calendar', 'Day 120 · Year 1'),
+            HudItem('sim-hud-season', 'Season', 'Spring'),
+            HudItem('sim-hud-temp', 'Temp', '—'),
+            HudItem('sim-hud-precip', 'Precip', '—'),
+            HudItem('sim-hud-wind', 'Wind', '—'),
+            HudItem('sim-hud-regime', 'Regime', '—'),
+            HudItem('sim-hud-mode', 'Mode', 'Solo · 1-by-1'),
+            HudItem('sim-hud-day', 'Baked', '0 sim-days'),
+            HudItem('sim-hud-stats', 'Erosion Totals', '—')
+        );
+        HudGroup.Body.appendChild(HudGrid);
+        Content.appendChild(HudGroup.Group);
+        this._simRefreshHud();
+    }
+
+    /*--------------------------------------------------------------------------------------------------------------------------------------
+                            TAB 6: GAEA TEXTURING · DATA MAPS · STAMPS
+    --------------------------------------------------------------------------------------------------------------------------------------*/
+    _buildTexturingTab(Content, Region)
+    {
+        // ---------- Data Map Lens ----------
+        const MapGroup = MakePropertyGroup('Gaea Data Maps', 'Layers', `${DATA_MAP_CATALOG.length} MAPS`, true,
+            'Simulated & derived maps — click any map to view it as a false-color diagnostic lens in the 3D viewport.');
+        const MapList = MakeEl('div', 'data-map-grid');
+        for (const Meta of DATA_MAP_CATALOG)
+        {
+            const Btn = MakeEl('button', 'data-map-btn' + (this.sim.mapLensId === Meta.id ? ' active' : ''));
+            Btn.type = 'button';
+            Btn.title = `${Meta.label} (${Meta.category})`;
+            const Dot = MakeEl('span', 'data-map-dot');
+            Dot.style.background = Meta.color;
+            Btn.append(Dot, MakeEl('span', '', Meta.label));
+            Btn.addEventListener('click', () =>
+            {
+                this.sim.mapLensId = this.sim.mapLensId === Meta.id ? null : Meta.id;
+                if (this.sim.mapLensId)
+                {
+                    this._applyMapLens();
+                    const Sel = document.getElementById('lens-select');
+                    if (Sel) Sel.value = `map:${Meta.id}`;
+                }
+                else
+                {
+                    this._clearMapLens();
+                    const Sel = document.getElementById('lens-select');
+                    if (Sel) Sel.value = '0';
+                }
+                this.rebuildInspector();
+            });
+            MapList.appendChild(Btn);
+        }
+        MapGroup.Body.appendChild(MapList);
+
+        const ExpRow = MakeEl('div', 'studio-btn-row');
+        const PngBtn = MakeEl('button', 'button', 'Export Lens Map .PNG');
+        PngBtn.type = 'button';
+        PngBtn.addEventListener('click', () => this._exportDataMap('png'));
+        const RawBtn = MakeEl('button', 'button', 'Export .RAW Float32');
+        RawBtn.type = 'button';
+        RawBtn.addEventListener('click', () => this._exportDataMap('raw'));
+        ExpRow.append(PngBtn, RawBtn);
+        MapGroup.Body.appendChild(ExpRow);
+        Content.appendChild(MapGroup.Group);
+
+        // ---------- SatMap Ramps + Surface Preview ----------
+        const RampGroup = MakePropertyGroup('SatMap Color Ramps & Surface Stack', 'Sun', 'MULTI-STOP', true,
+            'Multi-stop satellite ramps combined with slope shading, chemical stains, snow/ice, sand sheets & stamps.');
+        RampGroup.Body.appendChild(MakeSelectRow('SatMap Ramp', SATMAP_RAMPS.map(R => [R.label, R.id]), this.sim.rampId, Val =>
+        {
+            this.sim.rampId = Val;
+        }));
+        const SurfBtn = MakeEl('button', 'button export-button', 'Export Composed Surface .PNG');
+        SurfBtn.type = 'button';
+        SurfBtn.style.width = '100%';
+        SurfBtn.style.justifyContent = 'center';
+        SurfBtn.addEventListener('click', () =>
+        {
+            const R = this.world.getRegion?.(this.activeRegionId) || this.world.regions[0];
+            if (!R?.runtime) return;
+            const Colors = ComposeSurfaceColors(R, R.runtime.erosion || null, { rampId: this.sim.rampId, stampId: this.sim.stampId });
+            const Png = ExportSurfacePngBytes(Colors, R.runtime.nx, R.runtime.nz);
+            this._downloadBytes(Png, `surface-${R.id}-${this.sim.rampId}.png`, 'image/png');
+        });
+        RampGroup.Body.appendChild(SurfBtn);
+        Content.appendChild(RampGroup.Group);
+
+        // ---------- Geological Surface Stamps ----------
+        const StampGroup = MakePropertyGroup('Procedural Geological Stamps', 'Mountain', `${STAMP_CATALOG.length} STAMPS`, true,
+            'Gaea-style surface stamps: cross-bedded sandstone, hexagonal basalt, tafoni pits, braided alluvium, ripples, scree, grikes, playa cracks, striations.');
+        StampGroup.Body.appendChild(MakeSelectRow('Surface Stamp', STAMP_CATALOG.map(S => [S.label, S.id]), this.sim.stampId, Val =>
+        {
+            this.sim.stampId = Val;
+        }));
+        StampGroup.Body.appendChild(MakeSliderPillRow('Stamp Strength', 0.0, 2.0, 0.05, this.sim.stampStrength, 2, '×', V => { this.sim.stampStrength = V; }));
+        const ApplyBtn = MakeEl('button', 'button export-button', 'Apply Stamp as Persistent Sculpt Layer');
+        ApplyBtn.type = 'button';
+        ApplyBtn.style.width = '100%';
+        ApplyBtn.style.justifyContent = 'center';
+        ApplyBtn.addEventListener('click', () =>
+        {
+            this.pushUndoSnapshot();
+            this._applyStampAsSculptLayer(Region);
+            this.refreshChrome();
+        });
+        StampGroup.Body.appendChild(ApplyBtn);
+        Content.appendChild(StampGroup.Group);
+    }
+
+    _applyStampAsSculptLayer(Region)
+    {
+        if (!Region.runtime) return;
+        const Rt = Region.runtime;
+        const Nx = Rt.nx, Nz = Rt.nz;
+        const Meta = STAMP_CATALOG.find(S => S.id === this.sim.stampId) || STAMP_CATALOG[0];
+        // Persistent sculpt layer so the stamp survives stack re-evaluation.
+        let Layer = Region.stack.find(L => L.type === 'sculpt' && L.name === `Stamp · ${Meta.label}`);
+        if (!Layer)
+        {
+            Layer = CreateTerrainLayer('sculpt', {
+                name: `Stamp · ${Meta.label}`,
+                combine: 'add',
+                falloff: { mode: 'none', distance: 100, edgeFloor: 1.0 }
+            });
+            Region.stack.push(Layer);
+        }
+        if (!Layer.deltas || Layer.deltaRes !== Nx * Nz)
+        {
+            Layer.deltas = new Float32Array(Nx * Nz);
+            Layer.deltaRes = Nx * Nz;
+        }
+        const B = Region.bounds;
+        for (let Z = 0; Z < Nz; ++Z)
+        {
+            for (let X = 0; X < Nx; ++X)
+            {
+                const I = Z * Nx + X;
+                if (Rt.sdf2D[I] > 0) continue;
+                const S = SampleStamp(this.sim.stampId, B.x + X * Rt.stepX, B.z + Z * Rt.stepZ, {});
+                Layer.deltas[I] += S.height * this.sim.stampStrength;
+            }
+        }
+        Layer.strokeCount = (Layer.strokeCount || 0) + 1;
+        Region.dirty = true;
+        Region.meshDirty = true;
+        this._scheduleDirtyRegionsEvaluation();
+    }
+
+    _exportDataMap(Format)
+    {
+        const R = this.world.getRegion?.(this.activeRegionId) || this.world.regions[0];
+        if (!R?.runtime) return;
+        const Maps = ComputeDataMaps(R, R.runtime.erosion || null);
+        const MapId = this.sim.mapLensId || 'altitude';
+        const M = Maps[MapId];
+        if (!M) return;
+        if (Format === 'png')
+        {
+            const Png = ExportMapPngBytes(M.data, R.runtime.nx, R.runtime.nz, R.runtime.sdf2D);
+            this._downloadBytes(Png, `map-${MapId}-${R.id}.png`, 'image/png');
+        }
+        else
+        {
+            const Raw = ExportMapRawBytes(M.data);
+            this._downloadBytes(Raw, `map-${MapId}-${R.id}.raw`, 'application/octet-stream');
+        }
+    }
+
+    _downloadBytes(Bytes, Filename, Mime)
+    {
+        const Blob_ = new Blob([Bytes], { type: Mime });
+        const Url = URL.createObjectURL(Blob_);
+        const A = document.createElement('a');
+        A.href = Url;
+        A.download = Filename;
+        document.body.appendChild(A);
+        A.click();
+        setTimeout(() => { URL.revokeObjectURL(Url); A.remove(); }, 800);
+    }
+
+    /*======================================================================================================================================
                                                       MAIN RENDER LOOP & TELEMETRY
     ======================================================================================================================================*/
     _startMainLoop()
     {
         let Frames = 0;
         let LastFpsT = performance.now();
+        let LastSimT = performance.now();
         const EnginePill = document.getElementById('engine-pill-text');
         const HudTris = document.getElementById('hud-tris-count');
         const StatMesh = document.getElementById('status-mesh');
 
         const Tick = Now =>
         {
+            // ---- Live erosion simulation stepping (play mode) ----
+            if (this.sim.playing && this.sim.group)
+            {
+                this.sim.accumulator += (Now - LastSimT) / 1000 * this.sim.stepRate;
+                LastSimT = Now;
+                const Days = Math.floor(this.sim.accumulator);
+                if (Days >= 1)
+                {
+                    this.sim.accumulator -= Days;
+                    this._simStepDays(Math.min(Days, 10));
+                    if (this.inspectorTab === 'sim') this._simRefreshHud();
+                }
+            }
+            else LastSimT = Now;
+
             if (this.workspaceMode !== '3d') this.map2D.render();
             if (this.workspaceMode !== '2d') this.view3D.render(this.activeLayerId);
 

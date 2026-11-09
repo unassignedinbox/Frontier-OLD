@@ -172,14 +172,14 @@ precision highp float;
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNorm;
 layout(location = 2) in vec3 aCol;
-layout(location = 3) in vec2 aAux;
+layout(location = 3) in vec4 aAux;
 
 uniform mat4 uViewProj;
 
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec3 vColor;
-out vec2 vAux;
+out vec4 vAux;
 
 void main() {
     vWorldPos = aPos;
@@ -194,7 +194,7 @@ precision highp float;
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec3 vColor;
-in vec2 vAux;
+in vec4 vAux;
 
 out vec4 fragColor;
 
@@ -259,6 +259,34 @@ void main() {
     vec3 H = normalize(uSunDir + V);
     float spec = pow(max(dot(N, H), 0.0), 36.0) * 0.035;
     lit += sunCol * spec;
+
+    // ===================== NON-FLOODING SIMULATED WATER =====================
+    // vAux.z = simulated water depth (m) · vAux.w = wetness film 0..1.
+    // Thin rain films (< 0.08 m) render ONLY as darkened wet rock + specular —
+    // they can NEVER flood hillslopes. True channeled rivers & pooled
+    // depressions (depth over threshold) render as clear hydrostatic water.
+    float wDepth = vAux.z;
+    float wetFilm = clamp(vAux.w, 0.0, 1.0);
+    float filmOnly = smoothstep(0.0, 0.08, wDepth) * (1.0 - smoothstep(0.08, 0.22, wDepth));
+    float realWater = smoothstep(0.10, 0.55, wDepth);
+
+    // Thin-film wet rock: darker, glossier — no water color at all.
+    float wetDark = clamp(max(wetFilm * 0.85, filmOnly * 0.8), 0.0, 1.0);
+    lit *= mix(1.0, 0.66, wetDark);
+    lit += sunCol * pow(max(dot(N, H), 0.0), 64.0) * 0.09 * wetDark;
+
+    // Real rivers / pools: clear turquoise water with depth-graded absorption.
+    if (realWater > 0.002) {
+        vec3 shallowW = vec3(0.055, 0.20, 0.21);
+        vec3 deepW = vec3(0.035, 0.13, 0.17);
+        vec3 wCol = mix(shallowW, deepW, clamp(wDepth / 1.8, 0.0, 1.0));
+        float wLight = (skyAmb.y + sunCol.y * max(dot(vec3(0.0, 1.0, 0.0), uSunDir), 0.0) * 0.75);
+        vec3 waterLit = wCol * (0.55 + wLight);
+        float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+        waterLit += sunCol * pow(max(dot(N, H), 0.0), 90.0) * 0.32;
+        waterLit += vec3(0.10, 0.13, 0.15) * fres * 0.35;
+        lit = mix(lit, waterLit, clamp(realWater * 0.82, 0.0, 0.86));
+    }
 
     // Damp shoreline band right at sea level
     if (uLensMode == 0 && relH > -2.5 && relH < 3.4 && N.y > -0.2) {
@@ -1234,7 +1262,7 @@ export class TerrainOceanViewport
 
             Gl.bindBuffer(Gl.ARRAY_BUFFER, Entry.vboAux);
             Gl.enableVertexAttribArray(3);
-            Gl.vertexAttribPointer(3, 2, Gl.FLOAT, false, 0, 0);
+            Gl.vertexAttribPointer(3, 4, Gl.FLOAT, false, 0, 0);
 
             Gl.bindBuffer(Gl.ELEMENT_ARRAY_BUFFER, Entry.ibo);
             Gl.bindVertexArray(null);

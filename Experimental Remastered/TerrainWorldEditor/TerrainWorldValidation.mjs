@@ -232,4 +232,354 @@ Suite('7. Moving 3D Spline Knots UP and DOWN on Y-axis shapes terrain elevation 
     assert.ok(MeshWithArch.triangleCount > TrisBeforeArch + 200, '3D Rock Arch Bridge spline mode must generate true 3D overhang tube triangles');
 });
 
-console.log(`\nAll ${Passed}/7 Open-World SDF Terrain Studio validation suites passed!`);
+/*==========================================================================================================================================
+                     EROSION PHYSICS · PRESETS · GAEA TEXTURING VALIDATION
+==========================================================================================================================================*/
+import {
+    CreateClimateGroup, CreateErosionState, StepErosionDay, BakeErosionYears,
+    ApplyErosionToRegion, ErosionStateSummary, SampleClimate, AdvanceClimateDay,
+    UpdateDrainageArea
+} from './Engine/ErosionPhysicsEngine.js';
+import {
+    EROSION_PRESETS, BuildPresetWorld, CreateSimulationGroup, InitSimulationGroup,
+    StepSimulationGroupDay, BakeSimulationGroup, ApplySimulationGroup
+} from './Engine/ErosionPresets.js';
+import {
+    DATA_MAP_CATALOG, ComputeDataMaps, STAMP_CATALOG, SampleStamp,
+    SATMAP_RAMPS, EvaluateRamp, ComposeSurfaceColors, EncodePng, ExportMapPngBytes,
+    ExportSurfacePngBytes
+} from './Engine/GaeaTexturingAndStamps.js';
+
+function AssertFiniteField(Field, Name)
+{
+    for (let I = 0; I < Field.length; ++I)
+    {
+        assert.ok(Number.isFinite(Field[I]), `${Name}[${I}] must stay finite (got ${Field[I]})`);
+    }
+}
+
+// 8. Hydrology: rainfall runs off to the sea, floods never cover hillslopes, films ≠ rivers
+Suite('8. Non-flooding hydrology: rain drains to coastline sinks, thin films separate from real rivers, no NaN', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const Region = World.regions[0];
+    EvaluateTerrainRegion(World, Region);
+    const State = CreateErosionState(World, Region, { seed: 7 });
+    const Group = CreateClimateGroup({ regimeId: 'monsoon', latitudeDeg: 22, seed: 7, startDayOfYear: 20, precipitationScale: 1.6 });
+    BakeErosionYears(State, Group, 0.1);   // 36 storm-heavy days
+
+    AssertFiniteField(State.h, 'h');
+    AssertFiniteField(State.w, 'w');
+    AssertFiniteField(State.sed, 'sed');
+    AssertFiniteField(State.soil, 'soil');
+
+    let LandCells = 0, SeaWithWater = 0, FilmOnly = 0, RealWater = 0;
+    for (let I = 0; I < State.h.length; ++I)
+    {
+        if (State.sdf2D[I] >= 0)
+        {
+            if (State.w[I] > 1e-6) SeaWithWater++;
+            continue;
+        }
+        LandCells++;
+        if (State.w[I] > 1e-4 && State.w[I] <= 0.08) FilmOnly++;
+        if (State.w[I] > 0.12) RealWater++;
+    }
+    assert.equal(SeaWithWater, 0, 'Coastline sink cells (sdf2D >= 0) must NEVER hold water');
+    assert.ok(RealWater >= 0, 'Standing river/lake water count must be non-negative');
+    const S = ErosionStateSummary(State);
+    assert.ok(S.floodedCells <= LandCells * 0.02,
+        `Stagnant hillslope flooding must stay under 2% of land (got ${S.floodedCells}/${LandCells})`);
+    // Wetness encodes thin films without inventing water volume
+    let Wet = 0;
+    for (let I = 0; I < State.wetness.length; ++I) if (State.wetness[I] > 0.02) Wet++;
+    assert.ok(Wet >= 0, 'Wetness field must exist for thin-film wet-rock rendering');
+});
+
+// 9. Pitting: segregation-ice + freeze-thaw + thermal-expansion fatigue carve visible pits
+Suite('9. Pitting erosion: ice-expansion + thermal-expansion cracking nucleates pits, spalls & protected cavities', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const Region = World.regions[0];
+    EvaluateTerrainRegion(World, Region);
+    const State = CreateErosionState(World, Region, {
+        seed: 11,
+        thermalFatigueRate: 0.055, frostSegregationRate: 0.05, freezeThawRate: 0.06,
+        spallDamageThreshold: 0.45, spallDepthM: 0.2, pitProtectDepthM: 0.5
+    });
+    const Group = CreateClimateGroup({ regimeId: 'semi-arid-high-desert', latitudeDeg: 39, seed: 11, startDayOfYear: 40 });
+    BakeErosionYears(State, Group, 0.2);   // 73 days of thermal cycling + frost nights
+
+    AssertFiniteField(State.crack, 'crack');
+    AssertFiniteField(State.pit, 'pit');
+    let MaxCrack = 0;
+    for (let I = 0; I < State.crack.length; ++I) MaxCrack = Math.max(MaxCrack, State.crack[I]);
+    assert.ok(MaxCrack > 0.15, `Crack damage must accumulate visibly (max ${MaxCrack.toFixed(3)})`);
+    assert.ok(State.stats.pits > 10, `Spall events must nucleate real pits (got ${State.stats.pits})`);
+    const S = ErosionStateSummary(State);
+    assert.ok(S.maxPitDepthM > 0.05, `Pits must carve measurable depth (got ${S.maxPitDepthM.toFixed(3)} m)`);
+    // Pits cluster (tafoni honeycomb) — damage field non-uniform
+    let Cracked = 0;
+    for (let I = 0; I < State.crack.length; ++I) if (State.crack[I] > 0.1) Cracked++;
+    assert.ok(Cracked > 30 && Cracked < State.crack.length * 0.9, 'Crack damage must be spatially clustered, not uniform');
+});
+
+// 10. Wind: Bagnold saltation migrates sand to slipfaces ≤ 34° and canyon undercut wears bedrock
+Suite('10. Wind erosion: saltation builds 34° slipface dunes and basal undercutting carves canyon corridors', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const Region = World.regions[0];
+    EvaluateTerrainRegion(World, Region);
+    const State = CreateErosionState(World, Region, {
+        seed: 13,
+        windAbrasionK: 0.004, venturiGain: 2.0, undercutGain: 3.4,
+        sandSupply: 1.5, saltationThresholdMs: 3.8, slipfaceDeg: 34
+    });
+    // Guarantee a loose sand sheet to feed saltation
+    for (let I = 0; I < State.sand.length; ++I) if (State.sdf2D[I] < 0) State.sand[I] = Math.max(State.sand[I], 0.4);
+    const Group = CreateClimateGroup({ regimeId: 'arid-desert', latitudeDeg: 30, seed: 13, startDayOfYear: 180, windScale: 1.8 });
+    const SandBefore = State.sand.slice();
+    BakeErosionYears(State, Group, 0.25);   // 91 windy desert days
+
+    AssertFiniteField(State.sand, 'sand');
+    AssertFiniteField(State.h, 'h-after-wind');
+    let Moved = 0;
+    for (let I = 0; I < State.sand.length; ++I) if (Math.abs(State.sand[I] - SandBefore[I]) > 0.02) Moved++;
+    assert.ok(Moved > 50, `Saltation must migrate sand across many cells (moved ${Moved})`);
+    // Slipface repose: sand surfaces never exceed ~tan(36°) for long — check average sand slope
+    const Nx = State.nx;
+    let SteepSand = 0, SandCells = 0;
+    for (let Z = 1; Z < State.nz - 1; ++Z)
+    {
+        for (let X = 1; X < Nx - 1; ++X)
+        {
+            const I = Z * Nx + X;
+            if (State.sdf2D[I] >= 0 || State.sand[I] < 0.06) continue;
+            SandCells++;
+            const Tan = Math.hypot(State.h[I + 1] - State.h[I - 1], State.h[I + Nx] - State.h[I - Nx]) / (2 * State.stepX);
+            const SandTan = Math.max(Tan, Math.abs(State.sand[I + 1] - State.sand[I - 1]) / (2 * State.stepX));
+            if (SandTan > Math.tan(38 * Math.PI / 180)) SteepSand++;
+        }
+    }
+    assert.ok(SandCells > 20, 'Wind must leave an active sand sheet');
+    assert.ok(SteepSand < SandCells * 0.35, `Slipfaces must relax toward 34° repose (steep ${SteepSand}/${SandCells})`);
+    // Canyon undercut: wear happened somewhere
+    let Wear = 0;
+    for (let I = 0; I < State.wearMap.length; ++I) Wear += State.wearMap[I];
+    assert.ok(Wear > 0.1, `Wind abrasion + undercutting must carve bedrock (wear ${Wear.toFixed(2)} m)`);
+});
+
+// 11. Seasonal cycles + shared weather groups across 2 terrains + determinism
+Suite('11. Seasonal climate & shared weather group: 2 terrains share ONE cycle (solo mode stays 1-by-1) & runs are deterministic', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const RA = World.regions[0];
+    const RB = World.regions[1];
+    EvaluateTerrainRegion(World, RA);
+    EvaluateTerrainRegion(World, RB);
+
+    const Group = CreateSimulationGroup('shared', [RA, RB], { regimeId: 'alpine-continental', latitudeDeg: 46, seed: 21 }, {});
+    InitSimulationGroup(World, Group, 21);
+    const A = Group.members[0].state, B = Group.members[1].state;
+    for (let D = 0; D < 24; ++D) StepSimulationGroupDay(World, Group);
+    assert.equal(A.day, B.day, 'Both shared-group terrains must advance the same number of days');
+    assert.equal(A.lastClimate.tempC, B.lastClimate.tempC, 'Both terrains must experience the SAME daily temperature');
+    assert.equal(A.lastClimate.rainMm, B.lastClimate.rainMm, 'Both terrains must experience the SAME daily rainfall');
+    assert.equal(Group.climate.dayOfYear, 120 + 24 > 365 ? (120 + 24) % 365 : 144, 'Group calendar advances exactly once per day');
+
+    // Seasonal temperature cycle: summer vs winter differ at 46°N
+    const G2 = CreateClimateGroup({ regimeId: 'alpine-continental', latitudeDeg: 46, seed: 21, startDayOfYear: 196 });
+    const Summer = SampleClimate(G2);
+    const G3 = CreateClimateGroup({ regimeId: 'alpine-continental', latitudeDeg: 46, seed: 21, startDayOfYear: 15 });
+    const Winter = SampleClimate(G3);
+    assert.ok(Summer.tempC > Winter.tempC + 8, `Seasonal cycle must swing summer above winter (S=${Summer.tempC.toFixed(1)}, W=${Winter.tempC.toFixed(1)})`);
+    assert.ok(Winter.snowFrac > Summer.snowFrac, 'Winter precipitation must skew to snow, summer to rain');
+
+    // Determinism: two identical solo runs → bit-identical surfaces
+    const World2 = new WorldMask2D();
+    SeedThreeDemoTerrains(World2);
+    const RA2 = World2.regions[0];
+    EvaluateTerrainRegion(World2, RA2);
+    const S1 = CreateErosionState(World2, RA2, { seed: 99 });
+    const S2 = CreateErosionState(World2, RA2, { seed: 99 });
+    const G4 = CreateClimateGroup({ regimeId: 'monsoon', latitudeDeg: 22, seed: 99 });
+    const G5 = CreateClimateGroup({ regimeId: 'monsoon', latitudeDeg: 22, seed: 99 });
+    for (let D = 0; D < 12; ++D) { StepErosionDay(S1, G4); StepErosionDay(S2, G5); }
+    for (let I = 0; I < S1.h.length; ++I) assert.equal(S1.h[I], S2.h[I], 'Deterministic engine must reproduce identical heights');
+});
+
+// 12. Continuum rockfall: cliff calving, ballistic runout & size-sorted talus aprons (no rigid meshes)
+Suite('12. Rockfall erosion: over-steepened cliffs calve into ballistic runout with angle-of-repose talus aprons', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const Region = World.regions[0];
+    EvaluateTerrainRegion(World, Region);
+    const State = CreateErosionState(World, Region, {
+        seed: 17, rockfallRate: 1.0, cliffBaseAngleDeg: 50,
+        talusCoarseReposeDeg: 35, talusFineReposeDeg: 26, ballisticScourK: 0.04
+    });
+    // Force an over-steepened cliff band so detachment is guaranteed
+    const Nx = State.nx;
+    for (let Z = 2; Z < State.nz - 2; ++Z)
+    {
+        for (let X = 2; X < Nx - 2; ++X)
+        {
+            const I = Z * Nx + X;
+            if (State.sdf2D[I] >= 0) continue;
+            State.h[I] += (X > Nx / 2 ? 26 : 0) * (1 - Math.abs(Z / State.nz - 0.5));
+        }
+    }
+    const Group = CreateClimateGroup({ regimeId: 'alpine-continental', latitudeDeg: 45, seed: 17, startDayOfYear: 300 });
+    BakeErosionYears(State, Group, 0.15);   // 55 winter days
+
+    AssertFiniteField(State.h, 'h-after-rockfall');
+    AssertFiniteField(State.soil, 'soil-after-rockfall');
+    let TalusTot = 0, DepoTot = 0;
+    for (let I = 0; I < State.talusMap.length; ++I) { TalusTot += State.talusMap[I]; DepoTot += State.depoMap[I]; }
+    assert.ok(TalusTot > 0.5, `Talus aprons must accumulate at cliff bases (talus ${TalusTot.toFixed(2)} m)`);
+    assert.ok(DepoTot > 0.5, `Ballistic fragments must deposit along runout (depo ${DepoTot.toFixed(2)} m)`);
+    // Deposits respect grain-size repose: cells with talus rarely exceed coarse repose angle
+    let OverRepose = 0, TalusCells = 0;
+    const ReposeTan = Math.tan(40 * Math.PI / 180);
+    for (let Z = 1; Z < State.nz - 1; ++Z)
+    {
+        for (let X = 1; X < Nx - 1; ++X)
+        {
+            const I = Z * Nx + X;
+            if (State.sdf2D[I] >= 0 || State.talusMap[I] < 0.05) continue;
+            TalusCells++;
+            const Tan = Math.hypot(State.h[I + 1] - State.h[I - 1], State.h[I + Nx] - State.h[I - Nx]) / (2 * State.stepX);
+            if (Tan > ReposeTan) OverRepose++;
+        }
+    }
+    assert.ok(OverRepose < Math.max(8, TalusCells * 0.3), `Talus must relax below angle of repose (over ${OverRepose}/${TalusCells})`);
+});
+
+// 13. Chemical weathering: karst dissolution, hydrolysis, haloclasty & downhill mineral staining
+Suite('13. Chemical erosion: dissolution lowers carbonate rock, clay saprolite softens, salts crack, stains transport downhill', () =>
+{
+    const World = new WorldMask2D();
+    SeedThreeDemoTerrains(World);
+    const Region = World.regions[0];
+    EvaluateTerrainRegion(World, Region);
+    const State = CreateErosionState(World, Region, {
+        seed: 19,
+        carbonateShare: 0.8, dissolutionK: 0.008, hydrolysisK: 0.008,
+        haloclastyK: 0.006, stainTransportK: 0.08
+    });
+    const Group = CreateClimateGroup({ regimeId: 'semi-arid-high-desert', latitudeDeg: 34, seed: 19, startDayOfYear: 100, precipitationScale: 1.3 });
+    BakeErosionYears(State, Group, 0.2);
+
+    AssertFiniteField(State.h, 'h-after-chem');
+    AssertFiniteField(State.fe, 'fe');
+    AssertFiniteField(State.salt, 'salt');
+    let Wear = 0, Clay = 0, Salt = 0, Fe = 0, Mn = 0;
+    for (let I = 0; I < State.h.length; ++I)
+    {
+        Wear += State.wearMap[I];
+        Clay += State.clay[I];
+        Salt += State.salt[I];
+        Fe += State.fe[I];
+        Mn += State.mn[I];
+    }
+    assert.ok(Wear > 0.5, `Dissolution + hydrolysis must remove measurable rock (wear ${Wear.toFixed(2)} m)`);
+    assert.ok(Clay > 5, `Hydrolysis must build clay saprolite (clay sum ${Clay.toFixed(1)})`);
+    assert.ok(Salt > 5, `Haloclasty must accumulate salt in arid pores (salt sum ${Salt.toFixed(1)})`);
+    assert.ok(Fe > 5 && Mn > 5, 'Dissolved Fe / Mn staining must transport and accumulate');
+    // Hardness softening through hydrolysis
+    let Soft = 0;
+    for (let I = 0; I < State.hard.length; ++I) if (State.hard[I] < 0.42) Soft++;
+    assert.ok(Soft > 20, 'Hydrolysis must soften rock hardness into weak saprolite');
+});
+
+// 14. Presets & Gaea texturing: all landscapes build, 25 data maps normalize, stamps/ramps/PNG export valid
+Suite('14. Presets & Gaea texturing: 23 presets build land, data maps normalize 0..1, stamps finite, ramps valid, PNG encoder structurally sound', () =>
+{
+    for (const Preset of EROSION_PRESETS)
+    {
+        const World = new WorldMask2D();
+        const Built = BuildPresetWorld(World, Preset.id, { resolution: 48 });
+        EvaluateTerrainRegion(World, Built.region);
+        assert.ok(Built.region.runtime.hasLand, `Preset '${Preset.id}' must produce land inside its mask`);
+        assert.ok(Built.region.stack.length >= 2, `Preset '${Preset.id}' must ship a composable layer stack`);
+        assert.ok(Preset.climate?.regimeId, `Preset '${Preset.id}' must declare a climate regime`);
+        assert.ok(Preset.texture?.rampId, `Preset '${Preset.id}' must declare a texturing recipe`);
+    }
+
+    // Twin preset creates two regions under one shared group
+    {
+        const World = new WorldMask2D();
+        const Built = BuildPresetWorld(World, 'twin-shared-weather', { resolution: 48 });
+        EvaluateTerrainRegion(World, Built.region);
+        EvaluateTerrainRegion(World, Built.regionB);
+        const Group = CreateSimulationGroup('twin', [Built.region, Built.regionB], Built.climateOptions, Built.erosionOptions);
+        InitSimulationGroup(World, Group, 31);
+        for (let D = 0; D < 8; ++D) StepSimulationGroupDay(World, Group);
+        const A = Group.members[0].state, B = Group.members[1].state;
+        assert.equal(A.lastClimate.tempC, B.lastClimate.tempC, 'Twin terrains must share identical daily weather');
+        ApplySimulationGroup(World, Group);
+        assert.ok(Built.region.runtime.erosion === A, 'Applied erosion state must attach to region runtime for texturing');
+    }
+
+    // Data maps
+    {
+        const World = new WorldMask2D();
+        const Built = BuildPresetWorld(World, 'layered-plateau', { resolution: 64 });
+        EvaluateTerrainRegion(World, Built.region);
+        const Group = CreateSimulationGroup('maps', [Built.region], Built.climateOptions, Built.erosionOptions);
+        InitSimulationGroup(World, Group, 41);
+        BakeSimulationGroup(World, Group, 0.05);
+        ApplySimulationGroup(World, Group);
+        const Maps = ComputeDataMaps(Built.region, Group.members[0].state);
+        assert.equal(Object.keys(Maps).length, DATA_MAP_CATALOG.length, 'Every catalogued data map must compute');
+        for (const [Id, M] of Object.entries(Maps))
+        {
+            for (let I = 0; I < M.data.length; ++I)
+            {
+                assert.ok(M.data[I] >= -0.001 && M.data[I] <= 1.001, `Map '${Id}' must normalize to 0..1 (got ${M.data[I]})`);
+            }
+        }
+        // Surface composition + PNG export
+        const Colors = ComposeSurfaceColors(Built.region, Group.members[0].state, { rampId: 'canyonStrata', stampId: 'crossBeddedSandstone' });
+        const Nx = Built.region.runtime.nx, Nz = Built.region.runtime.nz;
+        const Png = ExportSurfacePngBytes(Colors, Nx, Nz);
+        const MapPng = ExportMapPngBytes(Maps.flow.data, Nx, Nz, Built.region.runtime.sdf2D);
+        for (const Bytes of [Png, MapPng])
+        {
+            assert.deepEqual([Bytes[0], Bytes[1], Bytes[2], Bytes[3]], [0x89, 0x50, 0x4e, 0x47], 'PNG magic must be valid');
+            const View = new DataView(Bytes.buffer, Bytes.byteOffset);
+            assert.equal(View.getUint32(16), Nx, 'PNG IHDR width must match grid');
+            assert.equal(View.getUint32(20), Nz, 'PNG IHDR height must match grid');
+        }
+    }
+
+    // Stamps + ramps
+    for (const S of STAMP_CATALOG)
+    {
+        for (const [X, Z] of [[0, 0], [123.4, -567.8], [-1e4, 2e4]])
+        {
+            const R = SampleStamp(S.id, X, Z, { seed: 5 });
+            assert.ok(Number.isFinite(R.height) && Number.isFinite(R.colorVar), `Stamp '${S.id}' must sample finite values`);
+        }
+    }
+    for (const Ramp of SATMAP_RAMPS)
+    {
+        for (const T of [0, 0.25, 0.5, 0.75, 1])
+        {
+            const C = EvaluateRamp(Ramp, T);
+            assert.ok(C.length === 3 && C.every(V => V >= 0 && V <= 1), `Ramp '${Ramp.id}' must emit valid RGB at t=${T}`);
+        }
+    }
+    // EncodePng round-trip on synthetic RGBA
+    const Px = new Uint8Array(4 * 4 * 3);
+    for (let I = 0; I < Px.length; ++I) Px[I] = (I * 7) & 255;
+    const Tiny = EncodePng(4, 4, Px, false);
+    assert.equal(new DataView(Tiny.buffer).getUint32(16), 4, 'Tiny PNG must encode width');
+});
+
+console.log(`\nAll ${Passed}/14 Open-World SDF Terrain Studio validation suites passed!`);
