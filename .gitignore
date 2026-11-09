@@ -1,0 +1,13 @@
+# Dependencies & build outputs
+node_modules/
+**/node_modules/
+Build/
+build/
+dist/
+out/
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+__pycache__/
+*.pyc
