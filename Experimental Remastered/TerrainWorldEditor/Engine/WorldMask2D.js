@@ -533,7 +533,13 @@ export class WorldMask2D
                 sdf3DOps: R.sdf3DOps.map(Op => ({ ...Op })),
                 stack: R.stack.map(Lyr =>
                 {
-                    const Copy = JSON.parse(JSON.stringify({ ...Lyr, deltas: undefined }));
+                    // Transient simulation state (caches, bake results, typed detail maps) must never
+                    // reach the file: it is both huge and fully reproducible from the parameters.
+                    const {
+                        imprintMap, baselineHeights, hardnessMap, lastStats, _bake,
+                        cacheKey, bakeDirty, bakeDirtyReason, ...Persistable
+                    } = Lyr;
+                    const Copy = JSON.parse(JSON.stringify({ ...Persistable, deltas: undefined }));
                     if (Lyr.deltas instanceof Float32Array)
                     {
                         Copy.deltasArr = Array.from(Lyr.deltas, V => Math.round(V * 100) / 100);

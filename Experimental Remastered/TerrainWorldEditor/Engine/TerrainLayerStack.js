@@ -5,6 +5,8 @@
 // Real-Time SDF Sculpting (2.5D + True 3D Overhang/Cave SDF), Thin-Slab Triangle Mesher, and 3 Demo Open-World Masks.
 
 import { ComputeRegionMaskSdf2D, MakeTerrainUid } from './WorldMask2D.js';
+import { BuildHardnessField, ErosionSimulationState } from './ErosionEngine.js';
+import { ApplyWeatherMode, ClonePresetParams, GetErosionPreset, MergeErosionParams } from './ErosionPresets.js';
 
 export const Clamp = (V, Lo, Hi) => (V < Lo ? Lo : V > Hi ? Hi : V);
 export const Mix = (A, B, T) => A + (B - A) * T;
@@ -285,7 +287,8 @@ export const LAYER_TYPE_META = {
     billow:       { label: 'Billow Hills & Dunes', badge: 'FOLDED', glyph: 'Wind', accent: '#a3d977' },
     terrace:      { label: 'Terrace & Strata', badge: 'STRATA', glyph: 'Layers', accent: '#d6a2e8' },
     spline:       { label: 'Spline Landform', badge: 'SPLINE', glyph: 'Spline', accent: '#3ec46d' },
-    sculpt:       { label: 'SDF Sculpt Layer', badge: 'SCULPT', glyph: 'Brush', accent: '#ff7b7b' }
+    sculpt:       { label: 'SDF Sculpt Layer', badge: 'SCULPT', glyph: 'Brush', accent: '#ff7b7b' },
+    erosion:      { label: 'Erosion Simulation', badge: 'EROSION', glyph: 'Activity', accent: '#f0935b' }
 };
 
 export function CreateTerrainLayer(Type = 'multifractal', Overrides = {})
@@ -384,6 +387,36 @@ export function CreateTerrainLayer(Type = 'multifractal', Overrides = {})
             points: (Overrides.points || []).map(P => P.slice())
         };
     }
+    if (Type === 'erosion')
+    {
+        const PresetId = Overrides.presetId || 'alpine-divide';
+        const PresetParams = ClonePresetParams(PresetId) || {};
+        const WeatherMode = Overrides.weatherMode || 'all-weather';
+        let Params = MergeErosionParams(PresetParams, Overrides.params || {});
+        if (Overrides.weatherMode) Params = ApplyWeatherMode(Params, WeatherMode);
+
+        return {
+            ...Base,
+            // Shared-weather group: several erosion layers with the same group id are simulated
+            // under one identical climate so two terrains can evolve with matching weather.
+            weatherGroup: Overrides.weatherGroup || null,
+            // 'shared' simulates with the group's climate, 'solo' uses only this layer's params.
+            simulateMode: Overrides.simulateMode || 'solo',
+            // 'independent' / 'group' / 'uniform' - how a layer whose mask reaches into the same
+            // region as another shares its field (see ResolveErosionLayers).
+            shareMode: Overrides.shareMode || 'independent',
+            presetId: PresetId,
+            weatherMode: WeatherMode,
+            params: Params,
+            hardnessMap: null,          // built on demand from params.strata
+            imprintMap: null,           // authored micro-detail captured before simulating
+            bakeVersion: Overrides.bakeVersion || 0,
+            baselineHeights: null,      // pre-erosion surface, for A/B scrubbing
+            lastStats: Overrides.lastStats || null,
+            bakeDirty: true,
+            bakeDirtyReason: 'created'
+        };
+    }
     // 'sculpt'
     return {
         ...Base,
@@ -476,6 +509,261 @@ function PointToPolylineDist(Wx, Wz, Poly)
  * Evaluates a Terrain Region's 2D Mask SDF + Thin Base Slab + Composable Layer Stack + Falloff Heatmap!
  * Stores results in `Region.runtime` and marks `Region.dirty = false`.
  */
+/*==========================================================================================================================================
+                                        EROSION LAYER RESOLUTION (cache, groups & shared weather)
+==========================================================================================================================================*/
+/**
+ * Erosion is the only *stateful* layer type: it needs the surface produced by everything below it
+ * in the stack, and its own result must be cached (a 36-iteration bake is far too expensive to
+ * redo on every slider move).
+ *
+ * This resolver implements the three sharing modes you asked for:
+ *   - `independent` : every erosion layer gets its own bake from its own preset/climate.
+ *   - `group`       : layers with the same `weatherGroup` share ONE climate field (identical
+ *                     rainfall, wind, season phase) but still keep their own process amplitudes.
+ *   - `uniform`     : layers in the same group are additionally forced onto the same iteration
+ *                     count and dt, so two terrains bounded into one world evolve in lockstep.
+ *
+ * Caches live on the layer, keyed by a cheap signature of everything that can change the result.
+ */
+function EnsureErosionBuffers(Region, Nx, Nz)
+{
+    const Need = Nx * Nz;
+    if (!Region.erosionDepth || Region.erosionDepth.length !== Need) Region.erosionDepth = new Float32Array(Need);
+    if (!Region.depositionDepth || Region.depositionDepth.length !== Need) Region.depositionDepth = new Float32Array(Need);
+    if (!Region.flowAccum || Region.flowAccum.length !== Need) Region.flowAccum = new Float32Array(Need);
+    if (!Region.hardnessMap || Region.hardnessMap.length !== Need) Region.hardnessMap = new Float32Array(Need);
+    if (!Region.lakeMask || Region.lakeMask.length !== Need) Region.lakeMask = new Uint8Array(Need);
+    if (!Region.lakeLevel || Region.lakeLevel.length !== Need) Region.lakeLevel = new Float32Array(Need);
+}
+
+export function ErosionLayerSignature(Layer)
+{
+    return JSON.stringify({
+        presetId: Layer.presetId,
+        weatherMode: Layer.weatherMode,
+        params: Layer.params,
+        simulateMode: Layer.simulateMode,
+        weatherGroup: Layer.weatherGroup,
+        shareMode: Layer.shareMode
+    });
+}
+
+/** Invalidate an erosion layer's bake (call whenever its params, preset or group change). */
+export function InvalidateErosionLayer(Layer, Reason = 'params')
+{
+    if (!Layer || Layer.type !== 'erosion') return;
+    Layer.bakeDirty = true;
+    Layer.bakeDirtyReason = Reason;
+    Layer.cacheKey = null;
+}
+
+/**
+ * Chooses the effective parameter set for a layer, applying weather-group constraints.
+ * Uniform groups force a common iteration count / dt so terrain seams match exactly.
+ */
+function ResolveErosionGroupParams(Region, Layer, GroupMembers)
+{
+    const Params = JSON.parse(JSON.stringify(Layer.params || {}));
+    if (!Layer.weatherGroup || !GroupMembers || GroupMembers.length <= 1) return Params;
+
+    const Seed = GroupMembers.reduce((A, L) => (A ^ (L.params?.seed | 0)) | 0, Layer.params?.seed | 0) || 4029;
+    Params.seed = Seed;
+    Params.weatherGroup = Layer.weatherGroup;
+
+    if (Layer.shareMode === 'group' || Layer.shareMode === 'uniform')
+    {
+        // Identical climate across the group: take the medians so no single layer dominates.
+        const Median = Key =>
+        {
+            const Values = GroupMembers.map(L => Number(L.params?.climate?.[Key])).filter(Number.isFinite).sort((A, B) => A - B);
+            return Values.length ? Values[Math.floor(Values.length / 2)] : undefined;
+        };
+        const medRain = Median('rainMmYr');
+        const medTemp = Median('meanTemperatureC');
+        const medWind = Median('windSpeed');
+        const medAz = Median('windAzimuthDeg');
+        Params.climate = { ...(Params.climate || {}) };
+        if (medRain !== undefined) Params.climate.rainMmYr = medRain;
+        if (medTemp !== undefined) Params.climate.meanTemperatureC = medTemp;
+        if (medWind !== undefined) Params.climate.windSpeed = medWind;
+        if (medAz !== undefined) Params.climate.windAzimuthDeg = medAz;
+    }
+    if (Layer.shareMode === 'uniform')
+    {
+        const Its = Math.max(...GroupMembers.map(L => Number(L.params?.iterations) || 36));
+        const Dt = GroupMembers.map(L => Number(L.params?.dtKyr) || 12).sort((A, B) => A - B)[0];
+        Params.iterations = Its;
+        Params.dtKyr = Dt;
+    }
+    return Params;
+}
+
+/**
+ * Applies one erosion layer to the current working surface.
+ * Returns { erosionDepth, depositionDepth, regolith, lakeMask, lakeLevel, flowAccum, hardness, stats }.
+ */
+function ApplyErosionLayer(World, Region, Layer, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, RefSpan)
+{
+    const Params = Layer.params || {};
+    const CellArea = StepX * StepZ;
+
+    // Authored micro-detail (sculpt strokes) is captured on the first bake so it can be re-imprinted
+    // after the simulation - a 40 m brush stroke must not be smoothed away by 400 kyr of diffusion.
+    if (!Layer.imprintMap || Layer.imprintMap.length !== Nx * Nz)
+    {
+        const Amp = Math.max(0, Number(Params.imprint?.amplitudeM) || 0);
+        const Scale = Math.max(1, Number(Params.imprint?.scaleM) || 13);
+        if (Amp > 0)
+        {
+            const Imp = new Float32Array(Nx * Nz);
+            for (let Z = 0; Z < Nz; ++Z)
+            {
+                for (let X = 0; X < Nx; ++X)
+                {
+                    const Wx = Region.bounds.x + X * StepX;
+                    const Wz = Region.bounds.z + Z * StepZ;
+                    Imp[Z * Nx + X] = (Fbm2D(Wx / Scale, Wz / Scale, 4, 0.5, 2.03, (Params.seed | 0) + 555) - 0.5) * 2.0 * Amp;
+                }
+            }
+            Layer.imprintMap = Imp;
+        }
+        else
+        {
+            Layer.imprintMap = new Float32Array(Nx * Nz);
+        }
+    }
+
+    const Hardness = BuildHardnessField(Nx, Nz, StepX, StepZ, Params.strata || { enabled: false }, Params.seed | 0);
+    Layer.hardnessMap = Hardness;
+
+    const State = new ErosionSimulationState({
+        nx: Nx, nz: Nz, stepX: StepX, stepZ: StepZ,
+        heights: Heights,
+        sdf2D: Sdf2D,
+        seaLevel: World.seaLevel ?? 0.0,
+        slabBottom: SlabBottom,
+        imprintTexture: Layer.imprintMap
+    }, Params);
+
+    const Iterations = Math.max(1, Math.min(400, Number(Params.iterations) || 36));
+    for (let I = 0; I < Iterations; ++I) State.step();
+    State.finalizeFlowFields();
+
+    Layer.baselineHeights = State.originalHeights;
+    Layer.lastStats = State.buildResult().stats;
+    Layer.bakeVersion = (Layer.bakeVersion | 0) + 1;
+    Layer.bakeDirty = false;
+    Layer.cacheKey = ErosionLayerSignature(Layer);
+
+    return {
+        heights: State.heights,
+        erosionDepth: State.erosionDepth,
+        depositionDepth: State.depositionDepth,
+        regolith: State.regolith,
+        lakeMask: State.isLake,
+        lakeLevel: State.lakeLevel,
+        flowAccum: State.flowAccum,
+        hardness: Hardness,
+        stats: Layer.lastStats
+    };
+}
+
+/**
+ * Runs every enabled erosion layer in stack order against the evolving surface.
+ * Called from EvaluateTerrainRegion after the procedural layers are composited.
+ */
+function ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, FalloffPreview, PreviewLayerId, WaterChannel)
+{
+    const ErosionLayers = Region.stack.filter(L => L.type === 'erosion' && L.enabled !== false);
+    if (ErosionLayers.length === 0) return;
+
+    // Group members by weatherGroup so shared-weather modes can see their siblings.
+    const Groups = new Map();
+    for (const L of ErosionLayers)
+    {
+        const Key = L.weatherGroup || `solo:${L.id}`;
+        if (!Groups.has(Key)) Groups.set(Key, []);
+        Groups.get(Key).push(L);
+    }
+
+    for (const Layer of ErosionLayers)
+    {
+        const GroupKey = Layer.weatherGroup || `solo:${Layer.id}`;
+        const Members = Groups.get(GroupKey) || [Layer];
+        const EffectiveParams = ResolveErosionGroupParams(Region, Layer, Members);
+
+        // Per-layer boundary falloff, so erosion can fade out towards the coast like any other layer
+        // (or hold full strength for sheer sea cliffs when mode === 'none').
+        const Falloff = Layer.falloff || { mode: 'soft', distance: 280, edgeFloor: 0 };
+        const Opacity = Clamp(Number(Layer.opacity) ?? 1.0, 0.0, 1.0);
+
+        // Cached result reused while nothing that affects it has changed.
+        const CacheKey = JSON.stringify({ sig: ErosionLayerSignature(Layer), params: EffectiveParams, nx: Nx, nz: Nz });
+        let Bake = Layer._bake;
+        if (!Bake || Layer.cacheKey !== CacheKey)
+        {
+            const WorkParams = { ...EffectiveParams, hardnessMap: null };
+            Bake = ApplyErosionLayer(World, Region, { ...Layer, params: WorkParams }, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, Math.min(Region.bounds.width, Region.bounds.depth));
+            Layer._bake = Bake;
+            Layer.cacheKey = CacheKey;
+        }
+
+        Layer.lastStats = Bake.stats;
+
+        // Composite the baked surface onto the working heights, honouring falloff + opacity.
+        for (let Z = 0; Z < Nz; ++Z)
+        {
+            const Wz = Region.bounds.z + Z * StepZ;
+            const BoxDz = Math.min(Wz - Region.bounds.z, Region.bounds.z + Region.bounds.depth - Wz);
+            const Row = Z * Nx;
+            for (let X = 0; X < Nx; ++X)
+            {
+                const Idx = Row + X;
+                const D2 = Sdf2D[Idx];
+                if (D2 > StepX * 1.1) continue;
+
+                const Wx = Region.bounds.x + X * StepX;
+                const BoxEdgeDist = Math.min(BoxDz, Wx - Region.bounds.x, Region.bounds.x + Region.bounds.width - Wx);
+                const InlandDist = Math.max(0.0, -D2);
+                const FallW = EvaluateBoundaryFalloff(InlandDist, BoxEdgeDist, Falloff);
+
+                let W = FallW * Opacity;
+                if (Layer.heightMask?.enabled)
+                {
+                    const Hm = Layer.heightMask;
+                    const CurH = Heights[Idx];
+                    W *= Smoothstep(Hm.minElev - 15.0, Hm.minElev + 5.0, CurH) *
+                         (1.0 - Smoothstep(Hm.maxElev - 5.0, Hm.maxElev + 15.0, CurH));
+                }
+                if (W <= 1e-4) continue;
+
+                Heights[Idx] = Mix(Heights[Idx], Bake.heights[Idx], W);
+                if (W > 0.5)
+                {
+                    EnsureErosionBuffers(Region, Nx, Nz);
+                    Region.erosionDepth[Idx] = Bake.erosionDepth[Idx];
+                    Region.depositionDepth[Idx] = Bake.depositionDepth[Idx];
+                    Region.flowAccum[Idx] = Bake.flowAccum[Idx];
+                    Region.hardnessMap[Idx] = Bake.hardness[Idx];
+                    Region.lakeMask[Idx] = Bake.lakeMask[Idx];
+                    Region.lakeLevel[Idx] = Bake.lakeLevel[Idx];
+                }
+                if (Layer.id === PreviewLayerId) FalloffPreview[Idx] = FallW;
+            }
+        }
+
+        // Water bodies: lakes created or deepened by this erosion pass feed the existing water tint.
+        if (WaterChannel && Region.lakeMask)
+        {
+            for (let Idx = 0; Idx < Nx * Nz; ++Idx)
+            {
+                if (Region.lakeMask[Idx]) WaterChannel[Idx] = Math.max(WaterChannel[Idx], 0.65);
+            }
+        }
+    }
+}
+
 export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = null)
 {
     const B = Region.bounds;
@@ -556,6 +844,7 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
         if (Opacity <= 1e-4 && !RecordFalloff) continue;
 
         const Type = Layer.type;
+        if (Type === 'erosion') continue; // Applied after the full procedural stack (needs the finished surface)
         const Seed = (Layer.seed | 0) || 4029;
         const Combine = Layer.combine || 'add';
 
@@ -790,6 +1079,22 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
         }
     }
 
+    // 4. Erosion layers operate on the finished procedural surface (they are the only stateful
+    //    layer type, so they must run last - see ApplyErosionStack).
+    if (Region.stack.some(L => L.type === 'erosion' && L.enabled !== false))
+    {
+        ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, FalloffPreview, PreviewLayerIdForFalloff, WaterChannel);
+        // Erosion may re-stamp authored micro-detail and lake beds; re-derived below in telemetry.
+        for (let I = 0; I < Count; ++I)
+        {
+            if (Heights[I] < SlabBottom + 0.3) Heights[I] = SlabBottom + 0.3;
+            const D2 = Sdf2D[I];
+            if (D2 <= 0.0) continue;
+            if (D2 <= Math.max(StepX, StepZ) * 1.6) continue;
+            Heights[I] = SlabBottom;
+        }
+    }
+
     // Compute peak height & land area telemetry
     let MaxHeight = SlabBottom;
     for (let I = 0; I < Count; ++I)
@@ -804,6 +1109,13 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
         slabBottom: SlabBottom, baseTop: BaseTop,
         coverage: MaskCov, sdf2D: Sdf2D, heights: Heights,
         falloffMap: FalloffPreview, waterChannel: WaterChannel,
+        // Erosion diagnostics consumed by the mesh colours, lenses and texturing pass.
+        erosionDepth: Region.erosionDepth || null,
+        depositionDepth: Region.depositionDepth || null,
+        flowAccum: Region.flowAccum || null,
+        hardnessMap: Region.hardnessMap || null,
+        lakeMask: Region.lakeMask || null,
+        lakeLevel: Region.lakeLevel || null,
         hasLand: true, maxHeight: MaxHeight, landAreaKm2: LandAreaKm2
     };
     Region.dirty = false;
@@ -994,7 +1306,7 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
             positions: new Float32Array(0),
             normals: new Float32Array(0),
             colors: new Float32Array(0),
-            aux: new Float32Array(0), // [falloffWeight, slopeDegNorm]
+            aux: new Float32Array(0), // [falloffWeight, slopeNorm, erosionNorm, depositionNorm]
             indices: new Uint32Array(0),
             vertexCount: 0,
             triangleCount: 0
@@ -1046,7 +1358,12 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
             PosList.push(Wx, H, Wz);
             NormList.push(NxVal, NyVal, NzVal);
             ColList.push(Litho[0], Litho[1], Litho[2]);
-            AuxList.push(Rt.falloffMap[Cell], Clamp(SlopeDeg / 90.0, 0.0, 1.0));
+            // aux = [falloffWeight, slope, erosionDepthNorm, depositionDepthNorm].
+            // Channels 2/3 drive the Erosion & Deposition diagnostic lenses and the stamp texturing
+            // pass; they stay 0 on terrains that have no erosion layer.
+            const Ero = Rt.erosionDepth ? Rt.erosionDepth[Cell] : 0.0;
+            const Dep = Rt.depositionDepth ? Rt.depositionDepth[Cell] : 0.0;
+            AuxList.push(Rt.falloffMap[Cell], Clamp(SlopeDeg / 90.0, 0.0, 1.0), Clamp(Ero / 24.0, 0.0, 1.0), Clamp(Dep / 24.0, 0.0, 1.0));
         }
     }
 
@@ -1083,7 +1400,7 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
             PosList.push(Wx, SlabBottom, Wz);
             NormList.push(0, -1, 0);
             ColList.push(0.055, 0.058, 0.064); // Clean dark basalt slab underside
-            AuxList.push(0.0, 0.0);
+            AuxList.push(0.0, 0.0, 0.0, 0.0);
             return BId;
         };
 
@@ -1104,7 +1421,7 @@ export function ExtractRegionTriangleMesh(World, Region, Options = {})
             {
                 NormList.push(OutNx, 0, OutNz);
                 ColList.push(0.105, 0.098, 0.088);
-                AuxList.push(0.0, 1.0);
+                AuxList.push(0.0, 1.0, 0.0, 0.0);
             }
             IdxList.push(BaseV, BaseV + 3, BaseV + 2, BaseV, BaseV + 2, BaseV + 1);
         };
@@ -1280,7 +1597,7 @@ function Append3DSplineTubeMeshes(Region, PosList, NormList, ColList, AuxList, I
                 NormList.push(Nx, Ny, Nz);
                 const TopTint = Clamp(Ny * 0.5 + 0.5, 0.0, 1.0);
                 ColList.push(Mix(0.13, 0.18, TopTint), Mix(0.12, 0.17, TopTint), Mix(0.11, 0.14, TopTint));
-                AuxList.push(1.0, Math.acos(Clamp(Ny, -1, 1)) / (Math.PI * 0.5));
+                AuxList.push(1.0, Math.acos(Clamp(Ny, -1, 1)) / (Math.PI * 0.5), 0.0, 0.0);
             }
         }
 
@@ -1321,7 +1638,7 @@ function Append3DOverhangCapsulesMesh(Region, PosList, NormList, ColList, AuxLis
                 const L = Math.hypot(Nx, Ny, Nz) || 1;
                 NormList.push(Nx / L, Ny / L, Nz / L);
                 ColList.push(0.38, 0.34, 0.31);
-                AuxList.push(1.0, 0.85);
+                AuxList.push(1.0, 0.85, 0.0, 0.0);
             }
         }
         const RowStride = Segs + 1;

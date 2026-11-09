@@ -167,19 +167,66 @@ void main() {
     fragColor = vec4(pow(mapped, vec3(1.0 / 2.2)), 1.0);
 }`;
 
+/* Inland water bodies: lakes and trunk rivers produced by the erosion hydrology.
+   Deliberately a separate, cheap pass so the ocean sheet never has to be moved to show them. */
+const WATERBODY_VS = `#version 300 es
+precision highp float;
+layout(location = 0) in vec3 aPos;
+uniform mat4 uViewProj;
+out vec3 vWorldPos;
+void main() {
+    vWorldPos = aPos;
+    gl_Position = uViewProj * vec4(aPos, 1.0);
+}`;
+
+const WATERBODY_FS = `#version 300 es
+precision highp float;
+in vec3 vWorldPos;
+out vec4 fragColor;
+
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform float uExposure;
+uniform int uAtmosMode;
+uniform int uIsRiver;
+
+vec3 acesFilm(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+void main() {
+    vec3 V = normalize(uCamPos - vWorldPos);
+    float fresnel = pow(1.0 - clamp(V.y, 0.0, 1.0), 4.0);
+
+    // Lakes read teal and still; rivers read paler and faster.
+    vec3 shallow = uIsRiver == 1 ? vec3(0.10, 0.19, 0.20) : vec3(0.035, 0.115, 0.135);
+    vec3 deep    = uIsRiver == 1 ? vec3(0.045, 0.095, 0.105) : vec3(0.010, 0.045, 0.065);
+    vec3 skyRefl = uAtmosMode == 1 ? vec3(0.095, 0.075, 0.072)
+                 : (uAtmosMode == 2 ? vec3(0.09, 0.13, 0.18) : vec3(0.042, 0.068, 0.098));
+
+    vec3 col = mix(deep, shallow, clamp(0.45 + fresnel * 0.4, 0.0, 1.0));
+    col = mix(col, skyRefl, clamp(fresnel * 0.85, 0.0, 0.9));
+
+    vec3 H = normalize(uSunDir + V);
+    col += vec3(0.95, 0.86, 0.68) * pow(max(dot(vec3(0.0, 1.0, 0.0), H), 0.0), 220.0) * 0.5;
+
+    vec3 mapped = acesFilm(col * uExposure);
+    fragColor = vec4(pow(mapped, vec3(1.0 / 2.2)), mix(0.58, 0.86, clamp(fresnel, 0.0, 1.0)));
+}`;
+
 const TERRAIN_VS = `#version 300 es
 precision highp float;
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNorm;
 layout(location = 2) in vec3 aCol;
-layout(location = 3) in vec2 aAux;
+layout(location = 3) in vec4 aAux;
 
 uniform mat4 uViewProj;
 
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec3 vColor;
-out vec2 vAux;
+out vec4 vAux;
 
 void main() {
     vWorldPos = aPos;
@@ -194,7 +241,7 @@ precision highp float;
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec3 vColor;
-in vec2 vAux;
+in vec4 vAux;
 
 out vec4 fragColor;
 
@@ -204,6 +251,7 @@ uniform float uSeaLevel;
 uniform float uExposure;
 uniform int uAtmosMode;
 uniform int uLensMode;
+uniform int uLithologyMode;
 uniform int uShowContours;
 uniform int uShowWireGrid;
 uniform int uIsSelected;
@@ -241,6 +289,31 @@ void main() {
     } else if (uLensMode == 3) {
         float slopeDeg = acos(clamp(N.y, -1.0, 1.0)) * 57.29578;
         baseAlbedo = mix(vec3(0.06, 0.24, 0.16), vec3(0.58, 0.16, 0.08), smoothstep(18.0, 50.0, slopeDeg));
+    } else if (uLensMode == 5) {
+        // Erosion lens: cool = untouched, hot = aggressively incised.
+        baseAlbedo = mix(vec3(0.045, 0.060, 0.085), vec3(0.86, 0.36, 0.10), smoothstep(0.02, 0.85, vAux.z));
+        baseAlbedo = mix(baseAlbedo, vec3(0.95, 0.90, 0.55), smoothstep(0.85, 1.0, vAux.z));
+    } else if (uLensMode == 6) {
+        // Deposition lens: aggradation / alluvial fill.
+        baseAlbedo = mix(vec3(0.050, 0.048, 0.058), vec3(0.28, 0.62, 0.46), smoothstep(0.02, 0.9, vAux.w));
+    }
+
+    // Lithology palette swap (stamp / Gaea-style texturing). This only remaps the albedo ramp;
+    // geometry, lighting and lenses are untouched, so it is safe to switch live.
+    if (uLithologyMode == 1) {
+        // Utah sandstone: terracotta <-> ochre, bleached caprock
+        baseAlbedo = mix(vec3(0.34, 0.145, 0.075), vec3(0.62, 0.40, 0.19), smoothstep(0.0, 140.0, relH));
+        baseAlbedo = mix(baseAlbedo, vec3(0.70, 0.64, 0.52), smoothstep(150.0, 230.0, relH) * 0.8);
+    } else if (uLithologyMode == 2) {
+        // Basalt / glacial: cold charcoal rock, snow above the snowline
+        baseAlbedo = mix(vec3(0.075, 0.082, 0.095), vec3(0.145, 0.155, 0.170), smoothstep(0.0, 180.0, relH));
+        baseAlbedo = mix(baseAlbedo, vec3(0.86, 0.90, 0.95), smoothstep(190.0, 250.0, relH));
+    } else if (uLithologyMode == 3) {
+        // Arid erg: warm sand to dark varnish
+        baseAlbedo = mix(vec3(0.66, 0.50, 0.30), vec3(0.30, 0.22, 0.15), smoothstep(20.0, 200.0, relH));
+    } else if (uLithologyMode == 4) {
+        // Regolith depth: bare rock (blue-grey) -> deep soil (olive)
+        baseAlbedo = mix(vec3(0.22, 0.25, 0.30), vec3(0.30, 0.36, 0.16), vAux.w);
     }
 
     // Crisp Studio Key + Rim + Deep Valley Shadow Contrast
@@ -351,6 +424,8 @@ uniform float uTime;
 uniform float uWaveAmp;
 uniform float uExposure;
 uniform int uAtmosMode;
+uniform float uSeaLevel;
+uniform float uShoreFade;
 
 vec3 acesFilm(vec3 x) {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
@@ -406,6 +481,18 @@ void main() {
 
     vec3 mapped = acesFilm(col * uExposure);
     float alpha = mix(0.84, 0.96, clamp(fresnel + fog * 0.4, 0.0, 1.0));
+
+    // ---- ANTI-FLOOD ----------------------------------------------------------------
+    // The ocean is a flat sheet. Any part of it standing ABOVE sea level is, by definition,
+    // water climbing up terrain it does not cover - that is what reads as "everything floods".
+    // Fading alpha with wave height above the datum keeps the sheet pinned to the waterline
+    // instead of washing over the shore, and leaves the terrain fully visible.
+    float above = vWorldPos.y - uSeaLevel;
+    if (uShoreFade > 0.5) {
+        alpha *= 1.0 - smoothstep(0.0, max(0.25, uWaveAmp * 0.55), above);
+    }
+    // Grazing view of deep water is darker and more opaque; steep views show the sea floor tone.
+    alpha = clamp(alpha, 0.0, 0.97);
     fragColor = vec4(pow(mapped, vec3(1.0 / 2.2)), alpha);
 }`;
 
@@ -498,6 +585,11 @@ export class TerrainOceanViewport
         // Diagnostic & Overlay toggles
         this.lensMode = 0;
         this.showContours = false;
+        this.lithologyMode = 0;
+        // Inland lakes/rivers produced by erosion hydrology (drawn as their own pass).
+        this.showWaterBodies = true;
+        // Feather the ocean where its wave sheet rises above sea level (anti-flood).
+        this.oceanShoreFade = true;
         this.showWireGrid = false;
         this.showBounds3D = true;
         this.showGizmo = true;
@@ -519,11 +611,13 @@ export class TerrainOceanViewport
         this.skyProg = CreateGlProgram(Gl, SKY_VS, SKY_FS);
         this.terrainProg = CreateGlProgram(Gl, TERRAIN_VS, TERRAIN_FS);
         this.oceanProg = CreateGlProgram(Gl, OCEAN_VS, OCEAN_FS);
+        this.waterBodyProg = CreateGlProgram(Gl, WATERBODY_VS, WATERBODY_FS);
         this.lineProg = CreateGlProgram(Gl, LINE_VS, LINE_FS);
 
         this.emptyVao = Gl.createVertexArray();
         this.regionGpu = new Map();
         this._initOceanMesh(168);
+        this._initWaterBodyBuffers();
         this._initDynamicLineBuffer();
 
         this.totalVisibleTriangles = 0;
@@ -533,6 +627,173 @@ export class TerrainOceanViewport
         this.dragState = null;
         this.startTime = performance.now();
         this._bindEvents();
+    }
+
+    _initWaterBodyBuffers()
+    {
+        const Gl = this.gl;
+        this.waterVao = Gl.createVertexArray();
+        Gl.bindVertexArray(this.waterVao);
+        this.waterVbo = Gl.createBuffer();
+        Gl.bindBuffer(Gl.ARRAY_BUFFER, this.waterVbo);
+        Gl.enableVertexAttribArray(0);
+        Gl.vertexAttribPointer(0, 3, Gl.FLOAT, false, 0, 0);
+        this.waterIbo = Gl.createBuffer();
+        Gl.bindBuffer(Gl.ELEMENT_ARRAY_BUFFER, this.waterIbo);
+        Gl.bindVertexArray(null);
+        this.waterIndexCount = 0;
+        this.waterVertexCount = 0;
+        this._waterCacheKey = null;
+        this.waterBodyTriangleCount = 0;
+    }
+
+    /**
+     * Extracts lake surfaces (from the erosion hydrology) and trunk rivers (from high flow
+     * accumulation) as flat triangle sheets placed just above the water elevation.
+     *
+     * Only cells whose water actually stands ABOVE the ground are emitted, so a lake can never
+     * bleed over its own shoreline - the water is clipped by the terrain it sits in.
+     */
+    _buildWaterBodyMesh(VisibleRegions)
+    {
+        const Key = VisibleRegions.map(R => `${R.id}:${R.meshDirty ? 'd' : 'c'}:${(R.stack || []).filter(L => L.type === 'erosion' && L.enabled !== false).length}`).join('|') +
+                    `:${this.showWaterBodies ? 1 : 0}`;
+        if (Key === this._waterCacheKey) return;
+        this._waterCacheKey = Key;
+
+        const PosList = [];
+        const IdxList = [];
+        const RiverPosList = [];
+        const RiverIdxList = [];
+
+        for (const Region of VisibleRegions)
+        {
+            const Rt = Region.runtime;
+            if (!Rt || !Rt.hasLand || !Rt.lakeMask) continue;
+            const B = Region.bounds;
+            const Nx = Rt.nx, Nz = Rt.nz;
+            const StepX = Rt.stepX, StepZ = Rt.stepZ;
+            const Sea = this.world.seaLevel ?? 0.0;
+
+            // Lakes: one quad per water cell, at its spill elevation.
+            const LakeVert = new Int32Array(Nx * Nz).fill(-1);
+            const GetLakeVert = (Cell, X, Z) =>
+            {
+                if (LakeVert[Cell] >= 0) return LakeVert[Cell];
+                const Wx = B.x + X * StepX;
+                const Wz = B.z + Z * StepZ;
+                const Surface = Math.max(Rt.lakeLevel ? Rt.lakeLevel[Cell] : Rt.heights[Cell], Rt.heights[Cell]);
+                const Id = PosList.length / 3;
+                PosList.push(Wx, Surface + 0.12, Wz);
+                LakeVert[Cell] = Id;
+                return Id;
+            };
+
+            for (let Z = 0; Z < Nz - 1; ++Z)
+            {
+                for (let X = 0; X < Nx - 1; ++X)
+                {
+                    const Cell = Z * Nx + X;
+                    if (!Rt.lakeMask[Cell]) continue;
+                    const RDepth = (Rt.lakeLevel ? Rt.lakeLevel[Cell] : Rt.heights[Cell]) - Rt.heights[Cell];
+                    if (RDepth < 0.4) continue;
+
+                    const A = GetLakeVert(Cell, X, Z);
+                    const Bv = GetLakeVert(Cell + 1, X + 1, Z);
+                    const Cv = GetLakeVert(Cell + Nx, X, Z + 1);
+                    const Dv = GetLakeVert(Cell + Nx + 1, X + 1, Z + 1);
+                    if (A < 0 || Bv < 0 || Cv < 0 || Dv < 0) continue;
+                    IdxList.push(A, Cv, Dv, A, Dv, Bv);
+                }
+            }
+
+            // Rivers: trunk channels where flow accumulation exceeds a threshold and the cell is
+            // not already a lake. Ribbon width scales with sqrt(flow), like a real channel.
+            if (Rt.flowAccum)
+            {
+                const Threshold = 260;
+                for (let Z = 1; Z < Nz - 1; ++Z)
+                {
+                    for (let X = 1; X < Nx - 1; ++X)
+                    {
+                        const Cell = Z * Nx + X;
+                        const Flow = Rt.flowAccum[Cell];
+                        if (Flow < Threshold || (Rt.lakeMask && Rt.lakeMask[Cell])) continue;
+
+                        const H = Rt.heights[Cell];
+                        if (H <= Sea + 0.3) continue;
+
+                        const HalfW = Math.min(StepX * 0.85, StepX * 0.16 + Math.sqrt(Flow) * 0.0042);
+                        const Wx = B.x + X * StepX;
+                        const Wz = B.z + Z * StepZ;
+                        const Base = RiverPosList.length / 3;
+                        RiverPosList.push(
+                            Wx - HalfW, H + 0.35, Wz - HalfW,
+                            Wx + HalfW, H + 0.35, Wz - HalfW,
+                            Wx + HalfW, H + 0.35, Wz + HalfW,
+                            Wx - HalfW, H + 0.35, Wz + HalfW
+                        );
+                        RiverIdxList.push(Base, Base + 2, Base + 3, Base, Base + 1, Base + 2);
+                    }
+                }
+            }
+        }
+
+        const Gl = this.gl;
+        const Lakes = new Float32Array(PosList);
+        Gl.bindVertexArray(null);
+        this.waterMeshes = [];
+
+        const Upload = (Positions, Indices, IsRiver) =>
+        {
+            if (Indices.length === 0) return;
+            const Vao = Gl.createVertexArray();
+            Gl.bindVertexArray(Vao);
+            const Vbo = Gl.createBuffer();
+            Gl.bindBuffer(Gl.ARRAY_BUFFER, Vbo);
+            Gl.bufferData(Gl.ARRAY_BUFFER, Positions, Gl.DYNAMIC_DRAW);
+            Gl.enableVertexAttribArray(0);
+            Gl.vertexAttribPointer(0, 3, Gl.FLOAT, false, 0, 0);
+            const Ibo = Gl.createBuffer();
+            Gl.bindBuffer(Gl.ELEMENT_ARRAY_BUFFER, Ibo);
+            Gl.bufferData(Gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(Indices), Gl.DYNAMIC_DRAW);
+            Gl.bindVertexArray(null);
+            this.waterMeshes.push({ vao: Vao, vbo: Vbo, ibo: Ibo, count: Indices.length, isRiver: IsRiver ? 1 : 0 });
+        };
+
+        Upload(Lakes, IdxList, false);
+        Upload(new Float32Array(RiverPosList), RiverIdxList, true);
+        this.waterBodyTriangleCount = (IdxList.length + RiverIdxList.length) / 3;
+    }
+
+    _renderWaterBodies(ViewProj)
+    {
+        if (!this.showWaterBodies) return;
+        const Visible = this.getVisibleRegions();
+        this._buildWaterBodyMesh(Visible);
+        const Gl = this.gl;
+        const Meshes = this.waterMeshes || [];
+        if (Meshes.length === 0) return;
+
+        Gl.disable(Gl.CULL_FACE);
+        Gl.enable(Gl.BLEND);
+        Gl.blendFunc(Gl.SRC_ALPHA, Gl.ONE_MINUS_SRC_ALPHA);
+        Gl.depthMask(false);
+        Gl.useProgram(this.waterBodyProg);
+        Gl.uniformMatrix4fv(Gl.getUniformLocation(this.waterBodyProg, 'uViewProj'), false, ViewProj);
+        Gl.uniform3fv(Gl.getUniformLocation(this.waterBodyProg, 'uCamPos'), this.getCameraBasis().eye);
+        Gl.uniform3fv(Gl.getUniformLocation(this.waterBodyProg, 'uSunDir'), this.getSunDirection());
+        Gl.uniform1f(Gl.getUniformLocation(this.waterBodyProg, 'uExposure'), this.exposure);
+        Gl.uniform1i(Gl.getUniformLocation(this.waterBodyProg, 'uAtmosMode'), this.atmosphereMode);
+
+        for (const M of Meshes)
+        {
+            Gl.uniform1i(Gl.getUniformLocation(this.waterBodyProg, 'uIsRiver'), M.isRiver);
+            Gl.bindVertexArray(M.vao);
+            Gl.drawElements(Gl.TRIANGLES, M.count, Gl.UNSIGNED_INT, 0);
+        }
+        Gl.depthMask(true);
+        Gl.disable(Gl.BLEND);
     }
 
     _initOceanMesh(GridDivs = 168)
@@ -1234,7 +1495,7 @@ export class TerrainOceanViewport
 
             Gl.bindBuffer(Gl.ARRAY_BUFFER, Entry.vboAux);
             Gl.enableVertexAttribArray(3);
-            Gl.vertexAttribPointer(3, 2, Gl.FLOAT, false, 0, 0);
+            Gl.vertexAttribPointer(3, 4, Gl.FLOAT, false, 0, 0);
 
             Gl.bindBuffer(Gl.ELEMENT_ARRAY_BUFFER, Entry.ibo);
             Gl.bindVertexArray(null);
@@ -1337,6 +1598,7 @@ export class TerrainOceanViewport
         Gl.uniform1f(Gl.getUniformLocation(this.terrainProg, 'uExposure'), this.exposure);
         Gl.uniform1i(Gl.getUniformLocation(this.terrainProg, 'uAtmosMode'), this.atmosphereMode);
         Gl.uniform1i(Gl.getUniformLocation(this.terrainProg, 'uLensMode'), this.lensMode);
+        Gl.uniform1i(Gl.getUniformLocation(this.terrainProg, 'uLithologyMode'), this.lithologyMode | 0);
         Gl.uniform1i(Gl.getUniformLocation(this.terrainProg, 'uShowContours'), this.showContours ? 1 : 0);
         Gl.uniform1i(Gl.getUniformLocation(this.terrainProg, 'uShowWireGrid'), this.showWireGrid ? 1 : 0);
 
@@ -1369,6 +1631,9 @@ export class TerrainOceanViewport
             this._renderBounds3D(ViewProj, VisibleRegions);
         }
 
+        // 3.5 Inland Lakes & Rivers produced by erosion hydrology
+        this._renderWaterBodies(ViewProj);
+
         // 4. Deep-Sapphire Animated Ocean Pass
         if (this.world.oceanVisible !== false)
         {
@@ -1387,6 +1652,7 @@ export class TerrainOceanViewport
             Gl.uniform1f(Gl.getUniformLocation(this.oceanProg, 'uWaveAmp'), this.waveAmplitude);
             Gl.uniform1f(Gl.getUniformLocation(this.oceanProg, 'uExposure'), this.exposure);
             Gl.uniform1i(Gl.getUniformLocation(this.oceanProg, 'uAtmosMode'), this.atmosphereMode);
+            Gl.uniform1f(Gl.getUniformLocation(this.oceanProg, 'uShoreFade'), this.oceanShoreFade ? 1.0 : 0.0);
             Gl.uniform3fv(Gl.getUniformLocation(this.oceanProg, 'uCamPos'), Eye);
             Gl.uniform3fv(Gl.getUniformLocation(this.oceanProg, 'uSunDir'), SunDir);
 
