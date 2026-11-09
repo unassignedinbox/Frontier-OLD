@@ -94,7 +94,7 @@
                 <div class="library" id="quick-library">
                     <div class="panel-heading">
                         <span>Add Layer &amp; Splines</span>
-                        <span class="count">7</span>
+                        <span class="count">11</span>
                     </div>
                     <div class="quick-lib-scroll" id="quick-add-list"></div>
                 </div>
@@ -124,6 +124,16 @@
                         <option value="2">Lens · Elevation &amp; Contours</option>
                         <option value="3">Lens · Slope &amp; Cliff Angle</option>
                         <option value="4">Lens · 25m Triangle Grid</option>
+                        <option value="5">Lens · Erosion Depth</option>
+                        <option value="6">Lens · Deposition / Fill</option>
+                    </select>
+
+                    <select id="lithology-select" aria-label="Surface lithology palette" title="Gaea-style surface palette applied to the baked terrain">
+                        <option value="0" selected>Surface · Geological Base</option>
+                        <option value="1">Surface · Utah Sandstone</option>
+                        <option value="2">Surface · Basalt &amp; Ice</option>
+                        <option value="3">Surface · Arid Erg Sand</option>
+                        <option value="4">Surface · Regolith Depth</option>
                     </select>
 
                     <div class="sym-cluster">
@@ -133,6 +143,7 @@
 
                     <div class="viewport-bar-end">
                         <button id="toggle-ocean-btn" class="button pill-btn active" type="button" title="Toggle 3D Ocean ON/OFF to inspect thin flat SDF underside (W)">Ocean ON</button>
+                        <button id="toggle-water-btn" class="button pill-btn active" type="button" title="Toggle inland lakes &amp; rivers from the erosion hydrology (L)">Lakes ON</button>
                         <button id="toggle-gizmo-btn" class="icon-button active" type="button" title="Toggle 3D Spline XYZ (Up/Down) Gizmo (G)" aria-label="Toggle 3D Spline Gizmo"></button>
                         <button id="toggle-bounds-btn" class="icon-button active" type="button" title="Toggle 3D Terrain Bounds Cages" aria-label="Toggle 3D Bounds"></button>
                         <button id="toggle-contours-btn" class="icon-button" type="button" title="Toggle 25m/100m Topographic Contours" aria-label="Toggle Contours"></button>
@@ -255,6 +266,7 @@
 
                 <div class="inspector-tabs" id="inspector-tabs" role="tablist" aria-label="Inspector categories">
                     <button data-itab="layers" class="active" type="button">Layers &amp; Falloff</button>
+                    <button data-itab="erosion" type="button">Erosion</button>
                     <button data-itab="spline" type="button">Spline &amp; Gizmo</button>
                     <button data-itab="slab" type="button">Thin-Slab</button>
                     <button data-itab="stage" type="button">Stage &amp; Export</button>

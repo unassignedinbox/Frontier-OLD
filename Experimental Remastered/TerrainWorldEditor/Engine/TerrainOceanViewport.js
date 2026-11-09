@@ -643,6 +643,7 @@ export class TerrainOceanViewport
         Gl.bindVertexArray(null);
         this.waterIndexCount = 0;
         this.waterVertexCount = 0;
+        this.waterMeshes = [];
         this._waterCacheKey = null;
         this.waterBodyTriangleCount = 0;
     }
@@ -742,6 +743,15 @@ export class TerrainOceanViewport
         const Gl = this.gl;
         const Lakes = new Float32Array(PosList);
         Gl.bindVertexArray(null);
+
+        // Release the previous meshes: a re-bake rebuilds these, and leaking a VAO+buffers per edit
+        // would slowly exhaust GPU memory over a long authoring session.
+        for (const Old of (this.waterMeshes || []))
+        {
+            Gl.deleteVertexArray(Old.vao);
+            Gl.deleteBuffer(Old.vbo);
+            Gl.deleteBuffer(Old.ibo);
+        }
         this.waterMeshes = [];
 
         const Upload = (Positions, Indices, IsRiver) =>

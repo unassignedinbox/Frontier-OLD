@@ -673,20 +673,24 @@ function ApplyErosionLayer(World, Region, Layer, Heights, Nx, Nz, StepX, StepZ, 
  * Runs every enabled erosion layer in stack order against the evolving surface.
  * Called from EvaluateTerrainRegion after the procedural layers are composited.
  */
-function ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, FalloffPreview, PreviewLayerId, WaterChannel)
+function ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, FalloffPreview, PreviewLayerId, WaterChannel, OnlyLayer = null)
 {
-    const ErosionLayers = Region.stack.filter(L => L.type === 'erosion' && L.enabled !== false);
-    if (ErosionLayers.length === 0) return;
+    const ErosionLayers = OnlyLayer
+        ? (OnlyLayer.enabled !== false ? [OnlyLayer] : [])
+        : Region.stack.filter(L => L.type === 'erosion' && L.enabled !== false);
+    if (ErosionLayers.length === 0) return null;
 
     // Group members by weatherGroup so shared-weather modes can see their siblings.
     const Groups = new Map();
-    for (const L of ErosionLayers)
+    const AllErosion = Region.stack.filter(L => L.type === 'erosion' && L.enabled !== false);
+    for (const L of AllErosion)
     {
         const Key = L.weatherGroup || `solo:${L.id}`;
         if (!Groups.has(Key)) Groups.set(Key, []);
         Groups.get(Key).push(L);
     }
 
+    let LastResult = null;
     for (const Layer of ErosionLayers)
     {
         const GroupKey = Layer.weatherGroup || `solo:${Layer.id}`;
@@ -761,7 +765,9 @@ function ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, 
                 if (Region.lakeMask[Idx]) WaterChannel[Idx] = Math.max(WaterChannel[Idx], 0.65);
             }
         }
+        LastResult = Bake;
     }
+    return LastResult;
 }
 
 export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = null)
@@ -844,7 +850,15 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
         if (Opacity <= 1e-4 && !RecordFalloff) continue;
 
         const Type = Layer.type;
-        if (Type === 'erosion') continue; // Applied after the full procedural stack (needs the finished surface)
+        if (Type === 'erosion')
+        {
+            // Erosion is stateful and consumes the surface built *below it* in the stack. Applying it
+            // here (rather than after the loop) means layers above it - a river spline, a sculpt pass -
+            // correctly modify the eroded surface instead of being erased by a later bake.
+            const EroRes = ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, FalloffPreview, Layer.id, WaterChannel, Layer);
+            if (EroRes && EroRes.hardness) Region.hardnessMap = EroRes.hardness;
+            continue;
+        }
         const Seed = (Layer.seed | 0) || 4029;
         const Combine = Layer.combine || 'add';
 
@@ -1079,19 +1093,14 @@ export function EvaluateTerrainRegion(World, Region, PreviewLayerIdForFalloff = 
         }
     }
 
-    // 4. Erosion layers operate on the finished procedural surface (they are the only stateful
-    //    layer type, so they must run last - see ApplyErosionStack).
+    // Final safety pass: erosion and sculpting may leave cells outside the mask or under the slab.
     if (Region.stack.some(L => L.type === 'erosion' && L.enabled !== false))
     {
-        ApplyErosionStack(World, Region, Heights, Nx, Nz, StepX, StepZ, Sdf2D, SlabBottom, FalloffPreview, PreviewLayerIdForFalloff, WaterChannel);
-        // Erosion may re-stamp authored micro-detail and lake beds; re-derived below in telemetry.
         for (let I = 0; I < Count; ++I)
         {
             if (Heights[I] < SlabBottom + 0.3) Heights[I] = SlabBottom + 0.3;
             const D2 = Sdf2D[I];
-            if (D2 <= 0.0) continue;
-            if (D2 <= Math.max(StepX, StepZ) * 1.6) continue;
-            Heights[I] = SlabBottom;
+            if (D2 > Math.max(StepX, StepZ) * 1.6) Heights[I] = SlabBottom;
         }
     }
 
@@ -1758,7 +1767,6 @@ export function SeedThreeDemoTerrains(World)
     World.regions = [];
     World.seaLevel = 0.0;
     World.oceanVisible = true;
-
     // --- DEMO MASK 1: North-West Highland Peninsula ---
     const Mask1 = World.addMaskLayer({
         id: 'mask-highland',
@@ -1957,9 +1965,73 @@ export function SeedThreeDemoTerrains(World)
         ]
     });
 
+    // --- DEMO EROSION LAYER (Demonstration mask 04) -------------------------------------------------
+    // A dedicated terrain that ships with an erosion bake so the simulator is visible on load, rather
+    // than being an empty feature the user has to discover.
+    const Mask4 = World.addMaskLayer({
+        id: 'mask-erosion',
+        name: 'Mask 04 · Erosion Demonstration',
+        color: '#f0935b'
+    });
+    World.paintPolygonMeters(Mask4, [
+        [1250, -260],
+        [1720, -420],
+        [2080, -180],
+        [2160, 320],
+        [1780, 560],
+        [1360, 430],
+        [1230, 120]
+    ], false, 0.30, 12011);
+
+    const Bounds4 = World.computeLayerPaintedBounds(Mask4, 95.0);
+    const Region4 = World.addTerrainRegion({
+        id: 'terrain-erosion-demo',
+        name: 'Terrain 04 · Eroded Massif',
+        maskLayerId: Mask4.id,
+        color: '#f0935b',
+        bounds: Bounds4,
+        resolution: 128,
+        baseElevation: 3.0,
+        slabThickness: 6.5,
+        shorelineBevel: 20.0,
+        maxRelief: 320.0,
+        stack: [
+            CreateTerrainLayer('multifractal', {
+                name: 'Continental Base',
+                amplitude: 205.0,
+                scale: 2.2,
+                octaves: 6,
+                gain: 0.54,
+                warp: 0.34,
+                seed: 12043,
+                falloff: { mode: 'soft', distance: 340.0, edgeFloor: 0.03 }
+            }),
+            CreateTerrainLayer('ridged', {
+                name: 'Tectonic Spine',
+                amplitude: 96.0,
+                scale: 2.7,
+                octaves: 5,
+                sharpness: 0.7,
+                azimuth: 28.0,
+                seed: 12109,
+                falloff: { mode: 'continental', distance: 380.0, edgeFloor: 0.0 }
+            }),
+            // The erosion bake: stratigraphy + stream power + deposition + talus.
+            CreateTerrainLayer('erosion', {
+                name: 'Canyon Erosion Bake',
+                presetId: 'grand-canyon',
+                weatherMode: 'all-weather',
+                seeds: 12211,
+                falloff: { mode: 'soft', distance: 300.0, edgeFloor: 0.0 }
+            })
+        ]
+    });
+
+
     EvaluateTerrainRegion(World, Region1);
     EvaluateTerrainRegion(World, Region2);
     EvaluateTerrainRegion(World, Region3);
+    EvaluateTerrainRegion(World, Region4);
 
-    return { masks: [Mask1, Mask2, Mask3], regions: [Region1, Region2, Region3] };
+    return { masks: [Mask1, Mask2, Mask3, Mask4], regions: [Region1, Region2, Region3, Region4] };
 }

@@ -17,8 +17,11 @@ import {
     ExportWorldTerrainsObj,
     ExportWorldTerrainsBinaryStl,
     SeedThreeDemoTerrains,
-    Clamp
+    Clamp,
+    InvalidateErosionLayer
 } from './Engine/TerrainLayerStack.js';
+import { BuildErosionInspector } from './ErosionPanel.js';
+import { EROSION_PRESETS } from './Engine/ErosionPresets.js';
 import { WorldMap2DCanvas } from './Engine/WorldMap2DCanvas.js';
 import { TerrainOceanViewport } from './Engine/TerrainOceanViewport.js';
 import {
@@ -31,6 +34,17 @@ import {
 } from './StudioControls.js';
 
 const MASK_PALETTE = ['#58b982', '#5ac8fa', '#a3d977', '#e8c27a', '#f0935b', '#d6a2e8'];
+
+/** Human-readable volume used in the bake status line. */
+function FormatVolume(V)
+{
+    if (!Number.isFinite(V)) return '—';
+    const A = Math.abs(V);
+    if (A >= 1e9) return `${(V / 1e9).toFixed(2)} km³`;
+    if (A >= 1e6) return `${(V / 1e6).toFixed(1)} Mm³`;
+    if (A >= 1e3) return `${(V / 1e3).toFixed(0)} k m³`;
+    return `${V.toFixed(0)} m³`;
+}
 
 const SPLINE_MODES = [
     ['3D Elevation Ramp (Cut & Fill — Gizmo Y ↕)', 'grade'],
@@ -380,6 +394,38 @@ class TerrainWorldStudioApp
                 badge: 'STRATA',
                 featured: false,
                 action: () => this.addProceduralLayer('terrace')
+            },
+            {
+                title: '+ Erosion: Fluvial Canyon',
+                desc: 'Stream-power incision + sediment routing, canyon strata',
+                glyph: 'Activity',
+                badge: 'EROSION',
+                featured: true,
+                action: () => this.addErosionLayer('grand-canyon')
+            },
+            {
+                title: '+ Erosion: Glacial Highlands',
+                desc: 'Ice flow troughs, frost pitting & meltwater',
+                glyph: 'Activity',
+                badge: 'EROSION',
+                featured: false,
+                action: () => this.addErosionLayer('icelandic-highlands')
+            },
+            {
+                title: '+ Erosion: Desert Dunes',
+                desc: 'Aeolian saltation & transverse dune fields',
+                glyph: 'Activity',
+                badge: 'EROSION',
+                featured: false,
+                action: () => this.addErosionLayer('namib-erg-dunes')
+            },
+            {
+                title: '+ Erosion: Alpine Divide',
+                desc: 'Fluvial + glacial + talus, the balanced default',
+                glyph: 'Activity',
+                badge: 'EROSION',
+                featured: false,
+                action: () => this.addErosionLayer('alpine-divide')
             }
         ];
 
@@ -411,7 +457,13 @@ class TerrainWorldStudioApp
             ['Solo: Basalt Cliffs (No Falloff · Sheer Cliff)', () => this._focusSingleRegion(1)],
             ['Solo: Caldera Atoll (Rim Ring Falloff)', () => this._focusSingleRegion(2)],
             ['Inspect Thin SDF Slab (Ocean OFF)', () => { this.world.oceanVisible = false; this._syncOceanUI(); }],
-            ['Export .STL Binary', () => this._exportStl()]
+            ['Export .STL Binary', () => this._exportStl()],
+            ['Erosion: bake Grand Canyon on active terrain', () => { const R = this.getActiveRegion(); if (R) this.addErosionLayer('grand-canyon'); }],
+            ['Erosion: Glacial Highlands', () => { const R = this.getActiveRegion(); if (R) this.addErosionLayer('icelandic-highlands'); }],
+            ['Erosion: Namib Dunes', () => { const R = this.getActiveRegion(); if (R) this.addErosionLayer('namib-erg-dunes'); }],
+            ['Lens: Erosion Depth', () => { this.view3D.lensMode = 5; const S = document.getElementById('lens-select'); if (S) S.value = '5'; }],
+            ['Lens: Deposition', () => { this.view3D.lensMode = 6; const S = document.getElementById('lens-select'); if (S) S.value = '6'; }],
+            ['Toggle Lakes & Rivers', () => document.getElementById('toggle-water-btn')?.click()]
         ];
 
         for (let I = 0; I < Chips.length; ++I)
@@ -513,6 +565,98 @@ class TerrainWorldStudioApp
         this._syncInspectorTabButtons();
         this.refreshChrome();
         this.rebuildInspector();
+    }
+
+    /*======================================================================================================================================
+                                            EROSION LAYER CREATION, BAKING & INVALIDATION
+    ======================================================================================================================================*/
+    /**
+     * Appends an erosion layer above the current stack. Erosion must sit on top of the landforms
+     * it is meant to erode, so it is appended last and given a soft coastal falloff.
+     */
+    addErosionLayer(PresetId = 'alpine-divide', WeatherMode = 'all-weather')
+    {
+        const Reg = this.getActiveRegion();
+        if (!Reg) return null;
+        this.pushUndoSnapshot();
+
+        const Preset = EROSION_PRESETS.find(P => P.id === PresetId);
+        const Lyr = CreateTerrainLayer('erosion', {
+            presetId: PresetId,
+            weatherMode: WeatherMode,
+            name: `${Preset?.name || 'Erosion'} Bake`,
+            falloff: { mode: 'soft', distance: 320.0, edgeFloor: 0.0 }
+        });
+        Reg.stack.push(Lyr);
+        this.activeLayerId = Lyr.id;
+        this.inspectorTab = 'erosion';
+        this._syncInspectorTabButtons();
+        this.evaluateAndRefresh(Reg);
+        return Lyr;
+    }
+
+    removeErosionLayer(Region, Layer)
+    {
+        if (!Region || !Layer) return;
+        this.pushUndoSnapshot();
+        const Idx = Region.stack.indexOf(Layer);
+        if (Idx >= 0) Region.stack.splice(Idx, 1);
+        Region.erosionDepth = null;
+        Region.depositionDepth = null;
+        Region.lakeMask = null;
+        Region.lakeLevel = null;
+        Region.flowAccum = null;
+        Region.hardnessMap = null;
+        this.activeLayerId = Region.stack[Region.stack.length - 1]?.id || null;
+        this.evaluateAndRefresh(Region);
+    }
+
+    /** Full evaluation + mesh refresh for a region (shared by the erosion panel and the app). */
+    evaluateAndRefresh(Region)
+    {
+        if (!Region) return;
+        EvaluateTerrainRegion(this.world, Region, this.activeLayerId);
+        Region.meshDirty = true;
+        if (this.map2D) this.map2D.invalidateRegionPreview(Region.id);
+        if (this.view3D) this.view3D._waterCacheKey = null;
+        this.refreshChrome();
+        this.rebuildInspector();
+    }
+
+    /**
+     * Debounced re-bake: dragging a slider must not queue a dozen full simulations.
+     * The timer collapses bursts of edits into a single evaluation.
+     */
+    scheduleErosionRebake(Region, Layer)
+    {
+        if (this._erosionTimer) clearTimeout(this._erosionTimer);
+        this.erosionStatusText = `Re-simulating ${Layer?.name || 'erosion'}…`;
+        const Status = document.getElementById('erosion-status-line');
+        if (Status) Status.textContent = this.erosionStatusText;
+
+        this._erosionTimer = setTimeout(() =>
+        {
+            this._erosionTimer = null;
+            const Started = performance.now();
+            EvaluateTerrainRegion(this.world, Region, this.activeLayerId);
+            Region.meshDirty = true;
+            if (this.map2D) this.map2D.invalidateRegionPreview(Region.id);
+            if (this.view3D) this.view3D._waterCacheKey = null;
+
+            const Ms = Math.round(performance.now() - Started);
+            const Stats = Layer?.lastStats;
+            this.erosionStatusText = Stats
+                ? `Baked ${Ms} ms · ${Stats.iterations} × ${Stats.dtKyr} kyr · eroded ${FormatVolume(Stats.incisionVolumeM3)} · deposited ${FormatVolume(Stats.depositedVolumeM3)}`
+                : `Baked in ${Ms} ms`;
+            const Line = document.getElementById('erosion-status-line');
+            if (Line) Line.textContent = this.erosionStatusText;
+            this.refreshChrome();
+        }, 220);
+    }
+
+    triggerErosionRebake(Region, Layer)
+    {
+        this.scheduleErosionRebake(Region, Layer);
     }
 
     /*======================================================================================================================================
@@ -786,11 +930,22 @@ class TerrainWorldStudioApp
         {
             this.view3D.lensMode = Number(E.target.value);
         });
+        document.getElementById('lithology-select')?.addEventListener('change', E =>
+        {
+            this.view3D.lithologyMode = Number(E.target.value);
+        });
         document.getElementById('toggle-ocean-btn')?.addEventListener('click', () =>
         {
             this.world.oceanVisible = !this.world.oceanVisible;
             this._syncOceanUI();
             this.rebuildInspector();
+        });
+        document.getElementById('toggle-water-btn')?.addEventListener('click', E =>
+        {
+            this.view3D.showWaterBodies = !this.view3D.showWaterBodies;
+            this.view3D._waterCacheKey = null;
+            E.currentTarget.classList.toggle('active', this.view3D.showWaterBodies);
+            E.currentTarget.textContent = this.view3D.showWaterBodies ? 'Lakes ON' : 'Lakes OFF';
         });
         document.getElementById('toggle-gizmo-btn')?.addEventListener('click', E =>
         {
@@ -981,6 +1136,7 @@ class TerrainWorldStudioApp
             else if (K === 'v') this.select2DTool('select');
             else if (K === 's' && !E.ctrlKey) this.select2DTool('spline');
             else if (K === 'w') document.getElementById('toggle-ocean-btn')?.click();
+            else if (K === 'l') document.getElementById('toggle-water-btn')?.click();
             else if (K === 'f') document.getElementById('focus-btn')?.click();
             else if (E.key === 'Delete' || E.key === 'Backspace')
             {
@@ -1354,7 +1510,11 @@ class TerrainWorldStudioApp
         );
         Content.appendChild(Switches);
 
-        if (this.inspectorTab === 'spline')
+        if (this.inspectorTab === 'erosion')
+        {
+            BuildErosionInspector(this, Content, Region);
+        }
+        else if (this.inspectorTab === 'spline')
         {
             this._buildSplineInspectorTab(Content, Region);
         }

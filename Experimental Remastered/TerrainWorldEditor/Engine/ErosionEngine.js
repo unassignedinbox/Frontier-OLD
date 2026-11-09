@@ -737,11 +737,9 @@ function ApplySedimentRouting(Nx, Nz, Heights, SlabBottom, SeaLevel, Grid, Sim, 
         Flux[R] += Math.max(0.0, Available);
     }
 
-    // Whatever is still sitting in a terminal cell (closed boundary) is also exported.
-    for (let I = 0; I < Count; ++I)
-    {
-        if (recv[I] < 0) { ExportedVolume += Flux[I]; Flux[I] = 0; }
-    }
+    // NOTE: terminal cells are already exported inside the sweep above (the `R < 0` branch), which
+    // consumes the flux they received. Adding `Flux[]` again here would double-count it and break
+    // the mass-balance closure below - this is checked by validation suite 9.
     return { depositedVolume: DepositedVolume, exportedVolume: ExportedVolume };
 }
 
@@ -796,11 +794,9 @@ function ApplyThermalErosion(Nx, Nz, Heights, SlabBottom, StepX, StepZ, Params, 
         }
     }
 
-    // Prevent any cell being pushed under the thin-slab floor by diffusion.
-    for (let I = 0; I < Heights.length; ++I)
-    {
-        if (Heights[I] < SlabBottom + 0.2) Heights[I] = SlabBottom + 0.2;
-    }
+    // NOTE: no blanket clamp here. Forcing cells to the slab floor inside the transport step breaks
+    // mass conservation (material vanishes silently). Floors are enforced once, centrally, in
+    // ErosionSimulationState._applyFiltersAndClamp.
     return { movedVolume: MovedVolume };
 }
 
