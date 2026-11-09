@@ -1,0 +1,4 @@
+carcass,settled_deflection_mm,step_ms,speed_after_4s_mps
+Spring,12.2821,0.0561912,15.5488
+XPBD,12.7632,0.454808,15.5584
+3D FEM,13.788,0.129102,15.5564

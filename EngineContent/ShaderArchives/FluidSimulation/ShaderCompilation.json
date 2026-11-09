@@ -1,0 +1,82 @@
+{
+  "format": 1,
+  "set": "FluidSimulation",
+  "compiler": "unrecorded",
+  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets FluidSimulation",
+  "entries": [
+    {
+      "file": "FluidOverlayRasterization.AtlasFragment.spv",
+      "spirv_sha256": "d414d9873c44f4106a18aa3bbd68903db335ffbc1e0e7872aa04fc464e4dc655"
+    },
+    {
+      "file": "FluidOverlayRasterization.AtlasVertex.spv",
+      "spirv_sha256": "eaf05371735081b331314687b929bd1a1b5126804fb663cb3714610c50628a70"
+    },
+    {
+      "file": "FluidOverlayRasterization.EmberFragment.spv",
+      "spirv_sha256": "048cfd9835f857cc46c8212f49fff8095c55fd8f251eb4c7832e2a485a6e4f36"
+    },
+    {
+      "file": "FluidOverlayRasterization.EmberVertex.spv",
+      "spirv_sha256": "7be7eb3c4ff69bd1c98c74df3afd10395ff9fb4def6228071a8232ffb0e833be"
+    },
+    {
+      "file": "FluidRaymarch.RaymarchFragment.spv",
+      "spirv_sha256": "b3a8dda7b543ff47c159ebff175f3636c54a1ea8ac5c96c63a25235331c05030"
+    },
+    {
+      "file": "FluidRaymarch.RaymarchVertex.spv",
+      "spirv_sha256": "c1bd37e20cfdea1fadbc13d3fc583370f4d950b9b216a57fb2ebdf97f41bcf1d"
+    },
+    {
+      "file": "FluidSimulation.AdvectFields.spv",
+      "spirv_sha256": "18d1e2ad8717e569680926c767bced88814b5f59c17d586a02dbf04172d9d757"
+    },
+    {
+      "file": "FluidSimulation.EvaluateCurl.spv",
+      "spirv_sha256": "bc6d2d177f030b4358363f95cb95284fc5a6ca7de2809e8cd57b3a8f015c8bb8"
+    },
+    {
+      "file": "FluidSimulation.EvaluateDivergence.spv",
+      "spirv_sha256": "f87056b3f2375c7c94db50178402d06ca3ae1fb25a9d326938c1f27652a633ac"
+    },
+    {
+      "file": "FluidSimulation.InjectSources.spv",
+      "spirv_sha256": "0cf57781775e3c0067ea35e5372e6e0f30ac24c6d6a00abbfc1c22634635fadd"
+    },
+    {
+      "file": "FluidSimulation.IntegrateForces.spv",
+      "spirv_sha256": "dc86d03c4546595312049ba230a67c412df9193a933d531e0da6cce10532c4b2"
+    },
+    {
+      "file": "FluidSimulation.ProjectGradient.spv",
+      "spirv_sha256": "d6c1ac774a971d6d3fa3227a16420ad60da78f0e25bdef3f63151c4fc0014e54"
+    },
+    {
+      "file": "FluidSimulation.RelaxPressure.spv",
+      "spirv_sha256": "0b4a1775ad393e2514edaf4bad67e84fff1b53acfe2a27f5d538f9a37f834fa1"
+    }
+  ],
+  "sources": [
+    {
+      "file": "Frontier/Engine/Shaders/FluidSimulation/FluidLayouts.slang",
+      "sha256": "8784d058bed1854d96624415291f24519a24b8b3a2af60df9a41e1827a729341"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/FluidSimulation/FluidOverlayRasterization.slang",
+      "sha256": "d391d4564fbf76880cd22f2e05ba8088dcf0a8b672973da6514363b1703d6f4f"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/FluidSimulation/FluidRaymarch.slang",
+      "sha256": "d6186ee95776956e1c2c66524a0646f9f1079b86633e85f13304e5ed73c0c4da"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/FluidSimulation/FluidSimulation.slang",
+      "sha256": "a38f99afe94427628b373ad1a1e24ba5b4342c6c3969ef6039067c3e9cd39b55"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/IntrinsicParity.slang",
+      "sha256": "8073ff213243e2548ab7d7bc96fda2406ce9931f4e63279f624672beb5ca2c84"
+    }
+  ]
+}

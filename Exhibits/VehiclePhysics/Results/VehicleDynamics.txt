@@ -1,0 +1,113 @@
+
+A · Magic Formula (Project Drive's GRIT sheet, the Control vehicle's coefficients)
+  🟢 no slip, no force (Fx(0) = Fy(0) = 0 with the sheet's zero shifts)
+  🟢 force follows the slip's sign over ±0.9 (traction and braking, both turning directions)
+  🟢 longitudinal slip stiffness 41472 N/unit = BCD 41472 (-0.000 %)
+  🟢 cornering stiffness 59904 N/rad = BCD 59904 (-0.000 %)
+  🟢 longitudinal peak 6185 N = D 6185 (μx 1.93)
+  📝 the sheet's longitudinal peak sits at slip 0.308 (road tyres peak near 0.10 – 0.15; pBx1 and pCx1 set it), so traction control aims just under it; below about 2.5 m/s the automated clutch ties the driven wheels to the idle engine speed, so a launch from rest slips whatever the throttle
+  🟢 lateral peak 7786 N = D 7786 (μy 2.43) at 13.0°
+  📝 the source's load factor 1 − s |dfz| makes μ rise with load below Fz0: μ 2.275 at 2 kN, 2.363 at 4 kN
+  🟢 load sensitivity (Control vehicle): peak μ falls monotonically as the load rises, 1 → 8 kN (μ 2.467 → 2.188)
+  🟢 aligning moment restores (Mz -697.7 N·m against Fy 2071 N at 2°) and the trail shrinks with slip (336.9 → -5.5 mm at 10°)
+  📝 the source's combined slip divides by the stiffnesses in kN, so G stays ≈ 1: 5° takes 0.02 % of the traction, and slips combine to 9565 N (1.23 × the larger peak)
+  🟢 combined slip (MF6.1): cornering at 5° takes 26 % of the traction away (Fx 3089 → 2285 N at slip 0.08)
+  🟢 friction ellipse (MF6.1): no combination of slips exceeds the larger peak by more than 5 % (7782 against 7786 N)
+  🟢 MF6.1: 20 % more pressure scales the cornering stiffness by 0.875 (1 + PPY1 dpi = 0.875)
+  🟢 MF6.1: at the nominal pressure the force is bit-identical to the pressure-blind formula
+  🟢 relaxation: a slip step builds 66 % of its force after one relaxation length (σ 0.039 m; first order: 63 %), 99.8 % at 6σ
+  🟢 camber: 5° of lean thrusts 50 N sideways at zero slip, mirrored leaning the other way (-50 N)
+  🟢 saturation: sliding at κ = 1 keeps 65 % of the longitudinal peak (4020 of 6185 N)
+
+B · The Control vehicle on a Jolt chassis (inline 240 Hz steps)
+  🟢 it settles on four tyres and stands still (0.0001 m/s after 3 s)
+  🟢 the tyres carry the car: Σ Fz 12282 N against the sprung and rim weight 12282 N (0.00 %)
+  🟢 front axle share 0.492 against the authored 0.491
+  🟢 the spring tyre deflects 12.1 mm under 3019 N (load / stiffness 12.1 mm)
+  🟢 full-throttle launch: 35.0 m/s (126 km/h) in 6 s, upshifted to gear 4, never slowing
+  🟢 traction control: above 5 m/s the driven slip over its 0.25 target integrates to 0.1123 s with it on against 2.2833 s off (worst 0.491 after 0.5 s; it cut the throttle to 15 %; 95 % less excess)
+  🟢 free rolling: front slip 0.0000, ω R 35.77 m/s against 34.45 m/s travel
+  🟢 braking from 34.5 m/s: peak deceleration 15.79 m/s² within the friction limit μ (W + downforce) / m = 17.16 m/s² (6232 N downforce)
+  🟢 stopping distance 49.2 m ≥ v² / (2 × that limit) 34.6 m; ABS worked 446 wheel-ticks
+  🟢 4 m/s circle: radius 82.0 m against the kinematic L / tan δ 81.6 m
+  🟢 14 m/s: yaw rate 0.0422 rad/s against the bicycle model 0.0431 (understeer gradient 0.0024 rad/g)
+  🟢 lateral acceleration 0.60 m/s² stays inside the grip 11.28 m/s²
+
+C · The pieces added beyond Project Drive
+  🟢 supercharger boost follows the crank: 77 % of its 0.80 bar 0.1 s after full throttle (turbo 1 % of 0.24 bar)
+  🟢 the blower takes 78.6 N·m from the crank under load, 3.8 N·m bypassed off throttle; the turbo none
+  🟢 charge air: 93.7 °C after the compressor at 0.8 bar (isentropic over η = 93.7 °C), ambient through a perfect intercooler, 68.8 °C live
+  🟢 the wastegate caps boost at 1.20 bar on a 12 s full-throttle run (peak 1.20 bar)
+  🟢 a 90 s, 25 kW slide heats the tread to 336 °C and the air to 30.1 °C; gauge 117.3 kPa = gas law 117.3 kPa at constant volume
+  🟢 heat balance: stored 1086 kJ, residual 6.08e-06 J
+  🟢 a carcass squeezed 2 % raises the gauge to 114.31 kPa (p V constant: 114.31 kPa)
+  🟢 cold window: a 20 °C tread grips × 0.760 (window from 68 °C)
+  🟢 fuel: 76.44 g burnt over 4 s at full throttle against BSFC × 1006 kJ indicated + idle = 76.44 g; the sprung mass is 0.0765 kg lighter
+  🟢 a locked-wheel stop with ABS off heats the front tread 53.6 K (105 kJ of sliding heat taken in)
+  🟢 wear: the front tread loses 0.0002 mm on that stop, grip × 0.99999
+  🟢 fluids warm under load: coolant 42.38 °C, oil 33.58 °C
+  🟢 Ackermann: turning left the inner (left) wheel turns 18.34°, the outer 15.90° (turn radius 11.0 m)
+
+D · The physics thread, its snapshots, and the register
+  🟢 240 Hz cadence: 240 steps in 1.004 s of wall time (241 expected), 240 wakes, real-time ratio 1.000, 0 dropped
+  🟢 snapshot exchange: 427958 reads under a racing producer, 0 torn, 0 out of order
+  🟢 the physics thread stepped the car 150 times while the caller refreshed 40 times
+  🟢 register: 4 records → 1 vehicle, 1 moving, 1 fracture (fixed bounds), 1 without physics
+  🟢 register document lists every object and its physics part (Results/WorldRegisterSample.md)
+
+E · Soft-carcass readings, coupled substeps, pit-lane tyres and levelspace round-trip
+  🟢 levelspace round-trips stepping, chase camera, carcass category and XPBD/3D-FEM moduli
+  🟢 coupled 2×2 substeps publish 160-node 3D FEM field (peak 13.9 mm) and pit-lane RR detachment
+  🟢 WorldRegister classifies 1 Vehicle, 3 fitted Tyres and 1 pit-lane detached Tyre
+
+F · Grades, hill-hold and brakes
+  🟢 handbrake holds on 20 %: 1.5 mm creep in 3 s
+  🟢 foot brake holds on 15 %: 1.1 mm creep in 3 s
+  🟢 hill start on 15 %: 0 mm rollback at most, pulls away to 14.9 m/s
+  🟢 climb: 34.8 m/s after 8 s at full throttle up 15 %
+  🟢 climb on 15 %: holds 10 m/s under power to 0.23 m/s mean error
+  🟢 descent on 15 %: holds 7 m/s on the brakes to 0.97 m/s mean error, never runs past 7.0 m/s
+  🟢 eleven 40→5 m/s stops: torque per bar falls 0.000639 → 0.000602 N·m/Pa as the discs reach 514 °C (line pressure 33 → 41 bar)
+  🟢 stop: ABS holds |κ| at 0.31 and stops in 29.5 m against 27.8 m locked (|κ| 0.98)
+  🟢 braking + steering: the ABS car yaws 16.2°, the locked car 0.1°
+
+G · Clutch models
+  🟢 single plate 1→2 in 0.4 s: engagement dips to 0.00, drive torque falls to -427 N·m through the hole (5303 N·m before)
+  🟢 dual clutch 1→2: 150 ms handoff, torque never dips below 93 % of the new gear's pull (5305 vs 5702 N·m)
+  🟢 0–30 m/s: dual clutch 5.35 s against 5.76 s for the staged single plate
+  🟢 foot on both pedals: the engine stalls at 2328 rpm against the converter, the car stands (0.00 m/s)
+  🟢 idle in drive: creeps to 2.35 m/s in gear 1 at 700 rpm
+  🟢 cruise at 20.4 m/s: converter slip 13 rpm with the lockup closed
+
+H · Intake manifold and electric drive
+  🟢 tip-in: the manifold fills from 0.05 bar in 4 ms (a 3.5 L plenum fills fast; turbo lag is the slow part)
+  🟢 10 % pedal at 3000 rpm: 63 % of full torque with the intake (3 % without)
+  🟢 overrun at 4000 rpm, throttle shut: the engine drags -40 N·m on vacuum
+  🟢 steady WOT at 4500 rpm: 473 N·m with the intake (manifold 0.999 bar, ±0.0 N·m), 481 N·m without (±0.0 N·m)
+  🟢 idle: manifold at 0.15 bar absolute, engine held at 730 rpm
+  🟢 motor envelope: 400 N·m at 1000 rpm (cap 400), 150.0 kW at 10000 rpm (cap 150)
+  🟢 EV launch: 0–100 km/h in 6.87 s
+  🟢 gentle regen stop 22 → -0 m/s returns 118 kJ of 295 kJ (40 %)
+  🟢 battery: 356 V at rest, sags to 315 V at full power
+
+I · End-to-end energy drive cycle
+  🟢 cycle: 38.1 m/s through gear 4, slalom peaks at 4.1 m/s² lateral, ends stopped
+  🟢 efficiency: 4.30 MJ indicated of 14.42 MJ fuel = 29.8 % (gasoline: 25–35 %)
+  🟢 wheels: 0.49 MJ through the contacts closes against 0.49 MJ motion + drag + climb to -0.1 %
+  🟢 driveline: 2.03 MJ at the wheels of 3.15 MJ from the crank (64 %; launch slip + gears), locked gears alone 0.913 (spec 0.92)
+  🟢 EV cycle: 2.62 MJ drawn balances 2.67 MJ of shaft + losses to -2.2 % (top speed 37.0 m/s)
+  🟢 determinism: two drive cycles hash 2183340b4be7fe44
+
+J · Closed-loop clutch, forced-induction physics, carcass heat & 4-corner slope equilibrium
+  🟢 progressive clutch uphill (22.5 % grade, 55 % throttle): min 700 rpm (idle 700), engagement 0.12 at 0.15 s, climbs to 14.0 m/s
+  🟢 clutch kick & lining fade: 2797 rpm on kick (slip 2790 rpm), peak slip 164.3 kW heats plate to 87.3 °C (capacity ×0.74)
+  🟢 turbo ceiling & choke: 1.15 bar pump, 1.40 bar race wastegate, 0.99 bar above compressor choke
+  🟢 airspeed intercooler: 94.6 °C soaked at standstill cools to 53.4 °C at 55 m/s
+  🟢 intake aero & filter: +26 mbar ram recovery at 75 m/s (MAP 1.018 vs 0.991 bar; clogged filter 0.958 bar)
+  🟢 boost fuel enrichment: 115.2 g burned under boost enrichment vs 96.7 g stoichiometric (+19 %)
+  🟢 carcass rolling & brake conduction: 22.58 °C rolling alone, 26.14 °C next to 407 °C brake disc (1st-law residual 2.11e-06 J)
+  🟢 4-corner slope equilibrium on 12.68° mesh ramp: pitch 12.43°, normal dot 0.99999, brake hold latched
+  🟢 parked on 12.68° ramp for 3 s: speed 0.0002 m/s, 4 wheels in contact, engine idling at 700 rpm
+  🟢 throttle releases brake hold & climbs 12.68° ramp crest: min 708 rpm, peak CoM z 1.90 m, clears lip to x = 39.7 m
+
+🟢 88 / 88 assertions
