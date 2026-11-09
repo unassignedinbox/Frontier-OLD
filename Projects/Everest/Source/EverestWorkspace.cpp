@@ -335,7 +335,7 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
 
     // 📝 The scene's entries plus the one Render settings component (the whole renderer, owner's request) and the scene archive's
     //    geometry objects; neither the renderer nor the geometry is constructible (the archive decides what geometry exists).
-    const std::vector<std::string> SceneTypes = {"RenderPipeline","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
+    const std::vector<std::string> SceneTypes = {"RenderPipeline","Camera","Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind",
                                                  "ForceSource","Geometry"};
     OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
     auto Types = QueryWorldSpace().EnumerateRegisteredTypes();
@@ -559,9 +559,18 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
         Frontier::RecordToken ParentToken{};
         if (*RequestedType == "OpticalFlare")
         {
-            if (Frontier::SceneRecordBase* Solar = QueryWorldSpace().FindFirstByType("Solar"))
+            const Frontier::RecordToken Selected = OutlinerPanel.QuerySelected();
+            if (const auto* SelectedCam = dynamic_cast<const Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(Selected)))
             {
-                ParentToken = Solar->QueryToken();
+                ParentToken = SelectedCam->QueryToken();
+            }
+            else if (Frontier::SceneRecordBase* ActiveCam = QueryWorldSpace().FindRecord(ActiveCameraToken))
+            {
+                ParentToken = ActiveCam->QueryToken();
+            }
+            else if (Frontier::SceneRecordBase* FirstCam = QueryWorldSpace().FindFirstByType("Camera"))
+            {
+                ParentToken = FirstCam->QueryToken();
             }
         }
         const Frontier::RecordToken Created = QueryWorldSpace().ConstructRecord(*RequestedType, {}, ParentToken);
@@ -626,7 +635,8 @@ void EverestWorkspace::ConfigureConstructCatalogue()
         const char* Glyph;
     };
     static constexpr TypeLook Looks[] = {
-        {"Solar", "Environment", "Sun"},      {"OpticalFlare", "Environment", "Aperture"}, {"Atmosphere", "Environment", "Sunrise"},
+        {"Camera", "Cameras", "Camera"},      {"OpticalFlare", "Cameras", "Aperture"},
+        {"Solar", "Environment", "Sun"},      {"Atmosphere", "Environment", "Sunrise"},
         {"Stars", "Environment", "Sparkles"}, {"Moons", "Environment", "Moon"},          {"Planet", "Environment", "Orbit"},
         {"Clouds", "Weather", "CloudFog"},    {"LocalCloud", "Weather", "CloudFog"},     {"Fog", "Weather", "Droplets"},
         {"LocalFog", "Weather", "Droplets"},  {"Wind", "Weather", "Wind"},               {"ForceField", "Weather", "Waves"},
@@ -949,6 +959,23 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     if (const std::string Requested = Frontier::InspectorRuntime::Instance().ConsumeSelectionRequest(); !Requested.empty())
     {
         Frontier::SceneRecordBase* Target = QueryWorldSpace().FindFirstByType(Requested);
+        if (Requested == "OpticalFlare")
+        {
+            const Frontier::RecordToken Selected = OutlinerPanel.QuerySelected();
+            const Frontier::RecordToken PreferredParent =
+                dynamic_cast<const Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(Selected)) != nullptr ? Selected : ActiveCameraToken;
+            if (PreferredParent.IsValid())
+            {
+                for (const auto* Candidate : QueryWorldSpace().FindAllByType("OpticalFlare"))
+                {
+                    if (Candidate->QueryParentToken() == PreferredParent)
+                    {
+                        Target = QueryWorldSpace().FindRecord(Candidate->QueryToken());
+                        break;
+                    }
+                }
+            }
+        }
         if (Requested == "LocalCloud" || Requested == "LocalFog")
         {
             for (auto* Candidate : QueryWorldSpace().FindAllByType(Requested == "LocalCloud" ? "Clouds" : "Fog"))
@@ -1157,6 +1184,8 @@ void EverestWorkspace::ConstructViewportSurface()
         PickPress   = IO.MousePos;
     }
     IntegrateViewportCamera(StageHovered, StageActive, ViewportDeltaSeconds, GizmoPress || Gizmo.QueryEngaged());
+    const float StageAspectRatio = StageExtent.y > 1.0f ? (StageExtent.x / StageExtent.y) : (16.0f / 9.0f);
+    SynchronizeCameraRecords(StageAspectRatio, ViewportDeltaSeconds);
 
     // 📝 The demo's overlay keys, while the viewport has the pointer or the focus and no text field takes the keys; W, E and R
     //    choose the transform handles (Unreal's keys) while the camera is not flying. A modal editor keeps the keys to itself.
@@ -1193,6 +1222,12 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.PixelDensity        = ImGui::GetWindowViewport() != nullptr ? ImGui::GetWindowViewport()->FramebufferScale.y : 1.0f;
         Request.CameraPosition      = Flight.Position;
         Request.CameraTarget        = Flight.ResolveTarget();
+        const auto ShakeOffset      = ViewportCameraShake.Advance(Flight.Velocity, Flight.ResolveForward(), Navigation.Up, ViewportDeltaSeconds);
+        for (size_t Axis = 0; Axis < 3; ++Axis)
+        {
+            Request.CameraPosition[Axis] += ShakeOffset.EyeMetres[Axis];
+            Request.CameraTarget[Axis]   += ShakeOffset.TargetMetres[Axis];
+        }
         Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
         Request.DeltaSeconds        = ViewportDeltaSeconds;
         Request.CameraUp = Navigation.Up;
@@ -1276,6 +1311,98 @@ void EverestWorkspace::ConstructViewportSurface()
     ConstructViewportBar(Min, ImVec2(Max.x, StageMin.y), Scale);
 }
 
+void EverestWorkspace::ActivateCameraRecord(Frontier::RecordToken Token)
+{
+    auto* NextCamera = dynamic_cast<Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(Token));
+    if (NextCamera == nullptr) return;
+
+    for (const Frontier::SceneRecordBase* Entry : QueryWorldSpace().FindAllByType("Camera"))
+    {
+        if (auto* Camera = dynamic_cast<Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken())))
+        {
+            const bool ShouldBeActive = (Camera->QueryToken() == Token);
+            if (Camera->QueryConfiguration().Active != ShouldBeActive || Camera->QueryConfiguration().ActivationRequested)
+            {
+                Camera->AccessConfiguration().Active              = ShouldBeActive;
+                Camera->AccessConfiguration().ActivationRequested = false;
+                Camera->AccessConfiguration().AdvanceRevision();
+            }
+        }
+    }
+
+    const bool SwitchingRig = ActiveCameraToken.IsValid() && ActiveCameraToken != Token;
+    ActiveCameraToken       = Token;
+    const auto& Config      = NextCamera->QueryConfiguration();
+    ViewportCameraShake.Reset();
+    ViewportCameraShake.AccessSettings() = Config.Shake;
+    if (SwitchingRig)
+    {
+        Flight.Position  = {Config.Spatial.PositionMetres[0], Config.Spatial.PositionMetres[1], Config.Spatial.PositionMetres[2]};
+        Flight.Elevation = std::clamp(static_cast<double>(Config.Spatial.OrientationDegrees[0]), -89.0, 89.0);
+        Flight.Heading   = std::remainder(static_cast<double>(Config.Spatial.OrientationDegrees[1]), 360.0);
+        Flight.Velocity  = {0.0, 0.0, 0.0};
+        AnnounceViewportNotice("Camera: " + NextCamera->QueryRecordName());
+    }
+}
+
+void EverestWorkspace::SynchronizeCameraRecords(float StageAspectRatio, double /*DeltaSeconds*/)
+{
+    const auto CameraEntries = QueryWorldSpace().FindAllByType("Camera");
+    if (CameraEntries.empty())
+    {
+        ActiveCameraToken = {};
+        ViewportCameraShake.AccessSettings().Enabled = false;
+        return;
+    }
+
+    for (const Frontier::SceneRecordBase* Entry : CameraEntries)
+    {
+        if (auto* Camera = dynamic_cast<Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken())))
+        {
+            Camera->AccessConfiguration().ViewportAspectRatio = StageAspectRatio;
+            if (Camera->QueryConfiguration().ActivationRequested)
+            {
+                ActivateCameraRecord(Camera->QueryToken());
+            }
+        }
+    }
+
+    auto* ActiveCamera = dynamic_cast<Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(ActiveCameraToken));
+    if (ActiveCamera == nullptr || !ActiveCamera->QueryConfiguration().Enabled)
+    {
+        Frontier::CameraRecord* Preferred = nullptr;
+        for (const Frontier::SceneRecordBase* Entry : CameraEntries)
+        {
+            auto* Candidate = dynamic_cast<Frontier::CameraRecord*>(QueryWorldSpace().FindRecord(Entry->QueryToken()));
+            if (Candidate == nullptr || !Candidate->QueryConfiguration().Enabled) continue;
+            if (Candidate->QueryConfiguration().Active)
+            {
+                Preferred = Candidate;
+                break;
+            }
+            if (Preferred == nullptr) Preferred = Candidate;
+        }
+        if (Preferred != nullptr)
+        {
+            ActiveCameraToken = {};   // initial bind without overwriting default startup Flight unless switched
+            Preferred->AccessConfiguration().Active = true;
+            ActiveCameraToken = Preferred->QueryToken();
+            ActiveCamera      = Preferred;
+        }
+    }
+
+    if (ActiveCamera == nullptr) return;
+    auto& Config = ActiveCamera->AccessConfiguration();
+    const auto Optics = Frontier::EvaluateCameraOptics(Config.Optics, StageAspectRatio);
+    Flight.VerticalFieldOfView = static_cast<double>(Optics.VerticalFieldOfViewDegrees) * DegreesToRadian;
+    ViewportCameraShake.AccessSettings() = Config.Shake;
+    Config.Spatial.PositionMetres[0]     = static_cast<float>(Flight.Position[0]);
+    Config.Spatial.PositionMetres[1]     = static_cast<float>(Flight.Position[1]);
+    Config.Spatial.PositionMetres[2]     = static_cast<float>(Flight.Position[2]);
+    Config.Spatial.OrientationDegrees[0] = static_cast<float>(Flight.Elevation);
+    Config.Spatial.OrientationDegrees[1] = static_cast<float>(Flight.Heading);
+}
+
 SceneCameraSubject EverestWorkspace::ResolveCameraSubject() const
 {
     SceneCameraSubject Subject;
@@ -1321,6 +1448,25 @@ void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,
         Flight=SceneViewportFlight{};Navigation=SceneViewportNavigation{};
     }
     X+=Button+Gap;
+    if (const auto Cameras = QueryWorldSpace().FindAllByType("Camera"); Cameras.size() >= 2)
+    {
+        std::vector<const char*> CameraLabels;
+        CameraLabels.reserve(Cameras.size());
+        int SelectedCameraIndex = 0;
+        for (size_t Index = 0; Index < Cameras.size(); ++Index)
+        {
+            CameraLabels.push_back(Cameras[Index]->QueryRecordName().c_str());
+            if (Cameras[Index]->QueryToken() == ActiveCameraToken) SelectedCameraIndex = static_cast<int>(Index);
+        }
+        const float CamWidth = std::min(156 * Scale, (Max.x - Min.x) * 0.22f);
+        if (X + CamWidth < Max.x - 12 * Scale - 3 * Button - 4 * Gap - 132 * Scale &&
+            ViewportChromeControls::ConstructSelectField("##ActiveCameraRig", Faces, {X, Min.y + (Height - Button) * .5f}, {CamWidth, Button},
+                                                         CameraLabels.data(), static_cast<int>(CameraLabels.size()), SelectedCameraIndex, Scale))
+        {
+            ActivateCameraRecord(Cameras[static_cast<size_t>(std::clamp(SelectedCameraIndex, 0, static_cast<int>(Cameras.size()) - 1))]->QueryToken());
+        }
+        X += CamWidth + Gap;
+    }
     // 📝 Debug views (Render settings › Debug views): the demo's inspection views and the analytic illumination as a view of its own.
     if (auto* Pipeline=dynamic_cast<Frontier::RenderPipelineRecord*>(QueryWorldSpace().FindFirstByType("RenderPipeline")))
     {

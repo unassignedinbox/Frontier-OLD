@@ -305,7 +305,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
     //    presentation word carries only exposure/scale metadata.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20);
+    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20) | EncodeCameraMotionBlurControl(Rendering.CameraMotionBlur);
     Inputs.External.FireBlock      = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.46f, 0.14f, 14.0f};
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);

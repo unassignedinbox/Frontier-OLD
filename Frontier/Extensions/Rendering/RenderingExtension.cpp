@@ -103,11 +103,42 @@ bool AdvanceSolarDay(Frontier::SolarConfiguration& Sun, double DeltaSeconds)
     return true;
 }
 
+const Frontier::CameraRecord* ResolveActiveCameraRecord(const Frontier::WorldSpace& World)
+{
+    const Frontier::CameraRecord* Fallback = nullptr;
+    for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("Camera"))
+    {
+        const auto* Camera = dynamic_cast<const Frontier::CameraRecord*>(Entry);
+        if (!Camera || !Camera->QueryConfiguration().Enabled) continue;
+        if (Camera->QueryConfiguration().Active) return Camera;
+        if (!Fallback) Fallback = Camera;
+    }
+    return Fallback;
+}
+
 Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::WorldSpace& World, double ElapsedSeconds)
 {
     Frontier::GlobalIllumination::SceneEnvironment Environment;
     ReadConfiguration<Frontier::SolarRecord>(World, "Solar", Environment.Solar);
-    ReadConfiguration<Frontier::OpticalFlareRecord>(World, "OpticalFlare", Environment.Flare);
+    bool BoundCameraFlare = false;
+    if (const Frontier::CameraRecord* ActiveCamera = ResolveActiveCameraRecord(World))
+    {
+        for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("OpticalFlare"))
+        {
+            const auto* Flare = dynamic_cast<const Frontier::OpticalFlareRecord*>(Entry);
+            if (!Flare) continue;
+            if (Flare->QueryParentToken() == ActiveCamera->QueryToken())
+            {
+                Environment.Flare = Flare->QueryConfiguration();
+                BoundCameraFlare  = true;
+                break;
+            }
+        }
+    }
+    if (!BoundCameraFlare)
+    {
+        ReadConfiguration<Frontier::OpticalFlareRecord>(World, "OpticalFlare", Environment.Flare);
+    }
     ReadConfiguration<Frontier::AtmosphereRecord>(World, "Atmosphere", Environment.Atmosphere);
     ReadGlobalConfiguration<Frontier::CloudRecord>(World, "Clouds", Environment.Clouds);
     ReadConfiguration<Frontier::StarRecord>(World, "Stars", Environment.Stars);
@@ -298,6 +329,13 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
     Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
+    if (const Frontier::CameraRecord* ActiveCamera = ResolveActiveCameraRecord(World))
+    {
+        if (ActiveCamera->QueryConfiguration().Enabled)
+        {
+            Rendering.CameraMotionBlur = ActiveCamera->QueryConfiguration().MotionBlur;
+        }
+    }
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |

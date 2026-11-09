@@ -72,6 +72,48 @@ live_refresh = true
 target_rate = 60
 
 [[records]]
+identity = "rec_editor_camera"
+type = "Camera"
+name = "Editor Camera"
+[records.configuration]
+enabled = true
+active = true
+role = "editor"
+focal_length_mm = 17.537
+sensor_width_mm = 36.0
+aperture_f_number = 2.8
+subject_distance_m = 12.0
+near_clip_m = 0.05
+far_clip_m = 25000.0
+shake_enabled = false
+motion_blur_mode = "off"
+motion_blur_strength = 0.35
+position_m = [-61.9997, -34.0018, 9.0052]
+orientation_deg = [-5.23, 37.57, 0.0]
+
+[[records]]
+identity = "rec_vehicle_camera"
+type = "Camera"
+name = "Vehicle Camera"
+[records.configuration]
+enabled = true
+active = false
+role = "vehicle"
+focal_length_mm = 24.0
+sensor_width_mm = 36.0
+aperture_f_number = 2.8
+subject_distance_m = 8.0
+near_clip_m = 0.05
+far_clip_m = 25000.0
+shake_enabled = true
+shake_amplitude_m = 0.0015
+shake_max_offset_m = 0.006
+motion_blur_mode = "off"
+motion_blur_strength = 0.35
+position_m = [-14.0, 6.0, 3.2]
+orientation_deg = [-6.0, 0.0, 0.0]
+
+[[records]]
 identity = "rec_solar"
 type = "Solar"
 name = "Sun"
@@ -86,7 +128,7 @@ kelvin = 5778.0
 identity = "rec_flare"
 type = "OpticalFlare"
 name = "Lens Flare"
-parent = "rec_solar"
+parent = "rec_editor_camera"
 [records.configuration]
 enabled = true
 intensity = 0.62

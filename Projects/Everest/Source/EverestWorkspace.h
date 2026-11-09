@@ -216,6 +216,8 @@ class EverestWorkspace
     void ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale);
     void ConstructViewportFooter(float Scale);
+    void ActivateCameraRecord(Frontier::RecordToken Token);
+    void SynchronizeCameraRecords(float StageAspectRatio, double DeltaSeconds);
     SceneCameraSubject ResolveCameraSubject() const;
     void ConstructFullscreenViewport(float Scale);
     void ToggleViewportOverlay(int Overlay);
@@ -270,6 +272,8 @@ class EverestWorkspace
     std::array<double, 2>         PickPoint{};                        // [-] the last click, as a fraction of the stage
     bool                          GizmoPress             = false;     // [-] that press began on a handle
     std::unordered_map<uint64_t, std::array<float, 3>> PendingAlbedo{};   // [-] constructed shapes waiting for their family
+    Frontier::RecordToken         ActiveCameraToken{};
+    Frontier::CameraShakeComponent ViewportCameraShake{};
     FieldViewport                 Field{};
     std::unique_ptr<Frontier::PhysicsExtension> Physics;
 #endif

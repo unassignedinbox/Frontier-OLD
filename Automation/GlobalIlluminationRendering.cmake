@@ -125,6 +125,7 @@ endif()
 #    and queue (the editor's Scene Viewport, Exhibits/SceneViewport).
 add_library(FrontierSceneViewport STATIC
     Frontier/Engine/Geometry/ShapeArchive.cpp
+    Frontier/Engine/Rendering/SceneViewport/CameraEffects.cpp
     Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
     Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
 target_include_directories(FrontierSceneViewport PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")

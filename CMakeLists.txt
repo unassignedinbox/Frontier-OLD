@@ -204,6 +204,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/RenderSettings/GeometrySection.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/ViewSection.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/TimingSection.cpp
+    Frontier/Engine/Interface/Inspectors/CameraInspector.cpp
     Frontier/Engine/Interface/Inspectors/SolarInspector.cpp
     Frontier/Engine/Interface/Inspectors/OpticalReference.cpp
     Frontier/Engine/Interface/Inspectors/OpticalFlareInspector.cpp
@@ -301,6 +302,7 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
+    Frontier/Engine/Rendering/SceneViewport/CameraEffects.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
@@ -845,6 +847,12 @@ if(BUILD_TESTING)
         Exhibits/EverestInterface/Code/EverestShippingValidation.cpp)
     target_link_libraries(EverestShippingValidation PRIVATE EverestProjectRuntime)
     add_test(NAME EverestShippingValidation COMMAND EverestShippingValidation
+        "${CMAKE_SOURCE_DIR}/Projects/Everest")
+
+    add_executable(CameraEffectsValidation
+        Exhibits/SceneViewport/Code/CameraEffectsValidation.cpp)
+    target_link_libraries(CameraEffectsValidation PRIVATE EverestProjectEditor)
+    add_test(NAME CameraEffectsValidation COMMAND CameraEffectsValidation
         "${CMAKE_SOURCE_DIR}/Projects/Everest")
 endif()
 

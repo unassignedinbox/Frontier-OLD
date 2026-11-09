@@ -550,6 +550,81 @@ void SolarRecord::DeserializeConfiguration(const toml::table& InTable)
 }
 
 template <>
+void CameraRecord::SerializeConfiguration(toml::table& OutTable) const
+{
+    OutTable.insert_or_assign("enabled", Parameters.Enabled);
+    OutTable.insert_or_assign("active", Parameters.Active);
+    OutTable.insert_or_assign("role", Parameters.Role == CameraRole::Vehicle ? "vehicle" : "editor");
+    OutTable.insert_or_assign("focal_length_mm", static_cast<double>(Parameters.Optics.FocalLengthMillimetres));
+    OutTable.insert_or_assign("sensor_width_mm", static_cast<double>(Parameters.Optics.SensorWidthMillimetres));
+    OutTable.insert_or_assign("aperture_f_number", static_cast<double>(Parameters.Optics.ApertureFNumber));
+    OutTable.insert_or_assign("subject_distance_m", static_cast<double>(Parameters.Optics.SubjectDistanceMetres));
+    OutTable.insert_or_assign("near_clip_m", static_cast<double>(Parameters.NearClipMetres));
+    OutTable.insert_or_assign("far_clip_m", static_cast<double>(Parameters.FarClipMetres));
+
+    OutTable.insert_or_assign("shake_enabled", Parameters.Shake.Enabled);
+    OutTable.insert_or_assign("shake_seed", static_cast<int64_t>(Parameters.Shake.Seed));
+    OutTable.insert_or_assign("shake_amplitude_m", static_cast<double>(Parameters.Shake.AmplitudeMetres));
+    OutTable.insert_or_assign("shake_frequency_hz", static_cast<double>(Parameters.Shake.FrequencyHz));
+    OutTable.insert_or_assign("shake_threshold_mps2", static_cast<double>(Parameters.Shake.AccelerationThresholdMps2));
+    OutTable.insert_or_assign("shake_attack_s", static_cast<double>(Parameters.Shake.AttackSeconds));
+    OutTable.insert_or_assign("shake_release_s", static_cast<double>(Parameters.Shake.ReleaseSeconds));
+    OutTable.insert_or_assign("shake_impact_multiplier", static_cast<double>(Parameters.Shake.ImpactMultiplier));
+    OutTable.insert_or_assign("shake_max_offset_m", static_cast<double>(Parameters.Shake.MaximumOffsetMetres));
+
+    const char* BlurModeName = "off";
+    if (Parameters.MotionBlur.Mode == CameraMotionBlurMode::Camera) BlurModeName = "camera";
+    else if (Parameters.MotionBlur.Mode == CameraMotionBlurMode::Scene) BlurModeName = "scene";
+    OutTable.insert_or_assign("motion_blur_mode", BlurModeName);
+    OutTable.insert_or_assign("motion_blur_strength", static_cast<double>(Parameters.MotionBlur.Strength));
+
+    SerializeSpatialSubtable(OutTable, Parameters.Spatial);
+}
+
+template <>
+void CameraRecord::DeserializeConfiguration(const toml::table& InTable)
+{
+    Parameters.Enabled = ReadBool(InTable, "enabled", Parameters.Enabled);
+    Parameters.Active  = ReadBool(InTable, "active", Parameters.Active);
+    if (const auto Role = InTable["role"].value<std::string>())
+    {
+        Parameters.Role = (*Role == "vehicle") ? CameraRole::Vehicle : CameraRole::Editor;
+    }
+    Parameters.Optics.FocalLengthMillimetres = ReadFloat(InTable, "focal_length_mm", Parameters.Optics.FocalLengthMillimetres);
+    Parameters.Optics.SensorWidthMillimetres = ReadFloat(InTable, "sensor_width_mm", Parameters.Optics.SensorWidthMillimetres);
+    Parameters.Optics.ApertureFNumber        = ReadFloat(InTable, "aperture_f_number", Parameters.Optics.ApertureFNumber);
+    Parameters.Optics.SubjectDistanceMetres  = ReadFloat(InTable, "subject_distance_m", Parameters.Optics.SubjectDistanceMetres);
+    Parameters.NearClipMetres                = ReadFloat(InTable, "near_clip_m", Parameters.NearClipMetres);
+    Parameters.FarClipMetres                 = ReadFloat(InTable, "far_clip_m", Parameters.FarClipMetres);
+
+    Parameters.Shake.Enabled                   = ReadBool(InTable, "shake_enabled", Parameters.Shake.Enabled);
+    Parameters.Shake.Seed                      = ReadUint32(InTable, "shake_seed", Parameters.Shake.Seed);
+    Parameters.Shake.AmplitudeMetres           = ReadFloat(InTable, "shake_amplitude_m", Parameters.Shake.AmplitudeMetres);
+    Parameters.Shake.FrequencyHz               = ReadFloat(InTable, "shake_frequency_hz", Parameters.Shake.FrequencyHz);
+    Parameters.Shake.AccelerationThresholdMps2 = ReadFloat(InTable, "shake_threshold_mps2", Parameters.Shake.AccelerationThresholdMps2);
+    Parameters.Shake.AttackSeconds             = ReadFloat(InTable, "shake_attack_s", Parameters.Shake.AttackSeconds);
+    Parameters.Shake.ReleaseSeconds            = ReadFloat(InTable, "shake_release_s", Parameters.Shake.ReleaseSeconds);
+    Parameters.Shake.ImpactMultiplier          = ReadFloat(InTable, "shake_impact_multiplier", Parameters.Shake.ImpactMultiplier);
+    Parameters.Shake.MaximumOffsetMetres       = ReadFloat(InTable, "shake_max_offset_m", Parameters.Shake.MaximumOffsetMetres);
+
+    if (const auto Blur = InTable["motion_blur_mode"].value<std::string>())
+    {
+        if (*Blur == "camera") Parameters.MotionBlur.Mode = CameraMotionBlurMode::Camera;
+        else if (*Blur == "scene") Parameters.MotionBlur.Mode = CameraMotionBlurMode::Scene;
+        else Parameters.MotionBlur.Mode = CameraMotionBlurMode::Off;
+    }
+    else
+    {
+        const uint32_t BlurIndex    = std::min<uint32_t>(ReadUint32(InTable, "motion_blur_mode", 0u), 2u);
+        Parameters.MotionBlur.Mode = static_cast<CameraMotionBlurMode>(BlurIndex);
+    }
+    Parameters.MotionBlur.Strength = ReadFloat(InTable, "motion_blur_strength", Parameters.MotionBlur.Strength);
+
+    DeserializeSpatialSubtable(InTable, Parameters.Spatial);
+    Parameters.AdvanceRevision();
+}
+
+template <>
 void OpticalFlareRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
@@ -1654,10 +1729,13 @@ void WorldSpace::RegisterNativeEngineTypes()
 
     // 📝 Glyphs, groups and colours as the demo's entity list gives them (InspectorPages.js ConstructEntities,
     //    EnvironmentInspector.js EnvironmentEntries): Native* names are the environment artwork, the rest lucide strokes.
+    // Camera & Connected Optics Types
+    RegisterSimple.operator()<CameraRecord>("Camera", "Camera · Perspective Camera", RecordClassification::Camera, "Camera", "Cameras", "#9fb4d6");
+    RegisterSimple.operator()<OpticalFlareRecord>("OpticalFlare", "Camera · Optical Flare", RecordClassification::Camera, "NativeFlare", "Cameras",
+                                                  "#99aafa");
+
     // Environment Types
     RegisterSimple.operator()<SolarRecord>("Solar", "Environment · Solar", RecordClassification::Illumination, "NativeSun", "Environment", "#e8c27a");
-    RegisterSimple.operator()<OpticalFlareRecord>("OpticalFlare", "Environment · Optical Flare", RecordClassification::Illumination, "NativeFlare", "Environment",
-                                                  "#99aafa");
     RegisterSimple.operator()<AtmosphereRecord>("Atmosphere", "Environment · Atmosphere", RecordClassification::Environment, "NativeAtmosphere", "Environment",
                                                 "#99aafa");
     RegisterSimple.operator()<CloudRecord>("Clouds", "Environment · Clouds", RecordClassification::Environment, "NativeClouds", "Environment", "#99aafa");

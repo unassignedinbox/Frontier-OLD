@@ -5,6 +5,9 @@
 
 #pragma once
 
+#include "Engine/Rendering/SceneViewport/CameraEffects.h"
+#include "Engine/Rendering/SceneViewport/CameraOptics.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -922,6 +925,31 @@ struct GeometryConfiguration : RevisionCounter
         bool                               Luminous         = false;   // [-] carries clustered lamps (street lamps, lanterns)
         std::string                        Diagnostic{};               // [-] why it did not bind
     } Resolved{};
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    CAMERA CONFIGURATION
+//------------------------------------------------------------------------------------------------------------------------
+
+enum class CameraRole : uint8_t
+{
+    Editor  = 0,
+    Vehicle = 1,
+};
+
+struct CameraConfiguration : RevisionCounter
+{
+    bool                      Enabled             = true;
+    bool                      Active              = false;
+    bool                      ActivationRequested = false;   // [-] transient UI request consumed by the workspace
+    CameraRole                Role                = CameraRole::Editor;
+    CameraOpticsSettings      Optics{};
+    float                     NearClipMetres      = 0.05f;
+    float                     FarClipMetres       = 25000.0f;
+    float                     ViewportAspectRatio = 16.0f / 9.0f;   // [-] live viewport aspect ratio for FOV display
+    SpatialConfiguration      Spatial{};
+    CameraShakeSettings       Shake{};
+    CameraMotionBlurComponent MotionBlur{};
 };
 
 } // namespace Frontier

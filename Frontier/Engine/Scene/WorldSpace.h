@@ -100,6 +100,7 @@ class TypedSceneRecord final : public SceneRecordBase
 
 #if FRONTIER_EDITOR
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration, RenderSettingsInspector>;
+using CameraRecord         = TypedSceneRecord<CameraConfiguration, CameraInspector>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration, SolarInspector>;
 using OpticalFlareRecord   = TypedSceneRecord<OpticalFlareConfiguration, OpticalFlareInspector>;
 using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration, AtmosphereInspector>;
@@ -118,6 +119,7 @@ using ParticleRecord       = TypedSceneRecord<ParticleConfiguration, ParticleIns
 using GeometryRecord       = TypedSceneRecord<GeometryConfiguration, GeometryInspector>;
 #else
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration>;
+using CameraRecord         = TypedSceneRecord<CameraConfiguration>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration>;
 using OpticalFlareRecord   = TypedSceneRecord<OpticalFlareConfiguration>;
 using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration>;
