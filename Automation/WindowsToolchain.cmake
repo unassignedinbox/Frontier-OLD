@@ -18,7 +18,7 @@ set(CMAKE_C_COMPILER_ARG1 "cc")
 set(CMAKE_C_FLAGS_INIT "-target x86_64-windows-gnu -static")
 set(CMAKE_CXX_COMPILER "${FRONTIER_ZIG}")
 set(CMAKE_CXX_COMPILER_ARG1 "c++")
-set(CMAKE_CXX_FLAGS_INIT "-target x86_64-windows-gnu -static")
+set(CMAKE_CXX_FLAGS_INIT "-target x86_64-windows-gnu -static -fexperimental-library")
 # CMake's platform modules reset archive templates; use executable adapters instead.
 set(FRONTIER_ZIG_TOOLS "${CMAKE_CURRENT_BINARY_DIR}/zig-tools")
 file(MAKE_DIRECTORY "${FRONTIER_ZIG_TOOLS}")

@@ -70,7 +70,7 @@ struct Quaternion
     [[nodiscard]] static inline Quaternion FromAxisAngle(Vector3<ScalarT> Axis, ScalarT AngleRadians) noexcept
     {
         const Vector3<ScalarT> Unit = Normalise(Axis);
-        if (LengthSquared(Unit) <= MathematicalConstants<ScalarT>::HighPrecisionEps)
+        if (Frontier::LengthSquared(Unit) <= MathematicalConstants<ScalarT>::HighPrecisionEps)
         {
             return Identity();
         }
