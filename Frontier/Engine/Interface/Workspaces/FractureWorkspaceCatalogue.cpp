@@ -1,13 +1,13 @@
 /*==========================================================================================================================================
                                                        FRACTUREWORKSPACECATALOGUE.CPP
 ==========================================================================================================================================*/
-// 🧩 Pinned fracture catalogues (materials, solvers, spawn presets, initial constructs) plus the shell-local
-//    closed-form estimators: partition receipts, SDF footprints, the Spencer/Kasten-Young solar ephemeris, and the
-//    .fracture.toml encoder. Deterministic in (Spec, material, nucleus count); no engine calls.
+// Pinned fracture catalogues (materials, solvers, spawn presets, initial constructs), native solver receipts,
+// SDF-footprint accounting, the Spencer/Kasten-Young solar ephemeris, and the .fracture.toml encoder.
 
 #include "Frontier/Engine/Interface/Workspaces/FractureWorkspace.h"
 #include "Frontier/Engine/Interface/Controls/Toast.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -20,10 +20,10 @@ namespace
 const FractureWorkspaceMaterial Materials[] = {
     { "concrete", "Reinforced Concrete", "Concrete", "bulk-brittle", 2350.0, 140.0, 30.0, 0.20, 1.15, 0x8D908BFF },
     { "granite", "Bedded Granite", "Granite", "bulk-brittle", 2700.0, 95.0, 55.0, 0.25, 1.40, 0x6F7378FF },
-    { "wood", "Spruce Wood", "Spruce Wood", "fibrous", 450.0, 320.0, 11.0, 0.30, 11.0, 0xB3824CFF },
+    { "wood", "Spruce Wood", "Spruce Wood", "fibrous", 520.0, 320.0, 11.0, 0.35, 11.0, 0xB3824CFF },
     { "glass", "Float Glass", "Float Glass", "plate-brittle", 2500.0, 7.0, 70.0, 0.22, 1.0, 0xB8DCE4FF },
     { "tempered", "Tempered Glass", "Tempered", "plate-brittle", 2500.0, 7.0, 70.0, 0.22, 1.0, 0xA8D8E6FF },
-    { "plastic", "Ductile ABS", "ABS", "ductile", 1050.0, 1200.0, 2.3, 0.35, 1.0, 0x3A3F4AFF },
+    { "plastic", "Ductile ABS", "ABS", "ductile", 1050.0, 460.0, 2.2, 0.35, 1.0, 0x3A3F4AFF }
 };
 
 const FractureWorkspaceSolver Solvers[] = {
@@ -189,39 +189,87 @@ FractureSpec QueryFractureConstructSeedSpec(int Index) noexcept
     return SeedSpec(Index < 0 || Index >= 7 ? 0 : Index);
 }
 
+void ApplyFractureSolverResult(FractureWorkspaceConstruct& Construct, const Fracture::Result& Result) noexcept
+{
+    try
+    {
+        Construct.NativeResult = Result;
+        Construct.NativeResultValid = Result.Success;
+        FractureReceipt& Out = Construct.Receipt;
+        Out.FragmentCount = static_cast<int>(Result.Fragments.size());
+        Out.BondCount = static_cast<int>(Result.Bonds.size());
+        Out.IntactBondCount = static_cast<int>(std::count_if(Result.Bonds.begin(), Result.Bonds.end(),
+            [](const Fracture::Bond& Bond) { return !Bond.BrokenOnImpact; }));
+        Out.TotalCrackArea = Result.TotalCrackAreaM2;
+        Out.VolumeDriftRatio = Result.VolumeDriftRatio;
+        Out.SpentSurfaceEnergy = Result.SpentSurfaceEnergyJ;
+        Out.BudgetPercent = Result.TotalEnergyBudgetJ > 0.0
+                                 ? std::clamp(100.0 * Result.SpentSurfaceEnergyJ / Result.TotalEnergyBudgetJ, 0.0, 100.0)
+                                 : 0.0;
+        Out.RayleighSpeedMps = Result.RayleighSpeedMps;
+        Out.WaveHazard = Result.RayleighSpeedMps / 3400.0 * (1.0 + Result.TotalCrackAreaM2 / 10.0);
+        Out.StepMilliseconds = Result.ComputeMilliseconds;
+        Out.WatertightManifold = Result.WatertightManifold;
+    }
+    catch (...)
+    {
+        Construct.NativeResultValid = false;
+        Construct.Receipt = FractureReceipt{};
+        Construct.Receipt.WatertightManifold = false;
+    }
+}
+
 void RecomputeFractureReceipt(FractureWorkspaceConstruct& Construct) noexcept
 {
-    const FractureSpec&            Spec = Construct.Spec;
-    const FractureWorkspaceMaterial& Mat = QueryFractureMaterial(Spec.Material);
-    FractureReceipt&               Out = Construct.Receipt;
+    try
+    {
+        Fracture::SolidKind Solid = Fracture::SolidKind::Monolith;
+        if (Construct.SolidCategory == "curtain_pane") Solid = Fracture::SolidKind::CurtainPane;
+        else if (Construct.SolidCategory == "timber_beam") Solid = Fracture::SolidKind::TimberBeam;
+        else if (Construct.SolidCategory == "boulder") Solid = Fracture::SolidKind::Boulder;
+        else if (Construct.SolidCategory == "hollow_core") Solid = Fracture::SolidKind::HollowCore;
+        else if (Construct.SolidCategory == "cube") Solid = Fracture::SolidKind::Cube;
+        else if (Construct.SolidCategory == "cylinder") Solid = Fracture::SolidKind::Cylinder;
+        else if (Construct.SolidCategory == "cone") Solid = Fracture::SolidKind::Cone;
 
-    const uint32_t Hash  = HashU32(static_cast<uint32_t>(Spec.Seed * 131 + Construct.PrimaryNucleusCells * 17 + Spec.Solver));
-    const double   Jitter = (static_cast<double>(Hash % 1000) / 1000.0 - 0.5) * 0.08; // 🧩 ±4 % deterministic.
-
-    int Fragments = static_cast<int>(std::round(std::pow(static_cast<double>(Construct.PrimaryNucleusCells), 0.72)));
-    if (Fragments < 4) Fragments = 4;
-    if (Fragments > Spec.Ceiling) Fragments = Spec.Ceiling;
-    Out.FragmentCount = Fragments;
-
-    // 🧩 Griffith-style crack area: energy over toughness, grain-amplified, seed-jittered.
-    const double Aniso = 1.0 + 0.05 * (Mat.AnisotropyRatio - 1.0);
-    Out.TotalCrackArea = Spec.Energy * 0.0011 * (300.0 / (Mat.Gc + 60.0)) * Aniso * (1.0 + Jitter);
-    Out.SpentSurfaceEnergy = 2.0 * Mat.Gc * Out.TotalCrackArea;
-    Out.BudgetPercent = Spec.Energy > 0.0 ? 100.0 * Out.SpentSurfaceEnergy / Spec.Energy : 0.0;
-    if (Out.BudgetPercent > 99.9) Out.BudgetPercent = 99.9;
-
-    Out.BondCount = Fragments * 2 + static_cast<int>(Hash % static_cast<uint32_t>(Fragments + 1));
-    const double IntactFrac = Clamp01(1.0 - (Out.SpentSurfaceEnergy / (Spec.Energy > 0.0 ? Spec.Energy : 1.0)) *
-                                                          (1.6 - 0.5 * Spec.BondStrengthScale) * 0.75);
-    Out.IntactBondCount = static_cast<int>(std::round(Out.BondCount * IntactFrac));
-
-    const bool Baked = Construct.Pipeline == "baked";
-    Out.VolumeDriftRatio = static_cast<double>(Hash % 10000) / 10000.0 * (Baked ? 1.0e-6 : 1.0e-4);
-    Out.WatertightManifold = Out.VolumeDriftRatio < 5.0e-5;
-
-    Out.RayleighSpeedMps = std::sqrt(Mat.YoungModulusGPa * 1.0e9 / Mat.Density) * 0.92;
-    Out.WaveHazard       = Out.RayleighSpeedMps / 3400.0 * (1.0 + Out.TotalCrackArea / 10.0);
-    Out.StepMilliseconds = 0.4 + static_cast<double>((Hash >> 10) % 1000) / 1000.0 * 2.8;
+        Fracture::Request Request;
+        Request.Algorithm = static_cast<Fracture::Solver>(std::clamp(Construct.Spec.Solver, 0, 5));
+        Request.EnergyJoules = Construct.Spec.Energy;
+        Request.Seed = static_cast<uint32_t>(std::max(1, Construct.Spec.Seed));
+        Request.FragmentCeiling = static_cast<uint32_t>(std::clamp(Construct.Spec.Ceiling, 2, 256));
+        Request.MinimumPieceSizeMetres = Construct.Spec.MinimumSize;
+        Request.GrainAngleDegrees = Construct.Spec.GrainAngleDeg;
+        Request.BondStrengthScale = Construct.Spec.BondStrengthScale;
+        Request.ImpactPointMetres = { Construct.Spec.ImpactPoint[0], Construct.Spec.ImpactPoint[1], Construct.Spec.ImpactPoint[2] };
+        Request.ImpactNormal = { Construct.Spec.ImpactNormal[0], Construct.Spec.ImpactNormal[1], Construct.Spec.ImpactNormal[2] };
+        const Fracture::Material Material = Fracture::ResolveMaterialById(QueryFractureMaterial(Construct.Spec.Material).Id);
+        Construct.NativeResult = Fracture::Execute(Fracture::ConstructSolid(Solid, { 1.0, 1.0, 1.0 }, Request.Seed),
+                                                    Request, Material);
+        const Fracture::Result& Result = Construct.NativeResult;
+        Construct.NativeResultValid = Result.Success;
+        FractureReceipt& Out = Construct.Receipt;
+        Out.FragmentCount = static_cast<int>(Result.Fragments.size());
+        Out.BondCount = static_cast<int>(Result.Bonds.size());
+        Out.IntactBondCount = static_cast<int>(std::count_if(Result.Bonds.begin(), Result.Bonds.end(),
+            [](const Fracture::Bond& Bond) { return !Bond.BrokenOnImpact; }));
+        Out.TotalCrackArea = Result.TotalCrackAreaM2;
+        Out.VolumeDriftRatio = Result.VolumeDriftRatio;
+        Out.SpentSurfaceEnergy = Result.SpentSurfaceEnergyJ;
+        Out.BudgetPercent = Result.TotalEnergyBudgetJ > 0.0
+                                 ? std::clamp(100.0 * Result.SpentSurfaceEnergyJ / Result.TotalEnergyBudgetJ, 0.0, 100.0)
+                                 : 0.0;
+        Out.RayleighSpeedMps = Result.RayleighSpeedMps;
+        Out.WaveHazard = Result.RayleighSpeedMps / 3400.0 * (1.0 + Result.TotalCrackAreaM2 / 10.0);
+        Out.StepMilliseconds = Result.ComputeMilliseconds;
+        Out.WatertightManifold = Result.WatertightManifold;
+    }
+    catch (...)
+    {
+        Construct.NativeResult = {};
+        Construct.NativeResultValid = false;
+        Construct.Receipt = FractureReceipt{};
+        Construct.Receipt.WatertightManifold = false;
+    }
 }
 
 double QueryFractureSdfMegabytes(int FragmentCount, int Resolution, bool Enabled) noexcept
@@ -368,6 +416,8 @@ void EncodeFractureToml(const FractureWorkspaceState& State, int Construct, char
 
 void ConstructFractureWorkspaceState(FractureWorkspaceState& State)
 {
+    State.CubeComparisonOpen = true;
+    State.CubeComparisonReady = false;
     for (int I = 0; I < FractureWorkspaceState::CardCount; ++I) State.OpenCards[I] = true;
     for (int I = 0; I < 7; ++I)
     {
@@ -379,8 +429,8 @@ void ConstructFractureWorkspaceState(FractureWorkspaceState& State)
         Dst.BakedResident         = Seed.BakedResident;
         Dst.PrimaryNucleusCells   = Seed.PrimaryNucleusCells;
         Dst.Spec                  = QueryFractureConstructSeedSpec(I);
-        RecomputeFractureReceipt(Dst);
     }
+    RecomputeFractureReceipt(State.Constructs[State.ActiveConstruct]);
     EvaluateFractureSun(State.Sun, State.SunSolved);
     State.Log.clear();
     AppendFractureWorkspaceLog(State, "WORKSPACE", "Fracture workspace ready", "7 constructs · 4 celestials");
@@ -400,8 +450,6 @@ void NoopFractureWorkspaceCommand(FractureWorkspaceState& State, const char* Cha
 {
     Toast::Show(ToastText);
     AppendFractureWorkspaceLog(State, Channel, Message, "explicit NOOP");
-    if (std::strcmp(Channel, "STRIKE") == 0) State.StrikeNoopRaised = true;
-    if (std::strcmp(Channel, "BAKE") == 0) State.BakeNoopRaised = true;
 }
 
 void LogFractureWorkspaceValue(FractureWorkspaceState& State, const char* Channel, const char* Label, const char* Shown)
@@ -414,7 +462,11 @@ void LogFractureWorkspaceValue(FractureWorkspaceState& State, const char* Channe
 void SelectFractureWorkspaceNode(FractureWorkspaceState& State, int Selection) noexcept
 {
     State.Selected = Selection;
-    if (Selection >= 0 && Selection < 7) State.ActiveConstruct = Selection;
+    if (Selection >= 0 && Selection < 7)
+    {
+        State.ActiveConstruct = Selection;
+        if (!State.Constructs[Selection].NativeResultValid) RecomputeFractureReceipt(State.Constructs[Selection]);
+    }
     if (Selection == FractureWorkspaceState::SelectedCloudsLocal) State.Clouds.ActiveScope = 1;
     if (Selection == FractureWorkspaceState::SelectedCloudsGlobal) State.Clouds.ActiveScope = 0;
     State.InspectorTab = FractureWorkspaceState::TabOverview; // 🧩 Silent: the prototype resets to overview.

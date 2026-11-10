@@ -68,7 +68,8 @@ class LuminaireRegister
     // 📝 Returns the register bytes; VehicleTransform is the body transform (column-major) when a vehicle is present.
     [[nodiscard]] std::vector<uint8_t> Update(const std::optional<Transform>& VehicleTransform, const std::vector<LampPlacement>& Poles,
                                               const std::vector<LampPlacement>& PointLamps,
-                                              const std::optional<LuminaireProfile>& TransientLight = std::nullopt);
+                                              const std::optional<LuminaireProfile>& TransientLight = std::nullopt,
+                                              const std::vector<LuminaireProfile>* Replacement = nullptr);
 
     AutomotiveBeam                VehicleBeam        = AutomotiveBeam::LowBeam;
     RoofFixtureCategory           RoofFixture        = RoofFixtureCategory::SlimLed;

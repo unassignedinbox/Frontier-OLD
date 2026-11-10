@@ -102,6 +102,7 @@ void ConstructAssetBrowserInspector(AssetBrowserWorkspaceState& State, const Edi
     const ImVec2 HeroMin = Col.Space(120.0f);
     const ImVec2 HeroMax(HeroMin.x + Col.Width, HeroMin.y + 120.0f);
     DrawList->AddRectFilled(HeroMin, HeroMax, ResolveAlpha(Accent, 0.12f), 12.0f);
+    DrawList->AddRect(HeroMin, HeroMax, ResolveCssColour(0xFFFFFF14), 12.0f, ImDrawFlags_None, 1.0f);
     (void)GlyphSymbol::Construct(DrawList, Record.Glyph.c_str(),
                                  ImVec2(HeroMin.x + (Col.Width - 52.0f) * 0.5f, HeroMin.y + 30.0f), 52.0f, 1.6f,
                                  Accent);
@@ -121,6 +122,8 @@ void ConstructAssetBrowserInspector(AssetBrowserWorkspaceState& State, const Edi
     for (const AssetBrowserMeta& Meta : Record.Meta)
     {
         const ImVec2 RowMin = Col.Space(22.0f);
+        DrawList->AddLine(ImVec2(RowMin.x, RowMin.y + 21.0f), ImVec2(RowMin.x + Col.Width, RowMin.y + 21.0f),
+                          ResolveCssColour(0xFFFFFF0C), 1.0f);
         Col.Text(Faces.Medium, 11.0f, RowMin.x, RowMin.y + 3.0f, 1.3f, ResolveCssColour(0x8A8A8AFF), Meta.Key.c_str());
         const float ValueX = RowMin.x + 110.0f;
         Col.Text(Faces.Regular, 11.0f, ValueX, RowMin.y + 3.0f, 1.3f, ResolveCssColour(0xD8D8D8FF),
@@ -141,6 +144,7 @@ void ConstructAssetBrowserInspector(AssetBrowserWorkspaceState& State, const Edi
             const ImVec2 PMin(X, TagMin.y);
             const ImVec2 PMax(X + Wide, TagMin.y + 24.0f);
             DrawList->AddRectFilled(PMin, PMax, ResolveCssColour(0xFFFFFF0D), 12.0f);
+            DrawList->AddRect(PMin, PMax, ResolveCssColour(0xFFFFFF1A), 12.0f, ImDrawFlags_None, 1.0f);
             Col.Text(Faces.Medium, 10.5f, X + 9.0f, TagMin.y + 4.0f, 1.3f, Accent, Label);
             if (Ordinal == 0) RecordAssetBrowserWorkspaceRect(State, "Inspector/Tag0", PMin, PMax);
             ImGui::PushID(Ordinal++);
@@ -171,6 +175,7 @@ void ConstructAssetBrowserInspector(AssetBrowserWorkspaceState& State, const Edi
     const float  HalfWide = (Col.Width - 8.0f) * 0.5f;
     const ImVec2 AddMax(SubMin.x + HalfWide, SubMin.y + 34.0f);
     DrawList->AddRectFilled(SubMin, AddMax, ResolveCssColour(0xFFFFFF0D), 10.0f);
+    DrawList->AddRect(SubMin, AddMax, ResolveCssColour(0xFFFFFF1A), 10.0f, ImDrawFlags_None, 1.0f);
     const float AddWide = Col.Measure(Faces.Medium, 11.5f, "Add to scene");
     Col.Text(Faces.Medium, 11.5f, SubMin.x + (HalfWide - AddWide) * 0.5f, SubMin.y + 8.0f, 1.3f,
              ResolveCssColour(0xB5B5B5FF), "Add to scene");
@@ -185,6 +190,7 @@ void ConstructAssetBrowserInspector(AssetBrowserWorkspaceState& State, const Edi
     const ImVec2 FavMin(SubMin.x + HalfWide + 8.0f, SubMin.y);
     const ImVec2 FavMax(FavMin.x + HalfWide, SubMin.y + 34.0f);
     DrawList->AddRectFilled(FavMin, FavMax, Fav ? ResolveCssColour(0xE8C27A33) : ResolveCssColour(0xFFFFFF0D), 10.0f);
+    DrawList->AddRect(FavMin, FavMax, ResolveCssColour(Fav ? 0xE8C27A88 : 0xFFFFFF1A), 10.0f, ImDrawFlags_None, 1.0f);
     const char* FavLabel = Fav ? "* Favorited" : "+ Favorite";
     const float FavWide  = Col.Measure(Faces.Medium, 11.5f, FavLabel);
     Col.Text(Faces.Medium, 11.5f, FavMin.x + (HalfWide - FavWide) * 0.5f, FavMin.y + 8.0f, 1.3f,
@@ -209,6 +215,7 @@ void ConstructAssetBrowserInspector(AssetBrowserWorkspaceState& State, const Edi
         const ImVec2 RMin = Col.Space(30.0f, 0.0f, 2.0f);
         const ImVec2 RMax(RMin.x + Col.Width, RMin.y + 30.0f);
         DrawList->AddRectFilled(RMin, RMax, ResolveCssColour(0xFFFFFF08), 8.0f);
+        DrawList->AddRect(RMin, RMax, ResolveCssColour(0xFFFFFF0C), 8.0f, ImDrawFlags_None, 1.0f);
         (void)GlyphSymbol::Construct(DrawList, Other.Glyph.c_str(), ImVec2(RMin.x + 8.0f, RMin.y + 8.0f), 14.0f, 1.8f,
                                      ResolveCssColour(Other.Colour));
         Col.Text(Faces.Regular, 11.0f, RMin.x + 30.0f, RMin.y + 7.0f, 1.3f, ResolveCssColour(0xD8D8D8FF),

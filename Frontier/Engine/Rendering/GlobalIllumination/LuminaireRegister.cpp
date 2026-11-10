@@ -71,10 +71,16 @@ const std::vector<LampPlacement>& QueryDefaultPointLamps()
 }
 
 std::vector<uint8_t> LuminaireRegister::Update(const std::optional<Transform>& VehicleTransform, const std::vector<LampPlacement>& Poles,
-                                            const std::vector<LampPlacement>& PointLamps, const std::optional<LuminaireProfile>& TransientLight)
+                                            const std::vector<LampPlacement>& PointLamps, const std::optional<LuminaireProfile>& TransientLight,
+                                            const std::vector<LuminaireProfile>* Replacement)
 {
     Luminaires.clear();
-
+    if (Replacement != nullptr)
+    {
+        Luminaires.assign(Replacement->begin(), Replacement->begin() + std::min<size_t>(Replacement->size(), MaximumLuminaires));
+    }
+    else
+    {
     // ① roadway street lamp poles; the emitter sits 25 cm below the head so shadow rays never self-occlude
     for (const LampPlacement& Pole : Poles)
     {
@@ -167,6 +173,7 @@ std::vector<uint8_t> LuminaireRegister::Update(const std::optional<Transform>& V
 
     // 📝 A bounded transient weather source shares real scene lighting; it never changes exposure.
     if (TransientLight && Luminaires.size() < MaximumLuminaires) Luminaires.push_back(*TransientLight);
+    }
 
     // ⑤ luminaire entries + cluster header + 16×16×4 64-bit cell masks
     std::vector<uint32_t> Words(LuminaireRegisterBytes / 4u, 0u);

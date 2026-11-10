@@ -19,8 +19,11 @@
 
 #include <imgui_internal.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace Frontier
@@ -576,8 +579,86 @@ void ConstructStageHud(PhotometricWorkspaceState& State, const EditorTypefaces& 
     }
 }
 
+SceneViewportRequest ConstructPhotometricPreviewRequestImpl(const PhotometricWorkspaceState& State, float Width, float Height,
+                                                            float PixelDensity, double DeltaSeconds)
+{
+    SceneViewportRequest Request;
+    Request.PanelWidth = Width;
+    Request.PanelHeight = Height;
+    Request.PixelDensity = PixelDensity;
+    Request.DeltaSeconds = std::clamp(DeltaSeconds, 0.0, 0.25);
+    Request.ReplaceLuminaires = true;
+    Request.OverrideSolar = true;
+    Request.SolarEnabled = State.Sun.Enabled;
+    Request.SolarElevationDegrees = State.SunSolved.ElevationDeg;
+    Request.SolarAzimuthDegrees = State.SunSolved.AzimuthDeg;
+    Request.SolarIlluminanceKilolux = std::clamp(State.Sun.Intensity * State.Sun.DirectGain, 0.0, 200.0);
+    Request.SolarAngularDiameterDegrees = std::clamp(State.Sun.DiameterDeg, 0.05, 2.0);
+    Request.SolarTemperatureKelvin = std::clamp(State.Sun.TemperatureK, 1000.0, 12000.0);
+    Request.PreviewSkyScale = std::clamp(State.Dome.SkylightIntensity * State.Dome.DiffuseMultiplier, 0.0, 4.0);
+    Request.PreviewReflectionScale = std::clamp(State.Dome.ReflectionGain, 0.0, 4.0);
+    const std::array<double, 3> PreviewTarget{-40.0, 0.0, 1.5};
+    Request.CameraTarget = PreviewTarget;
+    Request.CameraPosition = State.Camera == PhotometricWorkspaceState::CameraTop ? std::array<double, 3>{-40.0, -0.1, 16.0}
+                            : State.Camera == PhotometricWorkspaceState::CameraWall ? std::array<double, 3>{-47.0, -5.5, 4.0}
+                            : State.Camera == PhotometricWorkspaceState::CameraRoadway ? std::array<double, 3>{-49.0, -12.0, 6.0}
+                            : std::array<double, 3>{-47.0, -9.0, 6.0};
+    if (State.Camera == PhotometricWorkspaceState::CameraTop) Request.CameraUp = {0.0, 1.0, 0.0};
+
+    auto Linear = [](double Channel) { return Channel <= 0.04045 ? Channel / 12.92 : std::pow((Channel + 0.055) / 1.055, 2.4); };
+    Request.Luminaires.reserve(8);
+    for (const PhotometricLight& Source : State.Lights)
+    {
+        if (!Source.Visible) continue;
+        const PhotometricLightProps& Props = Source.Props;
+        SceneViewportLuminaire Light;
+        Light.Category = Source.Type == 0 ? 0u : 5u; // Omni for points; engine floodlight for generic spots and luminous surfaces.
+        if (Source.Type == 2 && Props.UseMeasuredIes && Props.CustomIesProfile < 0)
+        {
+            // The native C++ light library has these measured luminaire families; use their real beam models, not a generic cone.
+            switch (Props.MeasuredProfile)
+            {
+            case 0: Light.Category = 2u; break; // low beam
+            case 1: Light.Category = 3u; break; // high beam
+            case 2: Light.Category = 4u; break; // fog cutoff
+            case 3: Light.Category = 1u; break; // roadway batwing
+            default: Light.Category = 5u; break;
+            }
+        }
+        Light.Position = {-40.0 + Props.Position[0], Props.Position[2], Props.Position[1]}; // prototype Y-up → renderer Z-up.
+        if (Props.HasTarget)
+        {
+            const double Dx = Props.Target[0] - Props.Position[0];
+            const double Dy = Props.Target[1] - Props.Position[1];
+            const double Dz = Props.Target[2] - Props.Position[2];
+            const double Length = std::max(1.0e-9, std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz));
+            Light.Direction = {Dx / Length, Dz / Length, Dy / Length};
+        }
+        else Light.Direction = {0.0, 0.0, -1.0};
+        const unsigned R = std::strtoul(Props.ColorHex + 1, nullptr, 16);
+        Light.Colour = {Linear(static_cast<double>((R >> 16) & 0xFF) / 255.0), Linear(static_cast<double>((R >> 8) & 0xFF) / 255.0),
+                        Linear(static_cast<double>(R & 0xFF) / 255.0)};
+        const double OuterDegrees = Source.Type == 1 ? Props.Angle : Props.Cone * 0.5;
+        const double InnerDegrees = OuterDegrees * (1.0 - std::clamp(Props.Penumbra, 0.0, 0.98));
+        Light.Params = {std::cos(InnerDegrees * 0.017453292519943295), std::cos(OuterDegrees * 0.017453292519943295),
+                        static_cast<double>(Props.MeasuredProfile), 1.0};
+        if (Light.Category == 1u) Light.Params = {0.70, 0.20, 1.0, 1.0};
+        else if (Light.Category == 2u) Light.Params = {0.90, 0.60, 0.0, 1.0};
+        else if (Light.Category == 3u) Light.Params = {0.98, 0.85, 0.0, 1.0};
+        else if (Light.Category == 4u) Light.Params = {0.85, 0.40, 0.0, 1.0};
+        if (Source.Type == 0) Light.Intensity = Props.Intensity * Props.Multiplier;
+        else if (Source.Type == 1) Light.Intensity = Props.Intensity * Props.Multiplier;
+        else if (Source.Type == 2 || Source.Type == 3 || Source.Type == 4) Light.Intensity = Props.Lumens * Props.Multiplier / (4.0 * 3.141592653589793);
+        else if (Source.Type == 5) Light.Intensity = Props.Watts * Props.Efficacy * Props.Dimmer / (4.0 * 3.141592653589793);
+        else Light.Intensity = Props.LumensPerMetre * Props.Length * Props.Dimmer / (4.0 * 3.141592653589793);
+        Light.Reach = Source.Type == 0 ? Props.Distance : (Source.Type == 1 ? Props.Distance : Props.Range);
+        Request.Luminaires.push_back(Light);
+    }
+    return Request;
+}
+
 void ConstructLightStage(PhotometricWorkspaceState& State, const EditorTypefaces& Faces, ImDrawList* DrawList,
-                         ImVec2 Min, ImVec2 Max)
+                         ImVec2 Min, ImVec2 Max, const SceneViewportImage& Rendered)
 {
     PanelCursor Surface{ DrawList, &Faces, 1.0f, Min.x, Max.x - Min.x, Min.y };
     const float Wide    = Max.x - Min.x;
@@ -586,6 +667,10 @@ void ConstructLightStage(PhotometricWorkspaceState& State, const EditorTypefaces
     const float FloorY  = Min.y + Tall * 0.72f;
 
     DrawList->AddRectFilled(Min, Max, ResolveCssColour(State.DarkRoom ? 0x0B0B0BFF : 0x101418FF), 0.0f);
+    const bool NativeImage = Rendered.Texture != 0;
+    if (NativeImage) DrawList->AddImage(static_cast<ImTextureID>(Rendered.Texture), Min, Max);
+    if (!NativeImage)
+    {
     for (int I = -8; I <= 8; ++I)
     {
         const float X = CentreX + I * 52.0f;
@@ -631,8 +716,9 @@ void ConstructLightStage(PhotometricWorkspaceState& State, const EditorTypefaces
         std::snprintf(Tag, sizeof(Tag), "%s", Light.Name.c_str());
         Surface.Text(Faces.Regular, 9.5f, At.x + 14.0f, At.y - 8.0f, 1.4f, ResolveCssColour(0x848484FF), Tag);
     }
+    }
 
-    if (State.Lens == PhotometricWorkspaceState::LensLux)
+    if (!NativeImage && State.Lens == PhotometricWorkspaceState::LensLux)
     {
         static const char* Ticks[6] = { "0.1", "5", "25", "100", "300", "1000+" };
         const ImVec2 LegMin(Min.x + 14.0f, Min.y + 6.0f);
@@ -651,27 +737,29 @@ void ConstructLightStage(PhotometricWorkspaceState& State, const EditorTypefaces
         }
     }
 
-    Surface.Text(Faces.Regular, 10.0f, Min.x + 14.0f, Max.y - 26.0f, 1.4f, ResolveCssColour(0x5E5E5EFF),
-                 "Staged values only · markers & cones are static shell decor");
+    if (!NativeImage)
+        Surface.Text(Faces.Regular, 10.0f, Min.x + 14.0f, Max.y - 26.0f, 1.4f, ResolveCssColour(0x5E5E5EFF),
+                     "NO HOST RENDERER · schematic preview only");
 
-    // 📝 Bottom-right telemetry chip, where the reference parks its backend readout.
+    // 📝 Report the backend that actually presented the image; CPU lux remains a secondary staged estimate, never a renderer claim.
     {
         const double Klm = QueryPhotometricCensusLumens(State.Lights, 8) / 1000.0;
-        const double Lux = QueryPhotometricWallLux(State.Lights, 8, State.LoadedIesProfiles.empty()
-                                                                        ? nullptr
-                                                                        : State.LoadedIesProfiles.data(),
-                                                   static_cast<int>(State.LoadedIesProfiles.size()));
-        char         Summary[96]{};
-        std::snprintf(Summary, sizeof(Summary), "%.1f lx @ screen · %.2f klm", Lux, Klm);
-        const float  BackWide = Surface.Measure(Faces.SemiBold, 9.5f, "CPU SHELL", 0.9f);
-        const float  SumWide  = Surface.Measure(Faces.Regular, 10.5f, Summary);
+        char Summary[128]{};
+        const char* Backend = NativeImage ? Rendered.Readout.RendererTag.c_str() : "SCHEMATIC ONLY";
+        if (NativeImage)
+            std::snprintf(Summary, sizeof(Summary), "%u × %u · %.1f ms", Rendered.Readout.ScreenExtent[0],
+                          Rendered.Readout.ScreenExtent[1], Rendered.Readout.RefreshMilliseconds);
+        else
+            std::snprintf(Summary, sizeof(Summary), "%.2f klm staged · no GPU image", Klm);
+        const float  BackWide = Surface.Measure(Faces.SemiBold, 9.5f, Backend, 0.4f);
+        const float  SumWide  = Surface.Measure(Faces.Regular, 10.0f, Summary);
         const float  ChipWide = (BackWide > SumWide ? BackWide : SumWide) + 24.0f;
         const ImVec2 ChipMax(Max.x - 14.0f, Max.y - 12.0f);
         const ImVec2 ChipMin(ChipMax.x - ChipWide, ChipMax.y - 52.0f);
         DrawList->AddRectFilled(ChipMin, ChipMax, ResolveCssColour(0x0E0F12D6), 12.0f);
         Surface.Text(Faces.SemiBold, 9.5f, ChipMin.x + 12.0f, ChipMin.y + 7.0f, 1.4f,
-                     ResolveCssColour(0x7FD08AFF), "CPU SHELL", 0.9f);
-        Surface.Text(Faces.Regular, 10.5f, ChipMin.x + 12.0f, ChipMin.y + 25.0f, 1.4f,
+                     ResolveCssColour(NativeImage ? 0x7FD08AFF : 0xE8C27AFF), Backend, 0.4f);
+        Surface.Text(Faces.Regular, 10.0f, ChipMin.x + 12.0f, ChipMin.y + 25.0f, 1.4f,
                      ResolveCssColour(0xBCBCBCFF), Summary);
     }
 
@@ -940,6 +1028,12 @@ void ConstructIesMatrix(PhotometricWorkspaceState& State, const EditorTypefaces&
 
 } // namespace
 
+SceneViewportRequest BuildPhotometricPreviewRequest(const PhotometricWorkspaceState& State, float Width, float Height,
+                                                     float PixelDensity, double DeltaSeconds)
+{
+    return ConstructPhotometricPreviewRequestImpl(State, Width, Height, PixelDensity, DeltaSeconds);
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    ROOT
 //------------------------------------------------------------------------------------------------------------------------
@@ -1042,7 +1136,7 @@ void ApplyPhotometricWorkspaceLink(PhotometricWorkspaceState& State, AssetBrowse
 }
 
 void ConstructPhotometricWorkspace(PhotometricWorkspaceState& State, const EditorTypefaces& Faces, ImVec2 Size,
-                                   AssetBrowserLink* Link)
+                                   AssetBrowserLink* Link, const PhotometricViewportPresenter& Present, double DeltaSeconds)
 {
     ApplyPhotometricWorkspaceLink(State, Link);
     State.Rects.clear();
@@ -1084,7 +1178,17 @@ void ConstructPhotometricWorkspace(PhotometricWorkspaceState& State, const Edito
     // 📝 The HUD submits before the stage surface so its pills win the shared strip; the surface starts below
     //    row two so neither paints over the other.
     ConstructStageHud(State, Faces, DrawList, CentreMin, ImVec2(StageMax.x, CentreMin.y + 120.0f));
-    ConstructLightStage(State, Faces, DrawList, ImVec2(CentreMin.x, CentreMin.y + 46.0f), StageMax);
+    const ImVec2 SurfaceMin(CentreMin.x, CentreMin.y + 46.0f);
+    SceneViewportImage Preview;
+    if (Present)
+    {
+        const ImGuiViewport* Viewport = ImGui::GetWindowViewport();
+        const float Density = Viewport != nullptr ? Viewport->FramebufferScale.y : 1.0f;
+        const SceneViewportRequest Request = BuildPhotometricPreviewRequest(State, StageMax.x - SurfaceMin.x,
+                                                                                StageMax.y - SurfaceMin.y, Density, DeltaSeconds);
+        Preview = Present(Request);
+    }
+    ConstructLightStage(State, Faces, DrawList, SurfaceMin, StageMax, Preview);
     DrawList->AddRect(CentreMin, StageMax, ResolveCssColour(0xFFFFFF0E), 22.0f, ImDrawFlags_None, 1.0f);
 
     if (State.ConsoleOpen)

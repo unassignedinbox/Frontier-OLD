@@ -6,8 +6,8 @@
 //    quick tiles, pipeline, constitutive material, energy budget, adjacency bonds, impact locus, piece-SDF atlas, bake
 //    archive + TOML record), plus the celestial inspectors (Directional Sun Cycle/Optics/Coordinates/Notice, Sky
 //    Atmosphere LUT bake/optical curves/twilight/specs, cloud slab/volume/world-wind pages). Value controls edit the
-//    shell-local Spec copy, recompute the closed-form receipt, and log keyed PARAM lines. Strike, bake, export, and
-//    re-bake commands are explicit NOOPs.
+//    native Spec copy, recompute measured solver receipts, and log keyed PARAM lines. Bake and strike actions forward
+//    into the workspace's native solver/Jolt runtime; asset export remains a separate editor integration.
 
 #include "Engine/Interface/Workspaces/FractureWorkspace.h"
 
@@ -195,7 +195,7 @@ void ConstructOverviewTab(FractureWorkspaceState& State, ControlColumn& Column)
     char Budget[32]{};
     std::snprintf(Budget, sizeof(Budget), "%.0f%% SPENT", Rec.BudgetPercent);
     (void)SectionCard::Begin(Column, "OvReceipt", "Partition receipt", "StudioCheck", Budget,
-                             "01/PARTITION RECEIPT · closed-form shell estimate", State.OpenCards[FractureWorkspaceState::CardOvReceipt]);
+                             "01/PARTITION RECEIPT · native solver + Jolt", State.OpenCards[FractureWorkspaceState::CardOvReceipt]);
     {
         char Line[128]{};
         std::snprintf(Line, sizeof(Line), "%d shards · %d/%d bonds intact", Rec.FragmentCount, Rec.IntactBondCount,
@@ -238,8 +238,7 @@ void ConstructOverviewTab(FractureWorkspaceState& State, ControlColumn& Column)
         };
         const int Fired = ActionRow::Construct(Column, "OvTiles", Tiles, 4);
         if (Fired == 0 || Fired == 3) State.InspectorTab = FractureWorkspaceState::TabSdf;
-        else if (Fired == 1)
-            NoopFractureWorkspaceCommand(State, "BAKE", "Eng.Bake tile", "Bake is a NOOP in the UI shell");
+        else if (Fired == 1) (void)BakeFractureWorkspaceActive(State, "BAKE");
         else if (Fired == 2) State.InspectorTab = FractureWorkspaceState::TabBonds;
     }
 
@@ -269,8 +268,7 @@ void ConstructOverviewTab(FractureWorkspaceState& State, ControlColumn& Column)
             { "Matrix (6)", "StudioGrid", ActionTone::Default },
         };
         const int Fired = ActionRow::Construct(Column, "OvActions", Actions, 3);
-        if (Fired == 0)
-            NoopFractureWorkspaceCommand(State, "STRIKE", "Strike Mesh", "Strike is a NOOP in the UI shell");
+        if (Fired == 0) (void)StrikeFractureWorkspaceActive(State);
         else if (Fired == 1)
         {
             Cst.Spec.Seed = 1 + (Cst.Spec.Seed * 9301 + 49297) % 9999;
@@ -441,8 +439,7 @@ void ConstructSdfTab(FractureWorkspaceState& State, ControlColumn& Column)
             { "Download .fracture.toml", "StudioDownload", ActionTone::Default },
         };
         const int Fired = ActionRow::Construct(Column, "SdfActions", Actions, 2);
-        if (Fired == 0)
-            NoopFractureWorkspaceCommand(State, "BAKE", "Finalize Bake Archive", "Bake is a NOOP in the UI shell");
+        if (Fired == 0) (void)BakeFractureWorkspaceActive(State, "BAKE");
         else if (Fired == 1)
             NoopFractureWorkspaceCommand(State, "EXPORT", "Download .fracture.toml", "Export is a NOOP in the UI shell");
         char Toml[2048]{};

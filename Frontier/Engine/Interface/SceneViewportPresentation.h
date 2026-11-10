@@ -15,9 +15,22 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Frontier
 {
+
+// 📝 A compact light payload for a workspace preview. The host maps it onto the native renderer's clustered luminaire register.
+struct SceneViewportLuminaire
+{
+    uint32_t              Category = 0; // [-] GlobalIllumination::LuminaireCategory
+    std::array<double, 3> Position{};
+    std::array<double, 3> Direction{0.0, 0.0, -1.0};
+    std::array<double, 3> Colour{1.0, 1.0, 1.0};
+    std::array<double, 4> Params{};
+    double                Intensity = 0.0;
+    double                Reach = 0.0;
+};
 
 // 📝 What the Scene Viewport asks the host application to render and present each interface tick; the host owns the device
 //    and the renderer, the workspace owns the camera (orbit, pan, dolly, fly) and the level records the host reads.
@@ -31,6 +44,19 @@ struct SceneViewportRequest
     double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
     double                DeltaSeconds        = 0.0;                  // [s]
     std::array<double,3> CameraUp = {0,0,1};
+    // 📝 Photometric Studio supplies its staged luminaires here and replaces the proving-ground lamp set for this preview.
+    bool                              ReplaceLuminaires = false;
+    std::vector<SceneViewportLuminaire> Luminaires{};
+    // 📝 Optional Photometric Studio sun/sky overrides: they affect this preview only, not the level's saved records.
+    bool   OverrideSolar = false;
+    bool   SolarEnabled = true;
+    double SolarElevationDegrees = 0.0;
+    double SolarAzimuthDegrees = 0.0;
+    double SolarIlluminanceKilolux = 0.0;
+    double SolarAngularDiameterDegrees = 0.53;
+    double SolarTemperatureKelvin = 5600.0;
+    double PreviewSkyScale = 1.0;
+    double PreviewReflectionScale = 1.0;
     // 📝 GPU picking: a click on the stage asks for the record drawn under it in the image the click was made on; the readout's
     //    Pick answers the serial one interface tick later.
     uint64_t              PickSerial          = 0;                    // [-] advances with every click; 0 = nothing asked

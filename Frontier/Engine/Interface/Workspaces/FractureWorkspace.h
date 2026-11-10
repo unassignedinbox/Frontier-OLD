@@ -1,25 +1,21 @@
 /*==========================================================================================================================================
                                                              FRACTUREWORKSPACE.H
 ==========================================================================================================================================*/
-// 🧩 Fracture Workspace as a C++ UI shell: the Remastered 1:1 visuals (top bar with construct tabs, scene outliner,
-//    solid & solver preset library, viewport bar + shard stage + transport + fracture timeline, Overview / Physics /
-//    Bonds / SDF inspector, solver matrix dialog, log drawer, status bar) over local view state only. The staged
-//    FractureSpec copy mirrors the prototype's recipe fields (Experimental Remastered/FractureEditor); value controls
-//    edit that copy and log keyed PARAM lines, and nothing else. Every command that would mutate the scene or reach
-//    the engines (add-node, step, strike, bake, export, help, diagnostics, focus, maximize, preset spawn) is an
-//    explicit NOOP: it raises a toast, appends a warm log line, and changes nothing. Play/pause, speed, explode,
-//    reset, timeline scrub, tools, camera, lens, document tabs, pipeline select, matrix solver pick, and filters are
-//    silent local view state. Timecode and frame read honest frozen values; only the shard census, bond counts, SDF
-//    footprint, solar ephemeris, and receipt figures are live, because they
-//    derive from shell-local closed-form estimators. The workspace makes no engine, shader, or renderer calls; the
-//    stage shards, stress slices, and SDF bricks are static decor, honestly labelled in the viewport footer.
+// Native Fracture Studio workspace: the Remastered editor layout backed by deterministic convex fracture solvers and an
+// optional host-supplied rigid-body runtime. Bake and strike produce measured fragment/bond results; when a runtime is
+// present, shards become Jolt convex bodies that can be stepped, inspected, and reassembled in an isolated scene. The
+// stage projects actual fragment hulls and, when its active recipe matches, live runtime poses. Host-only services such
+// as archive export and help remain explicit integration points.
 
 #pragma once
 
 #include "Frontier/Engine/Interface/Workspaces/AssetBrowserWorkspace.h"
+#include "Frontier/Engine/Fracture/FractureStudioRuntime.h"
 
 #include <imgui.h>
 
+#include <array>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <string>
@@ -81,7 +77,7 @@ struct FractureWorkspacePreset
 //                                                    RECIPE & RECEIPT
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 Shell-local mirror of the prototype's fracture Spec (units in comments match the control unit map).
+// 📝 Native recipe state mirrors the prototype's fracture Spec (units match the control unit map).
 struct FractureSpec
 {
     int    Solver = 1; // 🧩 Index into the solver catalogue.
@@ -98,7 +94,7 @@ struct FractureSpec
     double ImpactNormal[3] = { 0.0, 0.0, -1.0 };
 };
 
-// 📝 Closed-form partition receipt: deterministic in (Spec, material, nucleus count), no engine calls.
+// Measured partition receipt from the deterministic native solver; computed lazily for the selected construct.
 struct FractureReceipt
 {
     int    FragmentCount   = 0;
@@ -137,10 +133,13 @@ struct FractureWorkspaceConstruct
     bool        BakedResident = false;
     int         PrimaryNucleusCells = 0;
     FractureSpec Spec;
-    FractureReceipt Receipt; // 🧩 Recomputed from Spec whenever the recipe edits.
+    FractureReceipt Receipt; // 🧩 Derived from the native solver's measured partition, never an estimator.
+    Fracture::Result NativeResult;
+    bool NativeResultValid = false;
 };
 
 void RecomputeFractureReceipt(FractureWorkspaceConstruct& Construct) noexcept;
+void ApplyFractureSolverResult(FractureWorkspaceConstruct& Construct, const Fracture::Result& Result) noexcept;
 [[nodiscard]] double QueryFractureSdfMegabytes(int FragmentCount, int Resolution, bool Enabled) noexcept;
 
 struct FractureWorkspaceLogEntry
@@ -288,6 +287,9 @@ struct FractureWorkspaceState
 
     FractureWorkspaceConstruct Constructs[7];
     int                        ActiveConstruct = 0;
+    bool                       CubeComparisonOpen = true;
+    bool                       CubeComparisonReady = false;
+    std::array<Fracture::Result, 6> CubeComparisonResults{};
 
     FractureSunParams   Sun;
     FractureSunSolved   SunSolved;
@@ -306,6 +308,7 @@ struct FractureWorkspaceState
 
     bool MatrixOpen = false;
     bool LogOpen    = false;
+    bool LeaveRequested = false;
 
     enum
     {
@@ -338,8 +341,14 @@ struct FractureWorkspaceState
     std::string OutlinerQuery;
     int         OutlinerFilter = FilterAll;
 
-    bool StrikeNoopRaised = false; // 🧩 Latched by validation: Strike/Bake stay explicit NOOPs.
-    bool BakeNoopRaised   = false;
+    Fracture::IFractureStudioRuntime* Runtime = nullptr; // 🧩 Non-owning Jolt-backed runtime supplied by the host.
+    int RuntimeConstructIndex = -1;
+    uint64_t RuntimeRecipeHash = 0;
+    double FrameDeltaSeconds = 1.0 / 60.0;
+    bool StrikeExecuted = false;
+    bool BakeExecuted = false;
+    bool PhysicsStepExecuted = false;
+    std::string RuntimeDiagnostic;
 
     std::deque<FractureWorkspaceLogEntry> Log;
     std::map<std::string, ImVec4>         Rects; // 🧩 Named hit rects refreshed every frame for scripted validation.
@@ -357,7 +366,12 @@ void        EncodeFractureToml(const FractureWorkspaceState& State, int Construc
 
 void ApplyFractureWorkspaceLink(FractureWorkspaceState& State, AssetBrowserLink* Link); // 🧩 fracture[-mat|-solver]/<id>.
 void ConstructFractureWorkspace(FractureWorkspaceState& State, const EditorTypefaces& Faces, ImVec2 Size,
-                                AssetBrowserLink* Link = nullptr);
+                                AssetBrowserLink* Link = nullptr,
+                                Fracture::IFractureStudioRuntime* Runtime = nullptr,
+                                double DeltaSeconds = 1.0 / 60.0);
+[[nodiscard]] bool BakeFractureWorkspaceActive(FractureWorkspaceState& State, const char* Channel = "BAKE");
+[[nodiscard]] bool StrikeFractureWorkspaceActive(FractureWorkspaceState& State);
+void ReassembleFractureWorkspaceActive(FractureWorkspaceState& State);
 
 class ControlColumn;
 void ConstructFractureWorkspaceInspector(FractureWorkspaceState& State, const EditorTypefaces& Faces, ControlColumn& Column);

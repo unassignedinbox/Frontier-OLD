@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <unordered_map>
 
@@ -223,10 +224,12 @@ JoltSubstrate::JoltSubstrate(const PhysicsSpaceSettings& Settings)
     : Detail(std::make_unique<Implementation>(Settings.Workers))
 {
     const JPH::uint Bodies = std::max<JPH::uint>(16, Settings.MaximumBodies);
+    const JPH::uint BodyPairCapacity = std::max<JPH::uint>(4096, Bodies);
+    const JPH::uint ContactCapacity = std::max<JPH::uint>(4096, Bodies);
     Detail->Solver.Init(Bodies,
                         0,
-                        Bodies,
-                        Bodies,
+                        BodyPairCapacity,
+                        ContactCapacity,
                         Detail->Backend.QueryLayers(),
                         Detail->Backend.QueryLayerFilter(),
                         Detail->Backend.QueryPairFilter());
@@ -313,10 +316,16 @@ void JoltSubstrate::Step(double DeltaSeconds, uint32_t CollisionSteps)
     Detail->Contacts.CurrentTimeSeconds.store(
         Detail->Contacts.CurrentTimeSeconds.load(std::memory_order_relaxed) + DeltaSeconds,
         std::memory_order_relaxed);
-    (void)Detail->Solver.Update(static_cast<float>(DeltaSeconds),
-                                static_cast<int>(std::max(1u, CollisionSteps)),
-                                &Detail->Backend.AccessTemporary(),
-                                &Detail->Backend.AccessJobs());
+    const JPH::EPhysicsUpdateError Errors = Detail->Solver.Update(static_cast<float>(DeltaSeconds),
+                                                                   static_cast<int>(std::max(1u, CollisionSteps)),
+                                                                   &Detail->Backend.AccessTemporary(),
+                                                                   &Detail->Backend.AccessJobs());
+    if (Errors != JPH::EPhysicsUpdateError::None)
+    {
+        std::fprintf(stderr, "Jolt physics update error flags: 0x%x (bodies=%zu, steps=%u, dt=%.6f)\n",
+                     static_cast<unsigned>(Errors), Detail->Bodies.size(), CollisionSteps, DeltaSeconds);
+        std::fflush(stderr);
+    }
 }
 
 PhysicsBodyReading JoltSubstrate::ReadBody(uint32_t Index) const

@@ -102,6 +102,8 @@ struct RefreshInputs
     EnvironmentSettings*     Environment    = nullptr;
     double                   CelestialDelta = 0.0;    // [s] elapsed since the previous refresh, for DayAnimate
     bool                     LuminairesLive = false;
+    std::vector<LuminaireProfile> ReplacementLuminaires{}; // [-] optional workspace rig, replaces the proving-ground fixtures.
+    bool                     ReplaceLuminaires = false;
     std::optional<Transform> VehicleTransform{};      // [-] body transform when a vehicle carries beams
 };
 

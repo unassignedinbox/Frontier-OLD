@@ -7,18 +7,20 @@
 //    the prototype's rig fields (Experimental Remastered/PhotometricEditor); value controls edit those copies and
 //    log keyed PARAM lines. Loading .ies parses a bounded LM-63 Type-C TILT=NONE profile into workspace-local
 //    memory, assigns it to an IES light, draws measured C0/C90 curves, and updates the shell wall-lux estimate; it
-//    does not mutate scene data or persist. Duplicate/delete luminaire, export .ies, export rig, and cross-studio
-//    suite links remain explicit NOOPs. The workspace makes no engine, shader, or renderer calls; stage markers,
-//    cones, and polar webs are static decor, honestly labelled in the viewport corner.
+//    does not mutate scene data or persist. The stage can submit the staged luminaire rig to the host Scene Viewport, which
+//    renders it through the native ReSTIR GI renderer; local markers remain editor overlays, not rendered lighting evidence.
+//    Duplicate/delete luminaire, export .ies, export rig, and cross-studio suite links remain explicit NOOPs.
 
 #pragma once
 
 #include "Frontier/Engine/Interface/Workspaces/AssetBrowserWorkspace.h"
+#include "Frontier/Engine/Interface/SceneViewportPresentation.h"
 #include "Frontier/Engine/Photometry/PhotometricIes.h"
 
 #include <imgui.h>
 
 #include <deque>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -351,8 +353,13 @@ void        RecordPhotometricWorkspaceRect(PhotometricWorkspaceState& State, con
                                                 ImVec2& Max) noexcept;
 
 void ApplyPhotometricWorkspaceLink(PhotometricWorkspaceState& State, AssetBrowserLink* Link); // 🧩 photo-<group>/<id>.
+using PhotometricViewportPresenter = std::function<SceneViewportImage(const SceneViewportRequest&)>;
+[[nodiscard]] SceneViewportRequest BuildPhotometricPreviewRequest(const PhotometricWorkspaceState& State, float Width, float Height,
+                                                                 float PixelDensity = 1.0f, double DeltaSeconds = 1.0 / 60.0);
+
 void ConstructPhotometricWorkspace(PhotometricWorkspaceState& State, const EditorTypefaces& Faces, ImVec2 Size,
-                                   AssetBrowserLink* Link = nullptr);
+                                   AssetBrowserLink* Link = nullptr, const PhotometricViewportPresenter& Present = {},
+                                   double DeltaSeconds = 1.0 / 60.0);
 
 class ControlColumn;
 void ConstructPhotometricWorkspaceInspector(PhotometricWorkspaceState& State, const EditorTypefaces& Faces,

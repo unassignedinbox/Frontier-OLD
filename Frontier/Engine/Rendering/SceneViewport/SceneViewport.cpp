@@ -218,7 +218,8 @@ void SceneViewport::ResolveSky(const SceneEnvironment& S)
 }
 
 bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment& Environment, const ViewportRendering& Rendering, double DeltaSeconds,
-                            std::array<uint32_t, 2> ScreenExtent, std::string* OutDiagnostic)
+                            std::array<uint32_t, 2> ScreenExtent, std::string* OutDiagnostic,
+                            const std::vector<LuminaireProfile>* ReplacementLuminaires)
 {
     if (!Host_) return false;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
@@ -312,6 +313,8 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
     Inputs.LuminairesLive          = true;
+    Inputs.ReplaceLuminaires       = ReplacementLuminaires != nullptr;
+    if (ReplacementLuminaires != nullptr) Inputs.ReplacementLuminaires = *ReplacementLuminaires;
     if (ToggleAdjustment) ToggleAdjustment(Inputs.Toggles);
     LastToggles_ = Inputs.Toggles;
 

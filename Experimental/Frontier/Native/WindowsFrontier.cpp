@@ -14,10 +14,13 @@
 #include "Engine/Interface/WindowsApplication.h"
 #include "Engine/Interface/VulkanPresentation.h"
 #include "Engine/Interface/IconPresentation.h"
+#include "Engine/Interface/ThumbnailAtlasCache.h"
 #include "Engine/Render/BrowserPreviewRendering.h"
 #include "UI/Editor/ControlCentrePanel.h"
 #include "UI/Editor/EditorWorkspace.h"
 #include "UI/Editor/ProjectBrowserPanel.h"
+#include "UI/Editor/TextureWorkspaceHost.h"
+#include "UI/Editor/TextureWorkspaceHostVulkan.h"
 #include "EverestWorkspace.h"
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
 #include "Frontier/Extensions/Particle/ParticleExtension.h"
@@ -148,51 +151,9 @@ std::filesystem::path ChooseCreationPath(GLFWwindow *Window, Frontier::BrowserCr
     return std::filesystem::path{};
 }
 
-// 📝 CommandLineToArgvW quoting: backslashes double only before a quote, so "C:\" survives as one argument.
-std::wstring QuoteCommandWord(const std::wstring &Word)
-{
-    std::wstring Quoted = L"\"";
-    size_t Backslashes = 0;
-    for (const wchar_t Letter : Word)
-    {
-        if (Letter == L'\\') { ++Backslashes; continue; }
-        Quoted.append(Letter == L'"' ? Backslashes * 2 + 1 : Backslashes, L'\\');
-        Backslashes = 0;
-        Quoted.push_back(Letter);
-    }
-    Quoted.append(Backslashes * 2, L'\\');
-    return Quoted + L"\"";
-}
-
-// 📝 TextureWorkspace.exe beside Frontier.exe, started on one material library folder (`--library <folder>`). The working
-//    directory is inherited, so it resolves EngineContent exactly like the browser.
-bool LaunchTextureWorkspace(const std::filesystem::path &Folder, std::string &Refusal)
-{
-    wchar_t Executable[MAX_PATH] = {};
-    const DWORD Length = GetModuleFileNameW(nullptr, Executable, MAX_PATH);
-    const std::filesystem::path Workspace = Length && Length < MAX_PATH
-        ? std::filesystem::path(Executable).parent_path() / L"TextureWorkspace.exe" : std::filesystem::path{};
-    std::error_code Failure;
-    if (Workspace.empty() || !std::filesystem::is_regular_file(Workspace, Failure))
-    {
-        Refusal = "TextureWorkspace.exe was not found next to Frontier.exe.";
-        return false;
-    }
-    std::wstring CommandLine = QuoteCommandWord(Workspace.wstring()) + L" --library " + QuoteCommandWord(Folder.wstring());
-    STARTUPINFOW Startup{};
-    PROCESS_INFORMATION Started{};
-    Startup.cb = sizeof(Startup);
-    if (!CreateProcessW(Workspace.c_str(), CommandLine.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &Startup,
-            &Started))
-    {
-        Refusal = "TextureWorkspace.exe could not be started (Windows error " + std::to_string(GetLastError()) + ").";
-        return false;
-    }
-    CloseHandle(Started.hThread);
-    CloseHandle(Started.hProcess);
-    Frontier::DiagnosticJournal::Append("TextureWorkspace", "library=" + Frontier::DiagnosticJournal::EncodePath(Folder));
-    return true;
-}
+// 📝 The Texture workspace opens in-process now (TextureWorkspaceHost, requested through the browser's
+//    LaunchTextureWorkspace hook and activated on the next ConfigurePlatform frame boundary). The
+//    TextureWorkspace.exe child process this replaced is gone; standalone TextureWorkspace.exe still ships.
 
 // 📝 `Frontier.exe <project>.projectspace` (or a project dropped on Frontier.exe) opens that project instead of the browser.
 std::filesystem::path ResolveLaunchProject()
@@ -275,6 +236,17 @@ int main()
     GLFWwindow *Window = nullptr;
     std::filesystem::path Preferences;
     bool ReturnRequested = false;
+    Frontier::TextureWorkspaceHost TextureHost;
+    std::unique_ptr<Frontier::TextureWorkspaceBackend> TextureBackend;
+    std::filesystem::path TextureRequestedFolder;
+    bool TextureRequestPending = false;
+    bool TextureReturnRequested = false;
+    const auto PersistTextureLayout = [&]()
+    {
+        std::string TextureLayoutMessage;
+        if (!TextureHost.PersistLayout(TextureLayoutMessage))
+            Frontier::DiagnosticJournal::Append("TextureWorkspaceLayout", TextureLayoutMessage);
+    };
     std::filesystem::path LaunchProject = ResolveLaunchProject();
 #ifdef FRONTIER_SOLIDARC_ENABLED
     // 📝 Open by file type: a .solidarc given to Frontier.exe (a drop on its icon, or Frontier picked in "Open with") belongs to
@@ -309,7 +281,18 @@ int main()
         Browser->PickImportFiles = [&]() { return ChooseImportFiles(Window); };
         Browser->PickImportFolder = [&]() { return ChooseImportFolder(Window); };
         Browser->PickCreationPath = [&](Frontier::BrowserCreation Creation) { return ChooseCreationPath(Window, Creation); };
-        Browser->LaunchTextureWorkspace = LaunchTextureWorkspace;
+        Browser->LaunchTextureWorkspace = [&](const std::filesystem::path &Folder, std::string &Refusal)
+        {
+            std::error_code Status;
+            if (Folder.empty() || !std::filesystem::exists(Folder, Status) || Status)
+            {
+                Refusal = "The texture library folder could not be found.";
+                return false;
+            }
+            TextureRequestedFolder = Folder;
+            TextureRequestPending = true;
+            return true;
+        };
         std::filesystem::path EverestProjectPath = "Projects/Everest/Everest.projectspace";
         if (!std::filesystem::exists(EverestProjectPath))
         {
@@ -438,8 +421,21 @@ int main()
                     PreviewRendering->ConstructCommands(Commands, Completed, Serial);
                 }
                 catch (const std::exception &Failure) { NoteFailure("ConstructCommands", Failure); }
+                if (TextureHost.IsOpen())
+                {
+                    try { TextureHost.ConstructWorkspaceCommands(Commands, Completed, Serial); }
+                    catch (const std::exception &Failure)
+                    {
+                        Frontier::DiagnosticJournal::Append("TextureWorkspaceRefused",
+                            std::string("ConstructCommands: ") + Failure.what());
+                    }
+                }
             },
-            [&]() { PreviewRendering->ConfirmSubmission(); });
+            [&]()
+            {
+                PreviewRendering->ConfirmSubmission();
+                if (TextureHost.IsOpen()) TextureHost.ConfirmWorkspaceSubmission();
+            });
         Frontier::DiagnosticJournal::Append("Startup", "Browser preview rendering initialized");
     };
     const auto ActivateProject = [&](const std::filesystem::path &Requested)
@@ -582,6 +578,7 @@ int main()
     {
         if (EverestSpace) EverestSpace->QueryDockspace().RecoverPlatformWindows();
         if (Workspace) Workspace->QueryPanels().RecoverPlatformWindows();
+        if (TextureHost.IsOpen()) TextureHost.RecoverPlatformWindows();
     };
     Callbacks.ConfigurePlatform = [&]()
     {
@@ -611,8 +608,72 @@ int main()
             glfwSetWindowTitle(Window, Callbacks.Title.c_str());
             Frontier::DiagnosticJournal::Append("ProjectSelection", "Returned to the Project Browser");
         }
+        if (TextureRequestPending)
+        {
+            TextureRequestPending = false;
+            const std::filesystem::path Folder = std::exchange(TextureRequestedFolder, std::filesystem::path{});
+            std::string Refusal;
+            bool Ready = TextureHost.Open(Folder, &Refusal);
+            if (Ready && !Presentation)
+            {
+                Ready = false;
+                Refusal = "The Vulkan presentation device is unavailable.";
+            }
+            if (Ready)
+            {
+                Frontier::TextureWorkspaceBackendPaths Paths;
+                Paths.ShaderDirectory = ResolveBesideExecutable("EngineContent/ShaderArchives/Surface");
+                Paths.EnvironmentDirectory = ResolveBesideExecutable("EngineContent/EnvironmentArchives");
+                Paths.AtlasCacheFile = Frontier::QueryFrontierCacheDirectory() / "MaterialAtlas.atlas";
+                try { TextureBackend = Frontier::ConstructTextureWorkspaceBackend(Presentation->QueryRasterAccess(), std::move(Paths)); }
+                catch (const std::exception &Failure) { Ready = false; Refusal = Failure.what(); }
+                catch (...) { Ready = false; Refusal = "The texture workspace backend failed to construct."; }
+                if (Ready && !TextureHost.AttachBackend(TextureBackend.get()))
+                {
+                    Ready = false;
+                    Refusal = TextureHost.QueryDiagnostic();
+                    TextureBackend.reset();
+                }
+            }
+            if (Ready)
+            {
+                TextureHost.ConfigureNavigation([&](Frontier::PlanePoint Displacement)
+                {
+                    return Appearance->QueryInput().QueryApplied().EvaluatePointerDelta(Displacement);
+                });
+                TextureHost.ConfigureControlCentre(Appearance);
+                std::string TextureLayoutDiagnostic;
+                if (!TextureHost.RestoreLayout(TextureLayoutDiagnostic))
+                    Frontier::DiagnosticJournal::Append("TextureWorkspaceLayout", TextureLayoutDiagnostic);
+                glfwSetWindowTitle(Window,
+                    ("Frontier - Texture Studio - " + Frontier::DiagnosticJournal::EncodePath(Folder.filename())).c_str());
+                Frontier::DiagnosticJournal::Append("TextureWorkspace",
+                    "library=" + Frontier::DiagnosticJournal::EncodePath(Folder));
+            }
+            else
+            {
+                TextureHost.Close();
+                TextureBackend.reset();
+                Frontier::DiagnosticJournal::Append("TextureWorkspaceRefused",
+                    Refusal.empty() ? "The texture library could not be opened." : Refusal);
+            }
+        }
+        if (TextureReturnRequested)
+        {
+            TextureReturnRequested = false;
+            if (TextureHost.IsOpen())
+            {
+                PersistTextureLayout();
+                TextureHost.Close();
+                TextureBackend.reset();
+                Browser->ResetSelection();
+                glfwSetWindowTitle(Window, Callbacks.Title.c_str());
+                Frontier::DiagnosticJournal::Append("ProjectSelection", "Returned to the Project Browser");
+            }
+        }
         if (EverestSpace) (void)EverestSpace->ConfigurePlatform();
         if (Workspace) (void)Workspace->ConfigurePlatform();
+        if (TextureHost.IsOpen()) TextureHost.ConfigurePlatform();
     };
     Callbacks.ConstructInterface = [&](bool MainVisible)
     {
@@ -626,6 +687,14 @@ int main()
         {
             (void)Appearance->Integrate(ImGui::GetIO().DeltaTime);
             Workspace->ConstructInterface();
+            if (MainVisible) Appearance->ConstructInterface();
+        }
+        else if (TextureHost.IsOpen())
+        {
+            (void)Appearance->Integrate(ImGui::GetIO().DeltaTime);
+            TextureHost.ConfigureInterfaceScale(Appearance->QueryAppearance().QueryApplied().InterfaceScale / 100.f);
+            TextureHost.Synchronize();
+            if (TextureHost.ConsumeCloseRequest()) TextureReturnRequested = true;
             if (MainVisible) Appearance->ConstructInterface();
         }
         else if (MainVisible)
@@ -649,6 +718,12 @@ int main()
         RetireSceneView();
         EverestSpace.reset();
         Workspace.reset();
+        if (TextureHost.IsOpen())
+        {
+            PersistTextureLayout();
+            TextureHost.Close();
+        }
+        TextureBackend.reset();
         Browser.reset();
         AppearanceOwnership.reset();
         Frontier::DiagnosticJournal::Append("Shutdown", "Frontier application resources reclaimed");

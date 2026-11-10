@@ -423,7 +423,8 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         if (!RelocatedOccupants.empty() || !SettlingOccupants.empty()) SettleRelocatedOccupants();
         if (Inputs->LuminairesLive)
         {
-            const std::vector<uint8_t> Packed = Luminaires.Update(Inputs->VehicleTransform, StreetLampPoles, PointLampPosts);
+            const std::vector<LuminaireProfile>* Replacement = Inputs->ReplaceLuminaires ? &Inputs->ReplacementLuminaires : nullptr;
+            const std::vector<uint8_t> Packed = Luminaires.Update(Inputs->VehicleTransform, StreetLampPoles, PointLampPosts, std::nullopt, Replacement);
             Exchange.WriteRegion(LuminaireRegion, 0, Packed.data(), Packed.size());
         }
     }

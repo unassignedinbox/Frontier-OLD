@@ -22,6 +22,8 @@
 namespace Frontier::GlobalIllumination
 {
 
+struct LuminaireProfile;
+
 struct SceneViewportConfiguration
 {
     std::filesystem::path GlobalIlluminationShaders{};   // [-] EngineContent/ShaderArchives/GlobalIllumination
@@ -107,7 +109,8 @@ class SceneViewport
     // 📝 One refresh at ScreenExtent (the screen targets follow a changed extent). The presented image is complete when this
     //    returns; the last submission ends with a full dependency, so later submissions on the queue may sample it.
     bool Refresh(const ViewportCamera& Camera, const SceneEnvironment& Environment, const ViewportRendering& Rendering, double DeltaSeconds,
-                 std::array<uint32_t, 2> ScreenExtent, std::string* OutDiagnostic = nullptr);
+                 std::array<uint32_t, 2> ScreenExtent, std::string* OutDiagnostic = nullptr,
+                 const std::vector<LuminaireProfile>* ReplacementLuminaires = nullptr);
 
     // 📝 UNORM view of the sRGB-encoded presented image (VK_IMAGE_LAYOUT_GENERAL): display it without further conversion.
     [[nodiscard]] VkImageView QueryPresentedView() const noexcept;

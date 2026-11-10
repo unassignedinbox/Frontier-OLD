@@ -1,17 +1,18 @@
-// Fracture workspace validation: the U4 UI shell (top bar, construct tabs, scene outliner, preset library,
-// viewport bar, shard stage, transport, fracture timeline, Overview / Physics / Bonds / SDF inspector, celestial
-// inspectors, solver matrix, log drawer, status bar) with scripted pointer interaction and PPM evidence per tab.
-// Value controls hold shell-local figures and log PARAM lines; engine-bound commands raise NOOP toasts and warm
-// log lines and change nothing.
+// Fracture Studio validation: native solver geometry, Jolt fragment bodies, scripted workspace interactions, and
+// PPM evidence for the Overview / Physics / Bonds / SDF tabs.
 
 #include "Frontier/Engine/Interface/Workspaces/FractureWorkspace.h"
 #include "Frontier/Engine/Interface/Controls/Toast.h"
 #include "Frontier/Engine/Interface/InspectorControls.h"
+#include "Frontier/Extensions/Physics/FractureStudioRuntime.h"
 #include "Engine/Interface/TypefaceRegistry.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 
 #include <imgui.h>
+#include <Jolt/Jolt.h>
+#include <Jolt/Core/IssueReporting.h>
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -22,9 +23,117 @@
 namespace
 {
 
+bool ReportJoltAssertion(const char* Expression, const char* Message, const char* File, JPH::uint Line)
+{
+    std::fprintf(stderr, "Jolt assertion: %s%s%s (%s:%u)\n", Expression,
+                 Message != nullptr ? " — " : "", Message != nullptr ? Message : "", File, Line);
+    std::fflush(stderr);
+    return false;
+}
+
 void Confirm(bool Condition, const char* Description)
 {
     if (!Condition) throw std::runtime_error(Description);
+}
+
+void CheckNativeSolvers()
+{
+    using namespace Frontier::Fracture;
+    const Polyhedron Base = ConstructSolid(SolidKind::Monolith, { 1.0, 1.0, 1.0 }, 42);
+    const Material Concrete = ResolveMaterial(MaterialKind::Concrete);
+    const std::array<SolidKind, 8> Solids = { SolidKind::Monolith, SolidKind::CurtainPane, SolidKind::TimberBeam,
+                                              SolidKind::Boulder, SolidKind::Cube, SolidKind::Cylinder,
+                                              SolidKind::Cone, SolidKind::HollowCore };
+    for (SolidKind Kind : Solids)
+    {
+        const Polyhedron Source = ConstructSolid(Kind, { 1.0, 1.0, 1.0 }, 42);
+        const Metrics Shape = EvaluateMetrics(Source);
+        Confirm(Source.Vertices.size() >= 4 && !Source.Faces.empty() && Shape.Volume > 1.0e-5,
+                "A native source-solid constructor produced no positive-volume closed shape");
+    }
+
+    for (int SolverIndex = 0; SolverIndex < 6; ++SolverIndex)
+    {
+        Request Specification;
+        Specification.Algorithm = static_cast<Solver>(SolverIndex);
+        Specification.EnergyJoules = 4600.0;
+        Specification.Seed = 42;
+        Specification.FragmentCeiling = 24;
+        Specification.MinimumPieceSizeMetres = 0.04;
+        Result Partition = Execute(Base, Specification, Concrete);
+        Confirm(Partition.Success, "A native fracture solver failed its geometry checks");
+        Confirm(Partition.Fragments.size() > 1 && Partition.Fragments.size() <= Specification.FragmentCeiling,
+                "A native solver returned a fragment count outside its ceiling");
+        Confirm(Partition.VolumeDriftRatio < 1.0e-4 && Partition.WatertightManifold,
+                "A native solver failed volume conservation or closed-manifold validation");
+        Confirm(Partition.TotalCrackAreaM2 > 0.0 && Partition.ComputeMilliseconds >= 0.0,
+                "A native solver returned missing crack-area or timing measurements");
+        for (const Fragment& Piece : Partition.Fragments)
+            Confirm(Piece.Shape.Vertices.size() >= 4 && Piece.ShapeMetrics.Volume > 0.0 && Piece.MassKg > 0.0,
+                    "A native solver emitted a degenerate shard");
+        for (const Bond& Bond : Partition.Bonds)
+            Confirm(Bond.FragmentA < Partition.Fragments.size() && Bond.FragmentB < Partition.Fragments.size(),
+                    "A native solver emitted a bond with an invalid fragment index");
+    }
+}
+
+void CheckJoltRuntime(Frontier::FractureStudioRuntime& Runtime)
+{
+    using namespace Frontier::Fracture;
+    const Polyhedron Base = ConstructSolid(SolidKind::Monolith, { 1.0, 1.0, 1.0 }, 42);
+    Request Specification;
+    Specification.Algorithm = Solver::RuntimeBoussinesq;
+    Specification.EnergyJoules = 4600.0;
+    Specification.Seed = 42;
+    Specification.FragmentCeiling = 24;
+    Specification.MinimumPieceSizeMetres = 0.04;
+    const Material Concrete = ResolveMaterial(MaterialKind::Concrete);
+    std::string Diagnostic;
+    if (!Runtime.Bake(Base, Specification, Concrete, &Diagnostic))
+        throw std::runtime_error("Jolt fracture bake failed: " + Diagnostic);
+    Confirm(Runtime.QueryPhysicsReady(), "Jolt did not publish a ready fracture world");
+    Confirm(Runtime.QueryResult().Success && Runtime.QueryFragmentBodyCount() == Runtime.QueryResult().Fragments.size(),
+            "The Jolt body roster did not match the native fracture result");
+    const Frontier::PhysicsSpace* Space = Runtime.QueryPhysicsSpace();
+    Confirm(Space != nullptr && Space->QueryBodyCount() == Runtime.QueryFragmentBodyCount() + 1,
+            "The Jolt world is missing shard bodies or its temporary ground body");
+    Confirm(Space->QuerySettings().GravityMps2[1] < -9.0,
+            "The Studio runtime did not preserve the reference Y-up gravity convention");
+    Confirm(Space->QueryDescriptor(0).Shape == Frontier::PhysicsShape::ConvexHull,
+            "A generated shard was not installed as a Jolt convex hull");
+    Confirm(Space->QueryDescriptor(static_cast<uint32_t>(Runtime.QueryFragmentBodyCount())).Shape == Frontier::PhysicsShape::Box,
+            "The isolated runtime ground plane was not installed");
+    bool HasImpactVelocity = false;
+    for (const Fragment& Piece : Runtime.QueryResult().Fragments)
+    {
+        const double Speed = std::sqrt(Piece.InitialVelocityMps[0] * Piece.InitialVelocityMps[0] +
+                                       Piece.InitialVelocityMps[1] * Piece.InitialVelocityMps[1] +
+                                       Piece.InitialVelocityMps[2] * Piece.InitialVelocityMps[2]);
+        HasImpactVelocity = HasImpactVelocity || Speed > 0.01;
+    }
+    Confirm(HasImpactVelocity, "Native impact energy did not produce shard ejection velocities");
+    BodyPose PoseBeforeStep;
+    Confirm(Runtime.QueryFragmentBody(0, PoseBeforeStep), "The first Jolt shard pose could not be queried");
+    Runtime.Step(1.0 / 30.0, 2);
+    Confirm(Runtime.QuerySimulatedSeconds() >= 1.0 / 30.0 - 1.0e-9,
+            "Jolt did not advance the fracture scene by the requested step");
+    BodyPose PoseAfterStep;
+    Confirm(Runtime.QueryFragmentBody(0, PoseAfterStep), "The stepped Jolt shard pose could not be queried");
+    Confirm(std::isfinite(PoseAfterStep.PositionMetres[0]) && std::isfinite(PoseAfterStep.PositionMetres[1]) &&
+                std::isfinite(PoseAfterStep.PositionMetres[2]),
+            "Jolt produced a non-finite shard pose");
+
+    const Vec3 StrikePoint{ -0.20, 0.18, 0.48 };
+    const Vec3 StrikeNormal{ 0.0, 0.0, -1.0 };
+    if (!Runtime.Strike(StrikePoint, StrikeNormal, 5200.0, &Diagnostic))
+        throw std::runtime_error("Jolt fracture strike failed: " + Diagnostic);
+    Confirm(Runtime.QueryResult().Success && Runtime.QueryFragmentBodyCount() > 1,
+            "A runtime strike did not recompute and release convex shards");
+    if (!Runtime.Reassemble(&Diagnostic))
+        throw std::runtime_error("Jolt fracture reassembly failed: " + Diagnostic);
+    Confirm(Runtime.QueryResult().Success && Runtime.QueryResult().Fragments.size() == 1 &&
+                Runtime.QueryFragmentBodyCount() == 1 && Runtime.QueryPhysicsSpace()->QueryBodyCount() == 2,
+            "Reassembly did not replace the shard world with one intact body and the ground plane");
 }
 
 } // namespace
@@ -34,6 +143,10 @@ int main(int ArgumentCount, char** Arguments)
     using namespace Frontier;
     try
     {
+#ifdef JPH_ENABLE_ASSERTS
+        JPH::AssertFailed = &ReportJoltAssertion;
+#endif
+        CheckNativeSolvers();
         ImGui::CreateContext();
         ImGui::StyleColorsDark();
         ImGuiIO& IO = ImGui::GetIO();
@@ -53,12 +166,14 @@ int main(int ArgumentCount, char** Arguments)
         const EditorTypefaces Faces = EditorTypefaces::Resolve();
         FractureWorkspaceState State{};
         ConstructFractureWorkspaceState(State);
+        FractureStudioRuntime Runtime;
+        CheckJoltRuntime(Runtime);
         AssetBrowserLink Link{};
 
         const auto Frame = [&]()
         {
             ImGui::NewFrame();
-            ConstructFractureWorkspace(State, Faces, IO.DisplaySize, &Link);
+            ConstructFractureWorkspace(State, Faces, IO.DisplaySize, &Link, &Runtime, IO.DeltaTime);
             ImGui::Render();
         };
         const auto RectCentre = [&](const char* Name)
@@ -100,18 +215,35 @@ int main(int ArgumentCount, char** Arguments)
         Confirm(State.Log.front().Channel == "WORKSPACE", "The boot line missed its WORKSPACE channel");
         {
             const FractureReceipt& Rec = State.Constructs[0].Receipt;
-            Confirm(Rec.FragmentCount >= 1 && Rec.FragmentCount <= 32, "The monolith receipt missed its ceiling");
+            Confirm(Rec.FragmentCount == 32, "Native Engineering FEM diverged from the reference monolith fragment count");
             Confirm(Rec.VolumeDriftRatio <= 1.0e-3, "The monolith drift exceeded its bound");
             Confirm(Rec.WatertightManifold, "The monolith missed its watertight manifold");
             Confirm(Rec.BudgetPercent >= 0.0 && Rec.BudgetPercent <= 100.0, "The monolith budget left 0–100");
-            Confirm(Rec.TotalCrackArea >= 0.5 && Rec.TotalCrackArea <= 14.5, "The monolith crack area left its band");
+            Confirm(std::isfinite(Rec.TotalCrackArea) && std::abs(Rec.TotalCrackArea - 9.64874271838099) < 1.0e-6,
+                    "Native Engineering FEM diverged from the reference monolith crack area");
             Confirm(Rec.IntactBondCount <= Rec.BondCount, "Intact bonds exceeded total bonds");
             Confirm(State.SunSolved.ElevationDeg > 20.0 && State.SunSolved.ElevationDeg < 45.0,
                     "The solar elevation left its afternoon band");
             Confirm(State.SunSolved.AirMass > 1.0 && State.SunSolved.AirMass < 3.0, "The air mass left its band");
         }
 
-        // 2. Outliner: constructs and celestials select silently and reset to Overview.
+        // 2. Side-by-side cube showcase: every native solver cuts the same cube, and selecting a tile loads that solver on the cube construct.
+        Confirm(State.CubeComparisonOpen && State.CubeComparisonReady,
+                "The workspace did not open directly into its cached cube solver comparison");
+        for (int Solver = 0; Solver < 6; ++Solver)
+        {
+            const Fracture::Result& Compared = State.CubeComparisonResults[Solver];
+            Confirm(Compared.Success && Compared.Fragments.size() >= 2,
+                    "A native solver failed to produce a fracture result in the cube comparison");
+        }
+        Click("CubeCompare/Griffith");
+        Confirm(!State.CubeComparisonOpen && State.ActiveConstruct == 5 && State.Selected == 5,
+                "Selecting a cube comparison tile did not transition to the cube construct");
+        Confirm(State.Constructs[5].Spec.Solver == 2, "The Griffith comparison tile did not load the Griffith solver");
+        Click("Outliner/Row0");
+        Confirm(State.ActiveConstruct == 0, "The cube comparison did not return to the monolith construct");
+
+        // 3. Outliner: constructs and celestials select silently and reset to Overview.
         Click("Outliner/Row1");
         Confirm(State.Selected == 1, "Clicking the glazing did not select it");
         Confirm(State.ActiveConstruct == 1, "Clicking the glazing did not activate it");
@@ -137,7 +269,7 @@ int main(int ArgumentCount, char** Arguments)
             Confirm(State.Constructs[0].BakedResident, "The monolith eye did not restore residency");
         }
 
-        // 3. Tabs: Overview / Physics / Bonds / SDF switch silently.
+        // 4. Tabs: Overview / Physics / Bonds / SDF switch silently.
         Click("Inspector/Tab1");
         Confirm(State.InspectorTab == 1, "Clicking Physics did not switch tabs");
         Click("Inspector/Tab2");
@@ -147,21 +279,30 @@ int main(int ArgumentCount, char** Arguments)
         Click("Inspector/Tab0");
         Confirm(State.InspectorTab == 0, "Clicking Overview did not switch back");
 
-        // 4. Transport: play is silent, step is a NOOP, reset restages locally.
+        // 5. Transport: play bakes and advances Jolt; step advances physics; reset reassembles the body set.
         {
-            const size_t LogSize = State.Log.size();
+            const double SimulatedBeforePlay = Runtime.QuerySimulatedSeconds();
             Click("Transport/Play");
-            Confirm(State.TimelinePlaying, "The play key did not start the shell clock");
-            Confirm(State.Log.size() == LogSize, "The silent play key logged");
+            Confirm(State.TimelinePlaying, "The play key did not start the native timeline");
+            Confirm(State.BakeExecuted && Runtime.QueryPhysicsReady(), "Play did not bake the active recipe into Jolt");
+            Confirm(Runtime.QueryFragmentBodyCount() == State.Constructs[0].Receipt.FragmentCount,
+                    "The workspace bake did not create one Jolt body per solver fragment");
+            Confirm(Runtime.QuerySimulatedSeconds() > SimulatedBeforePlay, "The playing timeline did not step Jolt");
             Click("Transport/Play");
             Confirm(!State.TimelinePlaying, "The play key did not pause");
         }
+        const double SimulatedBeforeStep = Runtime.QuerySimulatedSeconds();
+        const double TimelineBeforeStep = State.TimelineActive;
         Click("Transport/Step");
-        Confirm(Toast::QueryVisible(), "The NOOP step key raised no toast");
-        Confirm(!State.Log.empty() && State.Log.front().Channel == "TRANSPORT", "The NOOP step key logged no TRANSPORT line");
+        Confirm(State.PhysicsStepExecuted && Runtime.QuerySimulatedSeconds() > SimulatedBeforeStep,
+                "The transport step did not advance the Jolt world");
+        Confirm(State.TimelineActive > TimelineBeforeStep, "The transport step did not advance the native timeline");
+        Confirm(!State.Log.empty() && State.Log.front().Channel == "TRANSPORT", "The native step logged no TRANSPORT line");
         Click("Transport/Reset");
-        Confirm(State.TimelineActive == 0.0, "Reset did not restage t = 0");
-        Confirm(State.ExplodeAmount == 0.0, "Reset did not restage explode = 0");
+        Confirm(State.TimelineActive == 0.0, "Reset did not return the timeline to t = 0");
+        Confirm(State.ExplodeAmount == 0.0, "Reset did not clear explode = 0");
+        Confirm(Runtime.QueryFragmentBodyCount() == 1 && Runtime.QueryResult().Fragments.size() == 1,
+                "Reset did not reassemble the Jolt shard bodies");
         Click("Transport/Speed");
         Click("Transport/Speed/Option0");
         Confirm(State.PlaybackRate == 0.10, "The speed option did not restage 0.10×");
@@ -171,28 +312,37 @@ int main(int ArgumentCount, char** Arguments)
         Click("Transport/Explode");
         Confirm(std::fabs(State.ExplodeAmount - 0.5) < 0.02, "The explode track missed its midpoint");
 
-        // 5. Strike/Bake stay explicit NOOPs: toasts + warm lines, receipts untouched.
+        // 6. Bake and strike solve the current recipe and replace the isolated Jolt shard world.
         {
-            const int Fragments = State.Constructs[0].Receipt.FragmentCount;
+            State.StrikeExecuted = false;
             Click("Transport/Strike");
-            Confirm(State.StrikeNoopRaised, "Strike did not latch its NOOP flag");
-            Confirm(Toast::QueryVisible(), "Strike raised no toast");
+            Confirm(State.StrikeExecuted && Runtime.QueryResult().Success && Runtime.QueryFragmentBodyCount() > 1,
+                    "Strike did not solve and release convex shards into Jolt");
+            Confirm(Toast::QueryVisible(), "The native strike raised no completion toast");
             Confirm(!State.Log.empty() && State.Log.front().Channel == "STRIKE", "Strike logged no STRIKE line");
+            State.BakeExecuted = false;
             Click("Transport/Bake");
-            Confirm(State.BakeNoopRaised, "Bake did not latch its NOOP flag");
-            Confirm(Toast::QueryVisible(), "Bake raised no toast");
+            Confirm(State.BakeExecuted && Runtime.QueryResult().Success && Runtime.QueryFragmentBodyCount() > 1,
+                    "Bake did not create a Jolt body set from the native partition");
+            Confirm(Toast::QueryVisible(), "The native bake raised no completion toast");
             Confirm(!State.Log.empty() && State.Log.front().Channel == "BAKE", "Bake logged no BAKE line");
+            State.StrikeExecuted = false;
             Click("Surface/Shards");
-            Confirm(!State.Log.empty() && State.Log.front().Channel == "STRIKE", "The stage strike logged no STRIKE line");
-            Confirm(State.Constructs[0].Receipt.FragmentCount == Fragments, "A NOOP changed the receipt");
+            Confirm(State.StrikeExecuted && !State.Log.empty() && State.Log.front().Channel == "STRIKE",
+                    "Clicking the shard stage did not issue a native impact strike");
+            const Fracture::Metrics& Base = State.Constructs[0].NativeResult.BaseMetrics;
+            Confirm(std::fabs(State.Constructs[0].Spec.ImpactPoint[2] - Base.BoundsMax[2]) < 1.0e-3,
+                    "The stage click did not map its hit point onto the source solid surface");
+            Confirm(Runtime.QueryFragmentBodyCount() == State.Constructs[0].Receipt.FragmentCount,
+                    "The stage strike did not refresh the Jolt bodies from its new solver result");
         }
 
-        // 6. Timeline: the ruler scrubs silently.
+        // 7. Timeline: the ruler scrubs silently.
         Click("Timeline/Ruler");
         Confirm(std::fabs(State.TimelineActive - 2.0) < 0.05, "The ruler scrub missed 2.0 s");
         Confirm(!State.TimelinePlaying, "Scrubbing left the clock playing");
 
-        // 7. Viewport bar: pipeline restages the recipe; lens/camera stay silent; focus/maximize NOOP.
+        // 8. Viewport bar: pipeline restages the recipe; lens/camera stay silent; focus/maximize NOOP.
         Click("Viewport/Pipeline");
         Click("Viewport/Pipeline/Option1");
         Confirm(State.Constructs[0].Pipeline == "baked", "Eng.Bake did not restage the pipeline");
@@ -218,7 +368,7 @@ int main(int ArgumentCount, char** Arguments)
         Click("Viewport/Maximize");
         Confirm(Toast::QueryVisible(), "Maximize raised no toast");
 
-        // 8. Stage tools switch silently; reassemble restages the timeline.
+        // 9. Stage tools switch silently; reassemble bakes the selected recipe and restores one Jolt body.
         {
             const size_t LogSize = State.Log.size();
             Click("Surface/Tool1");
@@ -231,9 +381,11 @@ int main(int ArgumentCount, char** Arguments)
             Click("Surface/Reassemble");
             Confirm(State.TimelineActive == 0.0, "Reassemble did not restage t = 0");
             Confirm(State.ExplodeAmount == 0.0, "Reassemble did not restage explode = 0");
+            Confirm(Runtime.QueryResult().Success && Runtime.QueryFragmentBodyCount() == 1,
+                    "The stage reassemble control did not restore the intact Jolt body");
         }
 
-        // 9. Library: browsing delegates to the shared Asset Browser; handoffs spawn-refuse/select/apply.
+        // 10. Library: browsing delegates to the shared Asset Browser; handoffs spawn-refuse/select/apply.
         Click("Library/Browse");
         Confirm(Link.OpenRequested, "The browse row did not request the browser");
         Confirm(Link.OpenWorkspace == AssetBrowserWorkspaceFracture, "The browse row requested the wrong workspace");
@@ -338,7 +490,20 @@ int main(int ArgumentCount, char** Arguments)
             const size_t Dot = Stem.rfind(".ppm");
             if (Dot != std::string::npos && Dot + 4 == Stem.size()) Stem.erase(Dot);
             Click("Outliner/Row0");
+            Click("Footer/CubeCompare");
+            RenderEvidence((Stem + "-cube-comparison.ppm").c_str());
+            Click("Footer/CubeCompare");
             Click("Inspector/Tab0");
+            Click("Transport/Reset");
+            Click("Transport/Bake");
+            IO.DeltaTime = 0.02f;
+            Click("Transport/Play");
+            for (int FrameIndex = 0; FrameIndex < 5; ++FrameIndex) Frame();
+            Click("Transport/Play");
+            IO.DeltaTime = 1.0f / 60.0f;
+            Confirm(!State.TimelinePlaying && Runtime.QueryFragmentBodyCount() > 1 &&
+                        Runtime.QuerySimulatedSeconds() >= 0.10,
+                    "The evidence capture did not show a stepped Jolt shard scene");
             RenderEvidence((Stem + "-overview.ppm").c_str());
             Click("Inspector/Tab1");
             RenderEvidence((Stem + "-physics.ppm").c_str());
@@ -348,7 +513,7 @@ int main(int ArgumentCount, char** Arguments)
             RenderEvidence((Stem + "-sdf.ppm").c_str());
         }
 
-        std::fprintf(stdout, "FractureWorkspaceValidation: boot/select/tabs/transport/strike-bake/timeline/viewport/tools/library/topbar/matrix/reset/celestial checks passed\n");
+        std::fprintf(stdout, "FractureWorkspaceValidation: boot/select/cube-solver-comparison/tabs/transport/strike-bake/timeline/viewport/tools/library/topbar/matrix/reset/celestial checks passed\n");
         ImGui::DestroyContext();
         return 0;
     }

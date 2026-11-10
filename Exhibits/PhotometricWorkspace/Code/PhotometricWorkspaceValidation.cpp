@@ -5,6 +5,7 @@
 // and warm log lines and change nothing.
 
 #include "Frontier/Engine/Interface/Workspaces/PhotometricWorkspace.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.h"
 #include "Frontier/Engine/Interface/Workspaces/PhotometricIesFileDialog.h"
 #include "Frontier/Engine/Interface/Controls/Toast.h"
 #include "Frontier/Engine/Interface/InspectorControls.h"
@@ -56,11 +57,18 @@ int main(int ArgumentCount, char** Arguments)
         PhotometricWorkspaceState State{};
         ConstructPhotometricWorkspaceState(State);
         AssetBrowserLink Link{};
+        bool PreviewCallbackCalled = false;
+        const PhotometricViewportPresenter PreviewHook = [&](const SceneViewportRequest& Request)
+        {
+            PreviewCallbackCalled = true;
+            Confirm(Request.ReplaceLuminaires && !Request.Luminaires.empty(), "Photometric stage did not forward its active rig to the host renderer callback");
+            return SceneViewportImage{}; // no fake texture: this validation is UI proof, not a GPU render capture.
+        };
 
         const auto Frame = [&]()
         {
             ImGui::NewFrame();
-            ConstructPhotometricWorkspace(State, Faces, IO.DisplaySize, &Link);
+            ConstructPhotometricWorkspace(State, Faces, IO.DisplaySize, &Link, PreviewHook, IO.DeltaTime);
             ImGui::Render();
         };
         const auto RectCentre = [&](const char* Name)
@@ -88,6 +96,7 @@ int main(int ArgumentCount, char** Arguments)
         //    applied); catalogues hold pinned order.
         Frame();
         Frame();
+        Confirm(PreviewCallbackCalled, "The photometric workspace never called the host's native renderer bridge");
         Confirm(QueryPhotometricLightSpecCount() == 7, "The light-type catalogue lost entries");
         Confirm(QueryPhotometricMeasuredIesCount() == 7, "The measured IES catalogue lost entries");
         Confirm(std::strcmp(QueryPhotometricMeasuredIes(0), "LowBeam") == 0, "LowBeam is out of order");
@@ -102,6 +111,43 @@ int main(int ArgumentCount, char** Arguments)
         Confirm(std::fabs(State.Sun.LocalHours - 14.5) < 1.0e-9, "The workspace did not boot at 14:30 site time");
         Confirm(State.Log.size() == 1, "The boot produced the wrong number of log lines");
         Confirm(State.Log.front().Channel == "RIG", "The boot line missed its RIG channel");
+        {
+            const SceneViewportRequest Preview = BuildPhotometricPreviewRequest(State, 900.0f, 600.0f, 2.0f, 1.0 / 30.0);
+            Confirm(Preview.ReplaceLuminaires, "The native preview did not replace proving-ground lights with the staged rig");
+            Confirm(Preview.OverrideSolar && Preview.SolarEnabled && Preview.SolarIlluminanceKilolux > 0.0,
+                    "The native preview did not carry Photometric Studio's staged sun settings");
+            Confirm(Preview.PreviewSkyScale > 0.0 && Preview.PreviewReflectionScale > 0.0,
+                    "The native preview did not carry the staged dome/skylight response");
+            Confirm(Preview.PanelWidth == 900.0f && Preview.PanelHeight == 600.0f && Preview.PixelDensity == 2.0f,
+                    "The native preview request lost the stage extent or pixel density");
+            Confirm(Preview.Luminaires.size() == 6, "The staged photometric rig did not expose its six visible luminaires to the renderer");
+            Confirm(Preview.Luminaires.front().Category == 2u,
+                    "The measured ECE low beam did not map onto the native ReSTIR low-beam light model");
+            Confirm(std::fabs(Preview.Luminaires.front().Position[0] + 41.15) < 1.0e-9,
+                    "The staged light was not transformed from Photometric Studio coordinates into the renderer's world");
+            Confirm(Preview.Luminaires.front().Intensity > 0.0 && Preview.Luminaires.front().Reach > 0.0,
+                    "The staged light did not carry its native renderer intensity and reach");
+            using namespace Frontier::GlobalIllumination;
+            std::vector<LuminaireProfile> Profiles;
+            for (const SceneViewportLuminaire& Source : Preview.Luminaires)
+            {
+                LuminaireProfile Light;
+                Light.Category = static_cast<LuminaireCategory>(Source.Category);
+                Light.Position = Source.Position;
+                Light.Direction = Source.Direction;
+                Light.Colour = Source.Colour;
+                Light.Params = Source.Params;
+                Light.Intensity = Source.Intensity;
+                Light.Reach = Source.Reach;
+                Profiles.push_back(Light);
+            }
+            LuminaireRegister Register;
+            const std::vector<uint8_t> Packed = Register.Update(std::nullopt, {}, {}, std::nullopt, &Profiles);
+            Confirm(Packed.size() == LuminaireRegisterBytes && Register.Luminaires.size() == 6,
+                    "The C++ GI luminaire register did not accept the complete staged Photometric Studio rig");
+            Confirm(std::fabs(Register.Luminaires.front().Position[0] + 41.15) < 1.0e-9,
+                    "The C++ GI register lost the staged luminaire transform");
+        }
         {
             const double Census = QueryPhotometricCensusLumens(State.Lights, 8);
             Confirm(std::fabs(Census - 11220.0) < 0.5, "The default census missed 11.22 klm");

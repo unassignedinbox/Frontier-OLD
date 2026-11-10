@@ -159,8 +159,19 @@ bool ConstructSheetHeader(AssetBrowserWorkspaceState& State, const EditorTypefac
         ImGui::SetKeyboardFocusHere();
         State.FocusSearch = false;
     }
-    ImGui::InputText("##AssetSearch", State.SearchText, sizeof(State.SearchText));
-    RecordAssetBrowserWorkspaceRect(State, "Filter/Search", ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(ResolveCssColour(0x1A1A1AFF)));
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImGui::ColorConvertU32ToFloat4(ResolveCssColour(0x6E6E6EFF)));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28.0f, 5.0f));
+    ImGui::InputTextWithHint("##AssetSearch", "Search assets\u2026", State.SearchText, sizeof(State.SearchText));
+    const ImVec2 SearchMin = ImGui::GetItemRectMin();
+    const ImVec2 SearchMax = ImGui::GetItemRectMax();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(2);
+    DrawList->AddRect(SearchMin, SearchMax, ResolveCssColour(0xFFFFFF1A), 8.0f, ImDrawFlags_None, 1.0f);
+    (void)GlyphSymbol::Construct(DrawList, "StudioSearch", ImVec2(SearchMin.x + 8.0f, SearchMin.y + 6.0f), 13.0f, 1.8f,
+                                 ResolveCssColour(0x8A8A8AFF));
+    RecordAssetBrowserWorkspaceRect(State, "Filter/Search", SearchMin, SearchMax);
     const bool Typing = ImGui::IsItemActive();
     ImGui::PopItemWidth();
 
@@ -173,6 +184,8 @@ bool ConstructSheetHeader(AssetBrowserWorkspaceState& State, const EditorTypefac
         const ImVec2 PMax(ButtonX + Wide, Min.y + 32.0f);
         DrawList->AddRectFilled(PMin, PMax,
                                 Active ? ResolveCssColour(0xE8C27A33) : ResolveCssColour(0xFFFFFF0D), 8.0f);
+        DrawList->AddRect(PMin, PMax, ResolveCssColour(Active ? 0xE8C27A88 : 0xFFFFFF1A), 8.0f, ImDrawFlags_None,
+                          1.0f);
         PanelCursor Cursor{ DrawList, &Faces, 1.0f, PMin.x, Wide, PMin.y };
         const float TextWide = Cursor.Measure(Faces.Medium, 11.0f, Label);
         Cursor.Text(Faces.Medium, 11.0f, PMin.x + (Wide - TextWide) * 0.5f, PMin.y + 5.0f, 1.3f,
@@ -264,7 +277,12 @@ void ConstructTree(AssetBrowserWorkspaceState& State, const EditorTypefaces& Fac
     {
         const ImVec2 RMin = Rows.Space(TreeRowTall, 0.0f, 2.0f);
         const ImVec2 RMax(RMin.x + Rows.Width, RMin.y + TreeRowTall);
-        if (Active) DrawList->AddRectFilled(RMin, RMax, ResolveCssColour(0xE8C27A22), 8.0f);
+        if (Active)
+        {
+            DrawList->AddRectFilled(RMin, RMax, ResolveCssColour(0xE8C27A22), 8.0f);
+            DrawList->AddRectFilled(ImVec2(RMin.x + 2.0f, RMin.y + 5.0f), ImVec2(RMin.x + 5.0f, RMax.y - 5.0f),
+                                    ResolveCssColour(0xE8C27AFF), 1.5f);
+        }
         char CountText[16]{};
         std::snprintf(CountText, sizeof(CountText), "%d", Count);
         Rows.Text(Faces.Regular, 12.0f, RMin.x + (Nested ? 26.0f : 10.0f), RMin.y + 6.0f, 1.3f,
@@ -335,7 +353,9 @@ void ConstructItems(AssetBrowserWorkspaceState& State, const EditorTypefaces& Fa
             const ImVec2 CMax(CMin.x + StepX - 12.0f, CMin.y + CardTall);
             const bool   Active = State.Selected == Index;
             DrawList->AddRectFilled(CMin, CMax, ResolveCssColour(0x1A1A1AFF), 12.0f);
-            if (Active) DrawList->AddRect(CMin, CMax, ResolveCssColour(0xE8C27AFF), 12.0f, ImDrawFlags_None, 1.5f);
+            if (Active) DrawList->AddRectFilled(CMin, CMax, ResolveCssColour(0xE8C27A0D), 12.0f);
+            DrawList->AddRect(CMin, CMax, ResolveCssColour(Active ? 0xE8C27AFF : 0xFFFFFF14), 12.0f, ImDrawFlags_None,
+                              Active ? 1.5f : 1.0f);
             const ImU32 Accent = ResolveCssColour(Record.Colour);
             DrawList->AddRectFilled(ImVec2(CMin.x + 12.0f, CMin.y + 12.0f), ImVec2(CMin.x + 52.0f, CMin.y + 52.0f),
                                     ResolveAlpha(Accent, 0.16f), 10.0f);
@@ -368,9 +388,11 @@ void ConstructItems(AssetBrowserWorkspaceState& State, const EditorTypefaces& Fa
                 const bool   Fav = std::find(State.Favorites.begin(), State.Favorites.end(), Index) != State.Favorites.end();
                 const ImVec2 SMin(CMax.x - 34.0f, CMin.y + 8.0f);
                 const ImVec2 SMax(CMax.x - 8.0f, CMin.y + 34.0f);
+                DrawList->AddCircleFilled(ImVec2(SMin.x + 13.0f, SMin.y + 13.0f), 11.0f,
+                                          ResolveCssColour(Fav ? 0xE8C27A26 : 0xFFFFFF0D), 24);
                 PanelCursor Star{ DrawList, &Faces, 1.0f, SMin.x, 26.0f, SMin.y };
                 Star.Text(Faces.Medium, 15.0f, SMin.x + 5.0f, SMin.y + 3.0f, 1.2f,
-                          Fav ? ResolveCssColour(0xE8C27AFF) : ResolveCssColour(0x5E5E5EFF), Fav ? "*" : "+");
+                          Fav ? ResolveCssColour(0xE8C27AFF) : ResolveCssColour(0xB5B5B5FF), Fav ? "*" : "+");
                 RecordAssetBrowserWorkspaceRect(State, "Item/Fav0", SMin, SMax);
                 ImGui::PushID("Fav0");
                 StarPressed = InvisibleRect("##ItemFav", SMin, SMax);
@@ -398,6 +420,8 @@ void ConstructItems(AssetBrowserWorkspaceState& State, const EditorTypefaces& Fa
             const bool   Active = State.Selected == Index;
             DrawList->AddRectFilled(RMin, RMax, Active ? ResolveCssColour(0xE8C27A22) : ResolveCssColour(0x161616FF),
                                     10.0f);
+            DrawList->AddRect(RMin, RMax, ResolveCssColour(Active ? 0xE8C27A66 : 0xFFFFFF0C), 10.0f, ImDrawFlags_None,
+                              1.0f);
             const ImU32 Accent = ResolveCssColour(Record.Colour);
             (void)GlyphSymbol::Construct(DrawList, Record.Glyph.c_str(), ImVec2(RMin.x + 12.0f, RMin.y + 13.0f), 20.0f,
                                          1.8f, Accent);
@@ -440,13 +464,16 @@ void ConstructItems(AssetBrowserWorkspaceState& State, const EditorTypefaces& Fa
 void ConstructNotch(AssetBrowserWorkspaceState& State, const EditorTypefaces& Faces, ImDrawList* DrawList, ImVec2 Size,
                     float SheetH)
 {
-    const float Wide  = std::min(440.0f, Size.x * 0.6f);
+    const float Wide  = std::min(340.0f, Size.x * 0.6f); // 🧩 Slim enough to clear the view pills.
     const float X0    = (Size.x - Wide) * 0.5f;
     const float X1    = X0 + Wide;
     const float Y1    = Size.y - SheetH + NotchOverlap;
     const float Y0    = Y1 - NotchTall;
     const float Inset = Wide * 0.08f; // 🧩 PanelExpansionTab's 8% trapezoid inset, wide edge down.
     const ImVec2 Contour[4] = { ImVec2(X0 + Inset, Y0), ImVec2(X1 - Inset, Y0), ImVec2(X1, Y1), ImVec2(X0, Y1) };
+    const ImVec2 Shadow[4] = { ImVec2(Contour[0].x, Contour[0].y + 3.0f), ImVec2(Contour[1].x, Contour[1].y + 3.0f),
+                                       ImVec2(Contour[2].x, Contour[2].y + 3.0f), ImVec2(Contour[3].x, Contour[3].y + 3.0f) };
+    DrawList->AddConvexPolyFilled(Shadow, 4, ResolveCssColour(0x00000066));
     DrawList->AddConvexPolyFilled(Contour, 4, ResolveCssColour(0x232323FF));
     DrawList->AddPolyline(Contour, 4, ResolveCssColour(0xE8C27A55), ImDrawFlags_Closed, 1.5f);
     PanelCursor Cap{ DrawList, &Faces, 1.0f, X0, Wide, Y0 };
@@ -587,6 +614,9 @@ void ConstructAssetBrowserWorkspace(AssetBrowserWorkspaceState& State, const Edi
         QueryAssetBrowserFiltered(State, Filtered);
         ConstructKindChips(State, Faces, DrawList, ImVec2(SheetMin.x, SheetMin.y + HeaderTall), Size.x, Filtered);
 
+        DrawList->AddLine(ImVec2(16.0f, SheetMin.y + HeaderTall + ChipsTall - 4.0f),
+                          ImVec2(Size.x - 16.0f, SheetMin.y + HeaderTall + ChipsTall - 4.0f),
+                          ResolveCssColour(0xFFFFFF12), 1.0f);
         const float ColumnsY = SheetMin.y + HeaderTall + ChipsTall;
         const float ColumnsH = SheetH - HeaderTall - ChipsTall - FooterTall;
         const ImVec2 TreeMin(12.0f, ColumnsY);
@@ -599,6 +629,8 @@ void ConstructAssetBrowserWorkspace(AssetBrowserWorkspaceState& State, const Edi
         ConstructItems(State, Faces, DrawList, ItemsMin, ItemsMax, Filtered);
         ConstructAssetBrowserInspector(State, Faces, DrawList, InspMin, InspMax, Link);
 
+        DrawList->AddLine(ImVec2(16.0f, Size.y - FooterTall), ImVec2(Size.x - 16.0f, Size.y - FooterTall),
+                          ResolveCssColour(0xFFFFFF12), 1.0f);
         PanelCursor Foot{ DrawList, &Faces, 1.0f, 16.0f, Size.x - 32.0f, Size.y - FooterTall + 8.0f };
         char Status[128]{};
         if (State.Selected >= 0)

@@ -118,7 +118,7 @@ target_link_libraries(FrontierInterfaceExtension PUBLIC FrontierImGui)
 add_library(FrontierAuthoringControls STATIC Engine/Interface/VectorAuthoringControls.cpp UI/TextureStudio/PanelChrome.cpp)
 target_link_libraries(FrontierAuthoringControls PUBLIC FrontierInterface FrontierVectorAuthoring)
 target_link_libraries(FrontierTextureStudioUI PUBLIC FrontierAuthoringControls)
-add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/FoundationPanel.cpp UI/Editor/EditorWorkspace.cpp UI/Editor/ControlCentrePanel.cpp UI/Editor/ContentBrowserPanel.cpp)
+add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/FoundationPanel.cpp UI/Editor/EditorWorkspace.cpp UI/Editor/ControlCentrePanel.cpp UI/Editor/ContentBrowserPanel.cpp UI/Editor/TextureWorkspaceHost.cpp)
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
 target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1)
 find_package(Threads REQUIRED)
@@ -130,6 +130,8 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Scene/DynamicsSpaceCodecs.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
+    Frontier/Engine/Fracture/FracturePartition.cpp
+    Frontier/Engine/Fracture/EngineeringStressSolver.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
     Frontier/Engine/Diagnostics/LogStream.cpp
@@ -326,7 +328,8 @@ add_library(FrontierPhysicsExtension STATIC
     Frontier/Extensions/Physics/JoltExtension.cpp
     Frontier/Extensions/Physics/JoltSubstrate.cpp
     Frontier/Extensions/Physics/PhysicsSpace.cpp
-    Frontier/Extensions/Physics/PhysicsExtension.cpp)
+    Frontier/Extensions/Physics/PhysicsExtension.cpp
+    Frontier/Extensions/Physics/FractureStudioRuntime.cpp)
 target_link_libraries(FrontierPhysicsExtension PUBLIC FrontierSceneEditorUI PRIVATE Jolt)
 
 add_library(EverestProjectEditor STATIC
@@ -440,6 +443,7 @@ if(WIN32)
     target_compile_definitions(FrontierUI PRIVATE FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE)
     target_link_libraries(FrontierUI PRIVATE FrontierEditorUI glfw)
     add_executable(Frontier Experimental/Frontier/Native/WindowsFrontier.cpp
+        UI/Editor/TextureWorkspaceHostVulkan.cpp
         Frontier/Extensions/Interface/ViewportTexture.cpp
         Engine/Interface/WindowsApplication.cpp Engine/Interface/VulkanPresentation.cpp
         "${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp" "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp")
@@ -447,7 +451,7 @@ if(WIN32)
         "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
     target_compile_definitions(Frontier PRIVATE FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE
         FRONTIER_BUILD_COMMIT=\"${FRONTIER_BUILD_COMMIT}\")
-    target_link_libraries(Frontier PRIVATE FrontierEditorUI EverestProjectEditor FrontierSurfaceRasterization glfw ole32)
+    target_link_libraries(Frontier PRIVATE FrontierEditorUI FrontierTextureStudioUI EverestProjectEditor FrontierSurfaceRasterization glfw ole32)
     if(MSVC)
         enable_language(RC)
         foreach(WORKSPACE_TARGET Frontier TextureStudio)
@@ -919,6 +923,7 @@ include(Automation/FractureWorkspace.cmake)
 include(Automation/PhotometricWorkspace.cmake)
 include(Automation/UvWorkspace.cmake)
 include(Automation/AssetBrowserWorkspace.cmake)
+include(Automation/TextureWorkspaceHost.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/DirectShadingRendering.cmake)
 include(Automation/ParticleSimulationRendering.cmake)

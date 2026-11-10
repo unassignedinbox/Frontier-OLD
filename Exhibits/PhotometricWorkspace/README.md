@@ -28,3 +28,24 @@ ctest --test-dir build/photometric-ies -R '^PhotometricWorkspaceValidation$' --o
 ```
 
 The C++ workspace is separate from `Experimental Remastered/PhotometricEditor`; that browser editor's view captures are documented in its own README.
+
+## Native ReSTIR rendered proofs
+
+The images below are offscreen captures of the staged Photometric Studio UI composed over a readback from the production `RenderingExtension`. They were rendered with the repository's stored `EngineContent/ShaderArchives` on Vulkan SwiftShader (CPU), and each capture verifies that the renderer reports the RTX ReSTIR path. The staged measured profiles are translated to the renderer's native beam families (low beam, high beam, fog cutoff, or roadway batwing); the custom LM-63 importer remains workspace-local and is not yet a persisted shader distribution.
+
+| Roadway | Architectural gallery | Softbox studio | Night and lunar field |
+| --- | --- | --- | --- |
+| ![Roadway ReSTIR render](Images/NativeReSTIR-Roadway.png) | ![Gallery ReSTIR render](Images/NativeReSTIR-Gallery.png) | ![Studio ReSTIR render](Images/NativeReSTIR-Studio.png) | ![Lunar ReSTIR render](Images/NativeReSTIR-Lunar.png) |
+
+To regenerate these captures in a configured build:
+
+```sh
+cmake --build build/photometric-ies --target PhotometricWorkspaceCapture
+VK_ICD_FILENAMES=/tmp/vk_swiftshader_icd.json \
+  LD_LIBRARY_PATH=/tmp:${LD_LIBRARY_PATH} \
+  ./build/photometric-ies/PhotometricWorkspaceCapture \
+  EngineContent Projects/Everest EngineContent/ShaderArchives \
+  Exhibits/PhotometricWorkspace/Images 2
+```
+
+The last argument is the number of progressive refreshes per rig (1–8). Each saved PNG includes the native renderer readout and the selected Photometric workspace scenario.

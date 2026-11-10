@@ -166,9 +166,10 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Frontier::RenderPipelineConfiguration Pipeline;
     if (const auto* Entry = FindEntry<Frontier::RenderPipelineRecord>(World, "RenderPipeline")) Pipeline = Entry->QueryConfiguration();
     const std::string Quality    = Pipeline.QualityTier <= 0 ? "low" : (Pipeline.QualityTier == 1 ? "medium" : "high");
-    const bool        RayTracing = Pipeline.HardwareRayQueryTier;
+    // 📝 Photometric Studio explicitly previews through the C++ ray-query ReSTIR path, independent of the level's fast-preview tier.
+    const bool        RayTracing = Pipeline.HardwareRayQueryTier || Request.ReplaceLuminaires;
     Outcome.Readout.Quality = Quality;
-    if (!Pipeline.Enabled)
+    if (!Pipeline.Enabled && !Request.ReplaceLuminaires)
     {
         Outcome.Status          = "Render pipeline disabled";
         Outcome.Readout.Failure = Outcome.Status;
@@ -297,7 +298,25 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.Inspection           = static_cast<uint32_t>(std::clamp(Pipeline.InspectionModeIndex, 0, 14));
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
-    Rendering.DirectShading          = Pipeline.DirectShading;
+    Rendering.DirectShading          = Request.ReplaceLuminaires ? false : Pipeline.DirectShading;
+    if (Request.ReplaceLuminaires) Rendering.GlobalIllumination = true;
+    std::vector<Frontier::GlobalIllumination::LuminaireProfile> ReplacementLuminaires;
+    if (Request.ReplaceLuminaires)
+    {
+        ReplacementLuminaires.reserve(Request.Luminaires.size());
+        for (const SceneViewportLuminaire& Source : Request.Luminaires)
+        {
+            Frontier::GlobalIllumination::LuminaireProfile Light;
+            Light.Category = static_cast<Frontier::GlobalIllumination::LuminaireCategory>(std::min<uint32_t>(Source.Category, 5u));
+            Light.Position = Source.Position;
+            Light.Direction = Source.Direction;
+            Light.Colour = Source.Colour;
+            Light.Params = Source.Params;
+            Light.Intensity = std::max(0.0, Source.Intensity);
+            Light.Reach = std::max(0.01, Source.Reach);
+            ReplacementLuminaires.push_back(Light);
+        }
+    }
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
@@ -316,13 +335,13 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Toggles.SpatialRadius        = Pipeline.SpatialRadius;
     Toggles.TemporalTallyLimit   = Pipeline.TemporalTallyLimit;
     Toggles.IndirectScale        = Pipeline.IndirectScale;
-    Toggles.SkyScale             = Pipeline.SkyScale;
+    Toggles.SkyScale             = Request.OverrideSolar ? Request.PreviewSkyScale : Pipeline.SkyScale;
     Toggles.IncandescenceScale   = Pipeline.IncandescenceScale;
     Toggles.CardRadiosity        = Pipeline.CardRadiosity;
     Toggles.Reflection           = Pipeline.Reflection;
     Toggles.RayTracedReflections = Pipeline.RayTracedReflections;
     Toggles.ReflectionBounces    = static_cast<uint32_t>(std::clamp(Pipeline.ReflectionBounces, 1, 4));
-    Toggles.ReflectionScale      = Pipeline.ReflectionScale;
+    Toggles.ReflectionScale      = Request.OverrideSolar ? Request.PreviewReflectionScale : Pipeline.ReflectionScale;
     Toggles.ReflectionRoughness  = Pipeline.ReflectionRoughness;
     Toggles.DirectShadow         = Pipeline.DirectShadow;
     Toggles.RayTracedShadows     = Pipeline.RayTracedShadows;
@@ -347,7 +366,21 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     const auto Extent = StableExtentCount_ >= 6 ? Requested : Viewport_->QueryScreenExtent();
     std::string Diagnostic;
     const auto  Start = std::chrono::steady_clock::now();
-    if (!Viewport_->Refresh(Camera, ResolveSceneEnvironment(World, ElapsedSeconds), Rendering, Request.DeltaSeconds, Extent, &Diagnostic))
+    Frontier::GlobalIllumination::SceneEnvironment PreviewEnvironment = ResolveSceneEnvironment(World, ElapsedSeconds);
+    if (Request.OverrideSolar)
+    {
+        PreviewEnvironment.Solar.Enabled = Request.SolarEnabled;
+        PreviewEnvironment.Solar.ElevationDegrees = static_cast<float>(Request.SolarElevationDegrees);
+        PreviewEnvironment.Solar.AzimuthDegrees = static_cast<float>(Request.SolarAzimuthDegrees);
+        PreviewEnvironment.Solar.IlluminanceKilolux = static_cast<float>(Request.SolarIlluminanceKilolux);
+        PreviewEnvironment.Solar.AngularDiameterDeg = static_cast<float>(Request.SolarAngularDiameterDegrees);
+        PreviewEnvironment.Solar.KelvinTemperature = static_cast<float>(Request.SolarTemperatureKelvin);
+        PreviewEnvironment.Solar.TimeLinked = false;
+        PreviewEnvironment.Solar.DayCycle = false;
+        PreviewEnvironment.Flare.Enabled = false;
+    }
+    if (!Viewport_->Refresh(Camera, PreviewEnvironment, Rendering, Request.DeltaSeconds, Extent, &Diagnostic,
+                            Request.ReplaceLuminaires ? &ReplacementLuminaires : nullptr))
     {
         Failure_ = "Scene viewport refresh failed: " + Diagnostic;
         Frontier::WriteLogFormat(ViewportLogCategory(), Frontier::LogSeverity::Error, Frontier::LogVerbosity::Log, "SceneViewport", "%s",
@@ -364,7 +397,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Outcome.View   = Viewport_->QueryPresentedView();
     Outcome.Extent = Viewport_->QueryScreenExtent();
     char Status[160];
-    if (Pipeline.DirectShading)
+    if (Rendering.DirectShading)
         std::snprintf(Status, sizeof(Status), "LIVE: Direct shading (fast preview)  |  %u x %u  |  %.1f ms", Outcome.Extent[0], Outcome.Extent[1],
                       RefreshMilliseconds_);
     else
@@ -375,7 +408,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     // 📝 The demo's readout figures (IlluminationHost.js PresentMeasurements): renderer tag and the TLAS line.
     const Frontier::GlobalIllumination::ViewportStatistics Statistics = Viewport_->QueryStatistics();
     char Tag[96];
-    if (Pipeline.DirectShading)
+    if (Rendering.DirectShading)
     {
         std::snprintf(Tag, sizeof(Tag), "Direct shading (no rays)");
     }
