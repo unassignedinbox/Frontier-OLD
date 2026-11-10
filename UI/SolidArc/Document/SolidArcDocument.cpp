@@ -1263,22 +1263,34 @@ SolidArcCommandOutcome ChangeSolidArcSelection(SolidArcDocument& Document, FaceO
 SolidArcCommandOutcome ReshapeSolidArcSelection(SolidArcDocument& Document, const AffineMap& Map, const std::string& Verb)
 {
     const SolidArcSelection& Selection = Document.Selection;
-    const size_t Count = Selection.Vertices.size() + Selection.Edges.size();
-    const std::string Label = Verb + " " + std::to_string(Count) + (Selection.Vertices.empty() ? " edge(s)" : Selection.Edges.empty() ? " vertex(es)" : " vertex(es) / edge(s)");
-    // The owner carries every picked vertex and edge.
+    const size_t Count = Selection.Vertices.size() + Selection.Edges.size() + Selection.Faces.size();
+    const char*  Noun  = (!Selection.Faces.empty() && Selection.Vertices.empty() && Selection.Edges.empty())    ? " face(s)"
+                       : (!Selection.Edges.empty() && Selection.Vertices.empty() && Selection.Faces.empty())    ? " edge(s)"
+                       : (!Selection.Vertices.empty() && Selection.Edges.empty() && Selection.Faces.empty())    ? " vertex(es)"
+                                                                                                                : " sub-element(s)";
+    const std::string Label = Verb + " " + std::to_string(Count) + Noun;
+    // The owner carries every picked vertex, edge, and face.
     std::string Owner, Problem;
-    if (Count == 0) Problem = "pick vertices (1) or edges (2) first";
+    if (Count == 0) Problem = "pick vertices (1), edges (2), or faces (3) first";
     else if (!Document.Summary.PresentCondition) Problem = "there is no body to reshape";
     else
     {
-        std::string EdgeOwner, VertexOwner;
-        if (!Selection.Edges.empty()) Problem = CommonBody(Document, SolidArcSelectionKind::Edge, Selection.Edges, EdgeOwner);
-        if (Problem.empty() && !Selection.Vertices.empty()) Problem = CommonBody(Document, SolidArcSelectionKind::Vertex, Selection.Vertices, VertexOwner);
-        if (Problem.empty() && !EdgeOwner.empty() && !VertexOwner.empty() && EdgeOwner != VertexOwner) Problem = "the vertices and edges are on different bodies (one body at a time)";
-        Owner = EdgeOwner.empty() ? VertexOwner : EdgeOwner;
+        const auto MergeOwner = [&](SolidArcSelectionKind Kind, const std::vector<std::string>& Items)
+        {
+            if (!Problem.empty() || Items.empty()) return;
+            std::string PartOwner;
+            Problem = CommonBody(Document, Kind, Items, PartOwner);
+            if (!Problem.empty()) return;
+            if (!Owner.empty() && Owner != PartOwner) Problem = "the picked elements are on different bodies (one body at a time)";
+            else Owner = PartOwner;
+        };
+        MergeOwner(SolidArcSelectionKind::Face, Selection.Faces);
+        MergeOwner(SolidArcSelectionKind::Edge, Selection.Edges);
+        MergeOwner(SolidArcSelectionKind::Vertex, Selection.Vertices);
     }
     std::vector<std::string> Names = Selection.Vertices;
     Names.insert(Names.end(), Selection.Edges.begin(), Selection.Edges.end());
+    Names.insert(Names.end(), Selection.Faces.begin(), Selection.Faces.end());
     return RunDirectEdit(Document, Label, Problem.empty() ? Owner : std::string(), Names, [&](FeatureStep& Step) -> std::string
     {
         if (!Problem.empty()) return Problem;
@@ -1290,6 +1302,7 @@ SolidArcCommandOutcome ReshapeSolidArcSelection(SolidArcDocument& Document, cons
         Step.Target    = Owner;
         for (const std::string& Name : Document.Selection.Vertices) Step.References.push_back({ ReferenceKind::Vertex, Name, {} });
         for (const std::string& Name : Document.Selection.Edges) Step.References.push_back({ ReferenceKind::Edge, Name, {} });
+        for (const std::string& Name : Document.Selection.Faces) Step.References.push_back({ ReferenceKind::Face, Name, {} });
         Document.Captions[StepLabel] = NextCaption(Document, "Reshape");
         return {};
     });

@@ -192,11 +192,49 @@ namespace
     //    outer node with 1 or 7 and agree with them to round-off.
     enum class RowForm : uint8_t
     {
-        General       = 0,                                                                   // Composite Gauss–Legendre
-        Constant      = 1,                                                                   // density(𝑢, 𝑣) = c(𝑣)
-        Trigonometric = 2,                                                                   // degree ≤ 3 in 𝑢
-        Across        = 3,                                                                   // degree ≤ 3 in 𝑣: rows run along 𝑣
+        General             = 0,                                                             // Composite Gauss–Legendre
+        Constant            = 1,                                                             // density(𝑢, 𝑣) = c(𝑣)
+        Trigonometric       = 2,                                                             // degree ≤ 3 in 𝑢
+        Across              = 3,                                                             // degree ≤ 3 in 𝑣: rows run along 𝑣
+        PiecewisePolynomial = 4,                                                             // degree ≤ 15 in 𝑢 per knot span (1 Gauss panel)
     };
+
+    // Illinois secant-bracket root finder on a continuous bracket [Left, Right] with LeftGap * RightGap < 0.
+    template <typename ScalarFunction>
+    [[nodiscard]] double PolishBracketRoot(double Left, double Right, double LeftGap, double RightGap, const ScalarFunction& Evaluate)
+    {
+        const double Tolerance = 1.0e-14 * std::max(1.0, std::fabs(Left) + std::fabs(Right));
+        int Side = 0;                                                                        // [-] - Illinois side counter
+        for (int Step = 0; Step < 60 && std::fabs(Right - Left) > Tolerance; ++Step)
+        {
+            const double Denominator = RightGap - LeftGap;
+            double       Candidate   = 0.5 * (Left + Right);
+            if (std::fabs(Denominator) > 1.0e-300)
+            {
+                const double Secant = Left - LeftGap * (Right - Left) / Denominator;
+                const double Margin = 0.05 * (Right - Left);
+                if ((Right >= Left && Secant > Left + Margin && Secant < Right - Margin) || (Right < Left && Secant < Left + Margin && Secant > Right - Margin))
+                    Candidate = Secant;
+            }
+            const double Gap = Evaluate(Candidate);
+            if (Gap == 0.0) return Candidate;
+            if (Gap * LeftGap > 0.0)
+            {
+                Left    = Candidate;
+                LeftGap = Gap;
+                if (Side == -1) RightGap *= 0.5;
+                Side = -1;
+            }
+            else
+            {
+                Right    = Candidate;
+                RightGap = Gap;
+                if (Side == 1) LeftGap *= 0.5;
+                Side = 1;
+            }
+        }
+        return 0.5 * (Left + Right);
+    }
 
     // ∫_{Low}^{High} Row(𝑢) d𝑢 of a trigonometric polynomial of degree ≤ 3 from its values at 2πk/7.
     template <typename Row>
@@ -272,7 +310,13 @@ namespace
             if (Form == RowForm::Trigonometric) return IntegrateTrigonometricRow(LowerLimit, Reach, Row) * Sample.Derivative.Y;
             std::vector<double> Knots = Chart != nullptr ? CollectSurfaceBreakpoints(*Chart, std::min(LowerLimit, Reach), std::max(LowerLimit, Reach)) : std::vector<double>{};
             if (Reach < LowerLimit) std::reverse(Knots.begin(), Knots.end());
-            double Primitive = 0.0, From = LowerLimit;                                             // [-] - ∫_lower^𝑢 density, running piece start
+            double Primitive = 0.0, From = LowerLimit;                                       // [-] - ∫_lower^𝑢 density, running piece start
+            if (Form == RowForm::PiecewisePolynomial)
+            {
+                for (double Knot : Knots) { Primitive += IntegratePanel(From, Knot, Row).Value; From = Knot; }
+                Primitive += IntegratePanel(From, Reach, Row).Value;
+                return Primitive * Sample.Derivative.Y;
+            }
             for (double Knot : Knots) { Primitive += IntegrateComposite(From, Knot, PanelSpan, Row); From = Knot; }
             Primitive += IntegrateComposite(From, Reach, PanelSpan, Row);
             return Primitive * Sample.Derivative.Y;
@@ -291,7 +335,7 @@ namespace
         if (Chart != nullptr && Form == RowForm::Across)
         {
             // ⚠️ A traced spine is only C¹ at its knots, so the column integral jumps in slope where the SP-curve's 𝑢
-            //    crosses one: stop there (64 samples once, bisection on the bracketing intervals only).
+            //    crosses one: stop there (64 samples once, Illinois secant-bracket on the bracketing intervals only).
             constexpr int Samples = 64;
             const auto Width = [&](double τ) { return EvaluateParameterCurve(Curve, τ).Position.X; };
             std::array<double, Samples + 1> Values{};
@@ -301,41 +345,34 @@ namespace
             {
                 for (int Index = 0; Index < Samples; ++Index)
                 {
-                    double LeftGap = Values[Index] - Knot;
+                    const double LeftGap  = Values[Index] - Knot;
                     const double RightGap = Values[Index + 1] - Knot;
                     if (LeftGap == 0.0 || LeftGap * RightGap >= 0.0) continue;
-                    double Left = Start + (End - Start) * Index / Samples, Right = Start + (End - Start) * (Index + 1) / Samples;
-                    for (int Halving = 0; Halving < 60; ++Halving)
-                    {
-                        const double Middle = 0.5 * (Left + Right), MiddleGap = Width(Middle) - Knot;
-                        if (MiddleGap * LeftGap > 0.0) { Left = Middle; LeftGap = MiddleGap; } else Right = Middle;
-                    }
-                    Stops.push_back(0.5 * (Left + Right));
+                    const double Left  = Start + (End - Start) * Index / Samples;
+                    const double Right = Start + (End - Start) * (Index + 1) / Samples;
+                    Stops.push_back(PolishBracketRoot(Left, Right, LeftGap, RightGap, [&](double τ) { return Width(τ) - Knot; }));
                 }
             }
             std::sort(Stops.begin() + 1, Stops.end(), [&](double First, double Second) { return Start <= End ? First < Second : First > Second; });
         }
         if (Chart != nullptr && ResolveNurbsChart(*Chart) != nullptr)
         {
-            // ⚠️ The density is only C⁰ across a 𝑣-knot: stop where the SP-curve crosses one (64 samples, bisection).
+            // ⚠️ The density is only C⁰ across a 𝑣-knot: stop where the SP-curve crosses one (64 cached samples, Illinois polish).
             constexpr int Samples = 64;
             const auto Height = [&](double τ) { return EvaluateParameterCurve(Curve, τ).Position.Y; };
+            std::array<double, Samples + 1> Values{};
             double LowV = INFINITY, HighV = -INFINITY;
-            for (int Index = 0; Index <= Samples; ++Index) { const double 𝑣 = Height(Start + (End - Start) * Index / Samples); LowV = std::min(LowV, 𝑣); HighV = std::max(HighV, 𝑣); }
+            for (int Index = 0; Index <= Samples; ++Index) { Values[Index] = Height(Start + (End - Start) * Index / Samples); LowV = std::min(LowV, Values[Index]); HighV = std::max(HighV, Values[Index]); }
             for (double Knot : CollectSurfaceBreakpointsAlongV(*Chart, LowV, HighV))
             {
                 for (int Index = 0; Index < Samples; ++Index)
                 {
-                    double Left = Start + (End - Start) * Index / Samples, Right = Start + (End - Start) * (Index + 1) / Samples;
-                    double LeftGap = Height(Left) - Knot;
-                    const double RightGap = Height(Right) - Knot;
+                    const double LeftGap  = Values[Index] - Knot;
+                    const double RightGap = Values[Index + 1] - Knot;
                     if (LeftGap == 0.0 || LeftGap * RightGap >= 0.0) continue;
-                    for (int Halving = 0; Halving < 60; ++Halving)
-                    {
-                        const double Middle = 0.5 * (Left + Right), MiddleGap = Height(Middle) - Knot;
-                        if (MiddleGap * LeftGap > 0.0) { Left = Middle; LeftGap = MiddleGap; } else Right = Middle;
-                    }
-                    Stops.push_back(0.5 * (Left + Right));
+                    const double Left  = Start + (End - Start) * Index / Samples;
+                    const double Right = Start + (End - Start) * (Index + 1) / Samples;
+                    Stops.push_back(PolishBracketRoot(Left, Right, LeftGap, RightGap, [&](double τ) { return Height(τ) - Knot; }));
                 }
             }
             std::sort(Stops.begin() + 1, Stops.end(), [&](double First, double Second) { return Start <= End ? First < Second : First > Second; });
@@ -384,6 +421,16 @@ namespace
         //    in 𝑣, so a column of fixed 𝑢 is closed form (7 samples) where a row along a traced spine crossed every knot
         //    piece (~90 × 8 Gauss nodes per outer node).
         if (const auto* Ball = std::get_if<RollingBallSurface>(&Surface); Ball && Ball->Definition->Section == RollingBallSection::Circle) return RowForm::Across;
+        if (const auto* Spline = std::get_if<NurbsSurface>(&Surface); Spline && Spline->Definition && Spline->Definition->DegreeU <= 5 && !Spline->Definition->Weights.empty())
+        {
+            // 📝 On a non-rational B-spline surface of 𝑢-degree p ≤ 5, S · (S𝑢 × S𝑣) has degree 3p − 1 ≤ 14 on each 𝑢-knot
+            //    span, so one 8-point Gauss–Legendre panel per span integrates the inner row to exact machine precision.
+            const double ReferenceWeight  = Spline->Definition->Weights.front();
+            bool         UniformCondition = ReferenceWeight > 0.0;
+            for (double Weight : Spline->Definition->Weights)
+                if (std::fabs(Weight - ReferenceWeight) > 1.0e-15 * ReferenceWeight) { UniformCondition = false; break; }
+            if (UniformCondition) return RowForm::PiecewisePolynomial;
+        }
         return RowForm::General;
     }
 

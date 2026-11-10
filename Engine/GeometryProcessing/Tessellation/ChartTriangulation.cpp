@@ -333,8 +333,10 @@ void ChartTriangulation::FlipSide(int Triangle, int Side)
     // t1 = (p, u, v) with side u → v opposite p; t2 = (q, v, u). After the flip: t1 = (p, u, q), t2 = (q, v, p).
     const int First  = Triangle;
     const int Second = TriangleList[First].Neighbours[Side];
+    if (Second < 0) return;
     int SecondSide = 0;
-    while (TriangleList[Second].Neighbours[SecondSide] != First) SecondSide += 1;
+    while (SecondSide < 3 && TriangleList[Second].Neighbours[SecondSide] != First) SecondSide += 1;
+    if (SecondSide == 3) return;
 
     const ChartTriangle Left  = TriangleList[First];
     const ChartTriangle Right = TriangleList[Second];
@@ -399,11 +401,13 @@ bool ChartTriangulation::ConstrainSegment(int First, int Second)
     // ① Find the triangle around First whose wedge holds the segment.
     int Current = PointTriangle[First];
     int Entry   = -1;                                                                        // [-] - Triangle the segment leaves First through
-    for (int Guard = 0; Guard < 1 << 20; ++Guard)
+    const int RingLimit = static_cast<int>(TriangleList.size()) + 4;
+    for (int Guard = 0; Current >= 0 && Guard < RingLimit; ++Guard)
     {
         const ChartTriangle& Triangle = TriangleList[Current];
         int Corner = 0;
-        while (Triangle.Corners[Corner] != First) Corner += 1;
+        while (Corner < 3 && Triangle.Corners[Corner] != First) Corner += 1;
+        if (Corner == 3) break;
         const int Ahead = Triangle.Corners[Next(Corner)], Behind = Triangle.Corners[Prior(Corner)];
         if (Between(Ahead)) return ConstrainSegment(First, Ahead) && ConstrainSegment(Ahead, Second);
         if (Between(Behind)) return ConstrainSegment(First, Behind) && ConstrainSegment(Behind, Second);
@@ -422,30 +426,34 @@ bool ChartTriangulation::ConstrainSegment(int First, int Second)
     {
         const ChartTriangle& Triangle = TriangleList[Entry];
         int Corner = 0;
-        while (Triangle.Corners[Corner] != First) Corner += 1;
-        if (Triangle.Constrained[Corner]) return false;
+        while (Corner < 3 && Triangle.Corners[Corner] != First) Corner += 1;
+        if (Corner == 3 || Triangle.Constrained[Corner]) return false;
         Crossed.push_back({ Triangle.Corners[Next(Corner)], Triangle.Corners[Prior(Corner)] });
         Current = Triangle.Neighbours[Corner];
     }
-    for (int Guard = 0; Guard < 1 << 22; ++Guard)
+    const int WalkLimit = 2 * static_cast<int>(TriangleList.size()) + 16;
+    bool      ReachedSecond = false;
+    for (int Guard = 0; Guard < WalkLimit; ++Guard)
     {
         if (Current < 0) return false;
         const ChartTriangle& Triangle = TriangleList[Current];
         const auto [EnteredFrom, EnteredTo] = Crossed.back();
         int Opposite = 0;
-        while (Triangle.Corners[Opposite] == EnteredFrom || Triangle.Corners[Opposite] == EnteredTo) Opposite += 1;
+        while (Opposite < 3 && (Triangle.Corners[Opposite] == EnteredFrom || Triangle.Corners[Opposite] == EnteredTo)) Opposite += 1;
+        if (Opposite == 3) return false;
         const int Apex = Triangle.Corners[Opposite];
-        if (Apex == Second) break;
+        if (Apex == Second) { ReachedSecond = true; break; }
         if (Between(Apex)) return ConstrainSegment(First, Apex) && ConstrainSegment(Apex, Second);
         // Entered side runs EnteredTo → EnteredFrom in this triangle; leave through (Apex, ·) on the far side of A → B.
         const int  ApexSign = OrientationSign(A, B, PointList[Apex]);
         const int  Keep     = OrientationSign(A, B, PointList[EnteredFrom]) == -ApexSign ? EnteredFrom : EnteredTo; // [-] - Endpoint across A → B
         int ExitSide = 0;
-        while (Triangle.Corners[ExitSide] == Apex || Triangle.Corners[ExitSide] == Keep) ExitSide += 1;
-        if (Triangle.Constrained[ExitSide]) return false;
+        while (ExitSide < 3 && (Triangle.Corners[ExitSide] == Apex || Triangle.Corners[ExitSide] == Keep)) ExitSide += 1;
+        if (ExitSide == 3 || Triangle.Constrained[ExitSide]) return false;
         Crossed.push_back({ Triangle.Corners[Next(ExitSide)], Triangle.Corners[Prior(ExitSide)] });
         Current = Triangle.Neighbours[ExitSide];
     }
+    if (!ReachedSecond) return false;
 
     // ③ Sloan's flips: flip a crossing side whenever its quadrilateral is strictly convex; requeue sides that still cross.
     const auto ProperCrossing = [&](int From, int To)
@@ -453,7 +461,8 @@ bool ChartTriangulation::ConstrainSegment(int First, int Second)
         const Vector2 P = PointList[From], Q = PointList[To];
         return OrientationSign(A, B, P) * OrientationSign(A, B, Q) < 0 && OrientationSign(P, Q, A) * OrientationSign(P, Q, B) < 0;
     };
-    const size_t FlipLimit = 64 * Crossed.size() * Crossed.size() + 1024;                    // [-] - Termination guard
+    const size_t FlipLimit  = 64 * Crossed.size() * Crossed.size() + 1024;                   // [-] - Termination guard
+    size_t       StaleCount = 0;                                                             // [-] - Consecutive unflipped requeues
     for (size_t Attempt = 0; !Crossed.empty() && Attempt < FlipLimit; ++Attempt)
     {
         const auto [From, To] = Crossed.front();
@@ -462,14 +471,18 @@ bool ChartTriangulation::ConstrainSegment(int First, int Second)
         const int Owner = FindSide(From, To, CrossSide);
         if (Owner < 0) continue;                                                             // Queued twice and already flipped away
         const int Across = TriangleList[Owner].Neighbours[CrossSide];
+        if (Across < 0) return false;
         int AcrossSide = 0;
-        while (TriangleList[Across].Neighbours[AcrossSide] != Owner) AcrossSide += 1;
+        while (AcrossSide < 3 && TriangleList[Across].Neighbours[AcrossSide] != Owner) AcrossSide += 1;
+        if (AcrossSide == 3) return false;
         const int P = TriangleList[Owner].Corners[CrossSide], Q = TriangleList[Across].Corners[AcrossSide];
         if (OrientationSign(PointList[P], PointList[Q], PointList[From]) * OrientationSign(PointList[P], PointList[Q], PointList[To]) >= 0)
         {
             Crossed.push_back({ From, To });
+            if (++StaleCount >= Crossed.size()) return false;                                // Full queue pass with zero convex quads
             continue;
         }
+        StaleCount = 0;
         FlipSide(Owner, CrossSide);
         Counters.ConstraintFlips += 1;
         if (ProperCrossing(P, Q)) Crossed.push_back({ P, Q });
@@ -488,8 +501,9 @@ void ChartTriangulation::Legalize()
         if (!TriangleList[Triangle].Alive) continue;
         for (int Side = 0; Side < 3; ++Side) Pending.push_back({ Triangle, Side });
     }
-    int64_t Guard = 0;
-    while (!Pending.empty() && Guard++ < (int64_t(1) << 26))
+    const int64_t LegalizeLimit = std::max<int64_t>(4096, int64_t(32) * static_cast<int64_t>(TriangleList.size()));
+    int64_t       Guard         = 0;
+    while (!Pending.empty() && Guard++ < LegalizeLimit)
     {
         const auto [Triangle, Side] = Pending.back();
         Pending.pop_back();
@@ -563,7 +577,8 @@ int ChartTriangulation::CountDelaunayViolations()
             const int Across = Owner.Neighbours[Side];
             if (Owner.Constrained[Side] || Across < Triangle || !TriangleList[Across].Interior) continue;
             int AcrossSide = 0;
-            while (TriangleList[Across].Neighbours[AcrossSide] != Triangle) AcrossSide += 1;
+            while (AcrossSide < 3 && TriangleList[Across].Neighbours[AcrossSide] != Triangle) AcrossSide += 1;
+            if (AcrossSide == 3) continue;
             Violations += InsideCircumcircle(Triangle, PointList[TriangleList[Across].Corners[AcrossSide]]) ? 1 : 0;
         }
     }

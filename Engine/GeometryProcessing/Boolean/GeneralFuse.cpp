@@ -1326,13 +1326,16 @@ BooleanOutcome ImprintBody(ModelPartition& Partition, BodyToken Body, BodyToken 
     };
     const RedundancyOutcome Redundancy = RemoveRedundantTopology(Partition, Outcome.Body, SessionPrecision, [&](EdgeToken Edge)
     {
-        const FinToken First = Partition.Edges.Resolve(Edge).RadialFin;
-        FinToken       Fin   = First;
+        const FinToken First    = Partition.Edges.Resolve(Edge).RadialFin;
+        if (!First.PresentCondition()) return true;
+        const size_t   FinLimit = Partition.Fins.OccupiedCount() + 1;
+        FinToken       Fin      = First;
+        size_t         Steps    = 0;
         do
         {
             if (Coplanar(Partition.Loops.Resolve(Partition.Fins.Resolve(Fin).Loop).Face)) return false;
             Fin = Partition.Fins.Resolve(Fin).RadialSuccessor;
-        } while (!(Fin == First));
+        } while (Fin.PresentCondition() && !(Fin == First) && ++Steps <= FinLimit);
         return true;
     });
     for (const auto& [Absorbed, Survivor] : Redundancy.FaceMerges)

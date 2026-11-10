@@ -906,7 +906,7 @@ RegenerationOutcome RegenerateFeatureTree(ModelPartition& Partition, FeatureTree
                 Store();
                 break;
             }
-            // ③‴ Reshape (direct vertex / edge editing): picked vertices, and both ends of picked edges, carried by Placement.
+            // ③‴ Reshape (direct vertex / edge / face editing): picked vertices, ends of picked edges, and boundary vertices of picked faces, carried by Placement.
             if (Step.Operation == FaceOperationKind::Reshape)
             {
                 FaceOperationSettings Reshape;
@@ -914,8 +914,10 @@ RegenerationOutcome RegenerateFeatureTree(ModelPartition& Partition, FeatureTree
                 Reshape.Placement = Step.Placement;
                 const auto Carry  = [&](VertexToken Vertex)
                 {
-                    if (std::find(Reshape.Vertices.begin(), Reshape.Vertices.end(), Vertex) == Reshape.Vertices.end()) Reshape.Vertices.push_back(Vertex);
+                    if (Vertex.PresentCondition() && std::find(Reshape.Vertices.begin(), Reshape.Vertices.end(), Vertex) == Reshape.Vertices.end())
+                        Reshape.Vertices.push_back(Vertex);
                 };
+                const size_t FinLimit = Partition.Fins.OccupiedCount() + 1;
                 for (size_t Index = 0; Index < Slots.size(); ++Index)
                 {
                     if (Kinds[Index] == ReferenceKind::Vertex) Carry(Partition.Vertices.TokenAt(Slots[Index]));
@@ -924,6 +926,26 @@ RegenerationOutcome RegenerateFeatureTree(ModelPartition& Partition, FeatureTree
                         const EdgeProfile& Edge = Partition.Edges.Resolve(Partition.Edges.TokenAt(Slots[Index]));
                         Carry(Edge.Start);
                         Carry(Edge.End);
+                    }
+                    else if (Kinds[Index] == ReferenceKind::Face)
+                    {
+                        const FaceProfile& Face = Partition.Faces.Resolve(Partition.Faces.TokenAt(Slots[Index]));
+                        for (LoopToken Loop : Face.Loops)
+                        {
+                            const LoopProfile& Ring = Partition.Loops.Resolve(Loop);
+                            if (Ring.IsolatedVertex.PresentCondition()) { Carry(Ring.IsolatedVertex); continue; }
+                            FinToken Fin = Ring.FirstFin;
+                            if (!Fin.PresentCondition()) continue;
+                            size_t Steps = 0;
+                            do
+                            {
+                                const FinProfile&  Use  = Partition.Fins.Resolve(Fin);
+                                const EdgeProfile& Edge = Partition.Edges.Resolve(Use.Edge);
+                                Carry(Edge.Start);
+                                Carry(Edge.End);
+                                Fin = Use.Successor;
+                            } while (Fin.PresentCondition() && !(Fin == Ring.FirstFin) && ++Steps <= FinLimit);
+                        }
                     }
                 }
                 const FaceOperationOutcome Change = ApplyFaceOperation(Partition, Current, Reshape);

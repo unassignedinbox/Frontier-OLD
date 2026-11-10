@@ -39,12 +39,19 @@ namespace
         return { Measure.Distance, Dot(Measure.Normal, Sample.Derivative), Length(Sample.Derivative) };
     }
 
+    [[nodiscard]] DistanceProbe ProbeDistanceNear(const CurveGeometry& Curve, const SurfaceGeometry& Surface, double τ, Vector2& Hint)
+    {
+        const CurveSample     Sample  = EvaluateCurve(Curve, τ);
+        const SurfaceDistance Measure = MeasureSurfaceDistanceNear(Surface, Sample.Position, Hint);
+        return { Measure.Distance, Dot(Measure.Normal, Sample.Derivative), Length(Sample.Derivative) };
+    }
+
     // Newton on d(τ) = 0 — quadratic at transversal roots. Moves are confined to [Low, High].
-    [[nodiscard]] double PolishTransversal(const CurveGeometry& Curve, const SurfaceGeometry& Surface, double τ, double Low, double High)
+    [[nodiscard]] double PolishTransversal(const CurveGeometry& Curve, const SurfaceGeometry& Surface, double τ, double Low, double High, Vector2& Hint)
     {
         for (int Iteration = 0; Iteration < NewtonLimit; ++Iteration)
         {
-            const DistanceProbe Probe = ProbeDistance(Curve, Surface, τ);
+            const DistanceProbe Probe = ProbeDistanceNear(Curve, Surface, τ, Hint);
             if (std::fabs(Probe.Slope) <= 1.0e-14 * Probe.Speed) break;
             const double Step = Probe.Distance / Probe.Slope;                                // [-] - Newton correction
             if (!std::isfinite(Step)) break;                                                 // Probe left the carrier's range
@@ -59,13 +66,15 @@ namespace
     }
 
     // Newton on d′(τ) = 0 (central-difference d″): the extremum of the distance, where a touch lives.
-    [[nodiscard]] double PolishExtremum(const CurveGeometry& Curve, const SurfaceGeometry& Surface, double τ, double Low, double High)
+    [[nodiscard]] double PolishExtremum(const CurveGeometry& Curve, const SurfaceGeometry& Surface, double τ, double Low, double High, Vector2& Hint)
     {
         const double Increment = 1.0e-6 * std::max(1.0, High - Low);                         // [-] - Difference step
         for (int Iteration = 0; Iteration < NewtonLimit; ++Iteration)
         {
-            const double Slope     = ProbeDistance(Curve, Surface, τ).Slope;
-            const double Curvature = (ProbeDistance(Curve, Surface, τ + Increment).Slope - ProbeDistance(Curve, Surface, τ - Increment).Slope) / (2.0 * Increment);
+            const double Slope     = ProbeDistanceNear(Curve, Surface, τ, Hint).Slope;
+            Vector2      PlusHint  = Hint;
+            Vector2      MinusHint = Hint;
+            const double Curvature = (ProbeDistanceNear(Curve, Surface, τ + Increment, PlusHint).Slope - ProbeDistanceNear(Curve, Surface, τ - Increment, MinusHint).Slope) / (2.0 * Increment);
             if (std::fabs(Curvature) <= 1.0e-300) break;
             const double Step = Slope / Curvature;                                           // [-] - Newton correction
             if (!std::isfinite(Step)) break;                                                 // A difference probe left the range
@@ -125,7 +134,12 @@ CurveSurfaceOutcome IntersectCurveSurface(const CurveGeometry& Curve, double Low
         if (Settings.ScanSpacing > 0.0) Spacing = Settings.ScanSpacing;
         const int Count = std::clamp(std::max(static_cast<int>(std::ceil(Chord / std::max(Spacing, 1.0e-300))), 16 * Knots), Floor, 16384);
         std::vector<double> Values(Count + 1);
-        for (int Index = 0; Index <= Count; ++Index) Values[Index] = ProbeDistance(Curve, Surface, Low + (High - Low) * Index / Count).Distance;
+        Vector2 ScanHint = { NAN, NAN };
+        for (int Index = 0; Index <= Count; ++Index)
+        {
+            if ((Index & 7) == 0) ScanHint = { NAN, NAN };
+            Values[Index] = ProbeDistanceNear(Curve, Surface, Low + (High - Low) * Index / Count, ScanHint).Distance;
+        }
         for (int Index = 0; Index <= Count; ++Index)
         {
             const double τ = Low + (High - Low) * Index / Count;
@@ -143,7 +157,12 @@ CurveSurfaceOutcome IntersectCurveSurface(const CurveGeometry& Curve, double Low
         const double KnotSpan = Trace.Knots.back() - Trace.Knots.front();                    // [-] - τ per guide
         const int    Count    = std::clamp(static_cast<int>(16.0 * static_cast<double>(Trace.Knots.size()) * (High - Low) / std::max(KnotSpan, 1.0e-300)), 64, 8192);
         std::vector<double> Values(Count + 1);
-        for (int Index = 0; Index <= Count; ++Index) Values[Index] = ProbeDistance(Curve, Surface, Low + (High - Low) * Index / Count).Distance;
+        Vector2 ScanHint = { NAN, NAN };
+        for (int Index = 0; Index <= Count; ++Index)
+        {
+            if ((Index & 7) == 0) ScanHint = { NAN, NAN };
+            Values[Index] = ProbeDistanceNear(Curve, Surface, Low + (High - Low) * Index / Count, ScanHint).Distance;
+        }
         for (int Index = 0; Index <= Count; ++Index)
         {
             const double τ = Low + (High - Low) * Index / Count;
@@ -187,21 +206,23 @@ CurveSurfaceOutcome IntersectCurveSurface(const CurveGeometry& Curve, double Low
     // ---- ③ Polish on the exact signed distance and accept within precision.
     std::vector<CurveSurfaceCrossing> Transversals;
     std::vector<CurveSurfaceCrossing> Touches;
-    const auto Accept = [&](double τ, bool TouchCondition)
+    const auto Accept = [&](double τ, bool TouchCondition, Vector2& Hint)
     {
         const CurveSample     Sample  = EvaluateCurve(Curve, τ);
-        const SurfaceDistance Measure = MeasureSurfaceDistance(Surface, Sample.Position);
+        const SurfaceDistance Measure = MeasureSurfaceDistanceNear(Surface, Sample.Position, Hint);
         if (!(std::fabs(Measure.Distance) <= Settings.Precision)) return;                    // NaN-safe: never accept a non-finite probe
         for (const CoincidentInterval& Interval : Outcome.Coincidences) if (τ >= Interval.Low - 1.0e-12 && τ <= Interval.High + 1.0e-12) return;
-        const double Sine = std::fabs(Dot(Measure.Normal, Sample.Derivative)) / std::max(Length(Sample.Derivative), 1.0e-300);
-        CurveSurfaceCrossing Crossing{ τ, ProjectOntoSurface(Surface, Measure.Foot, { 0.0, 0.0 }), Sample.Position,
+        const double  Sine             = std::fabs(Dot(Measure.Normal, Sample.Derivative)) / std::max(Length(Sample.Derivative), 1.0e-300);
+        const Vector2 SurfaceParameter = (std::isfinite(Hint.X) && std::isfinite(Hint.Y)) ? ProjectOntoSurfaceNear(Surface, Measure.Foot, Hint) : ProjectOntoSurface(Surface, Measure.Foot, { 0.0, 0.0 });
+        CurveSurfaceCrossing Crossing{ τ, SurfaceParameter, Sample.Position,
                                        TouchCondition || Sine <= TangentSine ? CrossingCategory::Tangent : CrossingCategory::Transversal, std::fabs(Measure.Distance) };
         (Crossing.Category == CrossingCategory::Tangent ? Touches : Transversals).push_back(Crossing);
     };
     for (const Candidate& Entry : Candidates)
     {
-        if (Entry.TouchCondition) Accept(PolishExtremum(Curve, Surface, Entry.τ, Low, High), true);
-        else                      Accept(PolishTransversal(Curve, Surface, Entry.τ, Low, High), false);
+        Vector2 Hint = { NAN, NAN };
+        if (Entry.TouchCondition) Accept(PolishExtremum(Curve, Surface, Entry.τ, Low, High, Hint), true, Hint);
+        else                      Accept(PolishTransversal(Curve, Surface, Entry.τ, Low, High, Hint), false, Hint);
     }
 
     // ---- ④ Merge: duplicates collapse; crossings joined to a touch by a stretch within precision become that touch.

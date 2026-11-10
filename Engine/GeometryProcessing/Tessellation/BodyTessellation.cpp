@@ -614,8 +614,10 @@ namespace
         //    (a, b, c) + (b, a, d) into four triangles around a vertex this face owns. Afterwards the face claims its sides.
         void SplitClaimedSides(std::vector<Facet>& Facets)
         {
-            const std::unordered_set<uint64_t>& Fixed = FixedSides;                          // [-] - Edge-sample sides
-            for (bool Changed = true; Changed;)
+            const std::unordered_set<uint64_t>& Fixed      = FixedSides;                     // [-] - Edge-sample sides
+            const size_t                        SplitLimit = std::max<size_t>(256, 8 * Facets.size());
+            size_t                              Splits     = 0;
+            for (bool Changed = true; Changed && Splits < SplitLimit;)
             {
                 Changed = false;
                 for (size_t Index = 0; Index < Facets.size() && !Changed; ++Index)
@@ -648,6 +650,7 @@ namespace
                         Facets.push_back(Facet{ { B, M, D }, { ChartB, ChartM, ChartD } });
                         Facets.push_back(Facet{ { M, A, D }, { ChartM, ChartA, ChartD } });
                         Summary.ClaimedSplits += 1;
+                        Splits                += 1;
                         Changed = true;
                     }
                 }

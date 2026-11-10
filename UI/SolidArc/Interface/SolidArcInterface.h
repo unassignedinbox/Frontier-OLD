@@ -139,6 +139,7 @@ struct SolidArcBevelSession
     double                            PendingSince    = 0.0;                                 // [s]   - When PendingSize last changed
     int                               StageCount      = 0;                                   // [-]   - Previews built this session
     uint64_t                          PendingFrame    = 0;                                   // [-]   - Frame number when PendingSize last changed
+    uint64_t                          LastStagedFrame = UINT64_MAX;                          // [-]   - Frame number of last StageBevelPreview build
     bool                              DepthEnabled    = false;                               // [-]   - Inset: the pointer drives the depth (H) instead of the distance (D)
     SolidArcCornerRequest             Corner          = {};                                  // [-]   - Corner: the sketches / corner points (size and shape from the session)
     // 📝 Handles (Plasticity's fillet gizmo): [0] the uniform handle drives Size; one per corner of the picked edges
@@ -407,7 +408,9 @@ enum class SolidArcTransformTarget : uint8_t
     Sketches     = 1,                                                                        // 2D Sketch or 3D SpaceCurve steps
     SketchPoints = 2,                                                                        // Mode-1 picked control points of a sketch
     CurvePoles   = 3,                                                                        // Mode-1 picked poles of a fitted 3D curve
-    Vertices     = 4,                                                                        // Mode-1 picked B-rep vertices (direct reshape)
+    Vertices     = 4,                                                                        // Picked B-rep vertices (direct reshape)
+    Edges        = 5,                                                                        // Picked B-rep edges (direct reshape)
+    Faces        = 6,                                                                        // Picked B-rep faces (reshape, else analytic change)
 };
 
 struct SolidArcTransformSession
@@ -416,7 +419,8 @@ struct SolidArcTransformSession
     SolidArcTransformVerb             Verb               = SolidArcTransformVerb::Move;      // [-]   - G / R / S
     SolidArcTransformTarget           TargetKind         = SolidArcTransformTarget::Bodies;  // [-]   - Entity class transformed
     bool                              DuplicateCondition = false;                            // [-]   - Shift+D: commit copies
-    std::vector<std::string>          Keys               = {};                               // [-]   - Bodies / sketches / vertices moved
+    std::vector<std::string>          Keys               = {};                               // [-]   - Bodies / sketches / faces / edges / vertices moved
+    GeometryProcessing::Vector3       FaceNormal         = {};                               // [-]   - Area-weighted outward normal for face targets
     std::string                       PointOwner         = {};                               // [-]   - Sketch / curve label for point/pole targets
     std::vector<int>                  PointIndices       = {};                               // [-]   - Picked sketch points or curve poles
     int                               Axis               = -1;                               // [-]   - −1 screen · 0 x · 1 y · 2 z

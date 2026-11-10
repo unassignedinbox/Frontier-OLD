@@ -215,9 +215,13 @@ namespace
     // 📝 Canal foot: X − C(𝑢) ∥ n(𝑢, 𝑣) exactly when f(𝑢) = (X − C)·C′ + |X − C|·r′ = 0 (n·C′ = −r′), on or off the carrier;
     //    seeded by the spine inversion (the root for r′ = 0), Gauss–Newton first step (f′ ≈ −|C′|²), then secant. Stops on
     //    displacement (law spines carry ~10⁻¹³ of Newton-acceptance jitter).
-    [[nodiscard]] double SolveCanalFoot(const RollingBallDefinition& Definition, Vector3 Position, double SpineLow) noexcept
+    [[nodiscard]] double SolveCanalFoot(const RollingBallDefinition& Definition, Vector3 Position, double SpineLow, double SeedU = NAN) noexcept
     {
-        double 𝑢 = Clamp(ProjectOntoCurve(Definition.Spine, Position, SpineLow), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
+        double 𝑢 = 0.0;
+        if (const auto* Traced = std::get_if<IntersectionCurve>(&Definition.Spine); Traced && Traced->Trace && std::isfinite(SeedU))
+            𝑢 = Clamp(ProjectOntoIntersectionCurveNear(*Traced->Trace, Position, SeedU, SpineLow), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
+        else
+            𝑢 = Clamp(ProjectOntoCurve(Definition.Spine, Position, SpineLow), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
         double Speed = 0.0;                                                                  // [len] - |C′|
         const auto Measure = [&](double At) -> double
         {
@@ -230,6 +234,7 @@ namespace
         double Before = 𝑢, Gradient = Measure(𝑢), Previous = INFINITY;
         if (!(Speed > 0.0)) return 𝑢;
         𝑢 = Clamp(𝑢 + Gradient / (Speed * Speed), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
+        if (𝑢 == Before) return 𝑢;
         for (int Iteration = 0; Iteration < 40; ++Iteration)
         {
             const double Current = Measure(𝑢);
@@ -239,7 +244,8 @@ namespace
             const double Step = SecantCondition ? -Current / Slope : Current / (Speed * Speed);
             Before = 𝑢; Gradient = Current;
             𝑢 = Clamp(𝑢 + Step, Definition.SpineLow, Definition.SpineHigh, Definition.Period);
-            const double Moved = std::fabs(Step) * Speed;                                    // [len] - Along the spine
+            if (𝑢 == Before) break;
+            const double Moved = std::fabs(𝑢 - Before) * Speed;                              // [len] - Along the spine
             if (Moved <= Floor) break;
             if (Moved <= 1.0e-12 * (1.0 + Length(Position)) && Moved >= 0.5 * Previous) break;
             Previous = Moved;
@@ -318,12 +324,16 @@ namespace
     // ⚠️ Plain Gauss–Newton on (𝑢, 𝑣) drops the residual × curvature term: for points ~1 away (overlap scans) its 𝑢
     //    steps alternate with ratio ≈ −½ and ran to the iteration cap on every projection of a P10 run. Steps stop on
     //    displacement (law spines carry ~10⁻¹³ of Newton-acceptance jitter, so 10⁻¹⁵ parameter steps never come).
-    [[nodiscard]] Vector2 ProjectOntoChord(const RollingBallDefinition& Definition, Vector3 Position, Vector2 Reference) noexcept
+    [[nodiscard]] Vector2 ProjectOntoChord(const RollingBallDefinition& Definition, Vector3 Position, Vector2 Reference, bool UseReferenceSeed = false) noexcept
     {
         const double SpineLow = Definition.Period > 0.0 ? Reference.X - 0.5 * Definition.Period : (std::isfinite(Definition.SpineLow) ? Definition.SpineLow : 0.0);
         double 𝑢 = 0.0;
         const auto* Traced = std::get_if<IntersectionCurve>(&Definition.Spine);
-        if (Traced && Traced->Trace && Traced->Trace->Points.size() >= 2)
+        if (Traced && Traced->Trace && UseReferenceSeed && std::isfinite(Reference.X))
+        {
+            𝑢 = ProjectOntoIntersectionCurveNear(*Traced->Trace, Position, Reference.X, SpineLow);
+        }
+        else if (Traced && Traced->Trace && Traced->Trace->Points.size() >= 2)
         {
             const TracedIntersection& Trace = *Traced->Trace;
             double Nearest = INFINITY;                                                       // [len] - Best segment distance
@@ -356,23 +366,27 @@ namespace
         double Before = 𝑢, Gradient = Measure(𝑢), Previous = INFINITY;
         if (!(Speed > 0.0)) return { Fold(𝑢, Reference.X - 0.5 * Definition.Period, Definition.Period), 𝑣 };
         𝑢 = Clamp(𝑢 - Gradient / (Speed * Speed), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
-        for (int Iteration = 0; Iteration < 30; ++Iteration)
+        if (𝑢 != Before)
         {
-            const double Current = Measure(𝑢);                                               // [len²] - f(𝑢)
-            if (!(Speed > 0.0)) break;
-            const double Slope = (Current - Gradient) / (𝑢 - Before);                        // [len²] - Secant f′
-            const double Newton = Current / (Speed * Speed);                                 // [-]    - Gauss–Newton step
-            // Near the foot the secant's difference quotient is jitter over a 10⁻¹² step: Gauss–Newton (quadratic on the
-            // carrier, where the residual term vanishes) finishes instead.
-            const bool   SecantCondition = std::fabs(𝑢 - Before) > 1.0e-8 * (1.0 + std::fabs(𝑢)) && std::isfinite(Slope) && Slope > 0.0;
-            const double Step = SecantCondition ? Current / Slope : Newton;
-            Before = 𝑢; Gradient = Current;
-            𝑢 = Clamp(𝑢 - Step, Definition.SpineLow, Definition.SpineHigh, Definition.Period);
-            const double Moved = std::fabs(Step) * Speed;                                    // [len] - |ΔP| along the carrier
-            // A point off the carrier: steps below 10⁻⁹ of its distance leave the foot as good as the distance it serves.
-            if (Moved <= Floor + 1.0e-9 * Offset) break;
-            if (Moved <= 1.0e-12 * (1.0 + Length(Position)) && Moved >= 0.5 * Previous) break;   // Jitter floor on the carrier
-            Previous = Moved;
+            for (int Iteration = 0; Iteration < 30; ++Iteration)
+            {
+                const double Current = Measure(𝑢);                                           // [len²] - f(𝑢)
+                if (!(Speed > 0.0)) break;
+                const double Slope = (Current - Gradient) / (𝑢 - Before);                    // [len²] - Secant f′
+                const double Newton = Current / (Speed * Speed);                             // [-]    - Gauss–Newton step
+                // Near the foot the secant's difference quotient is jitter over a 10⁻¹² step: Gauss–Newton (quadratic on the
+                // carrier, where the residual term vanishes) finishes instead.
+                const bool   SecantCondition = std::fabs(𝑢 - Before) > 1.0e-8 * (1.0 + std::fabs(𝑢)) && std::isfinite(Slope) && Slope > 0.0;
+                const double Step = SecantCondition ? Current / Slope : Newton;
+                Before = 𝑢; Gradient = Current;
+                𝑢 = Clamp(𝑢 - Step, Definition.SpineLow, Definition.SpineHigh, Definition.Period);
+                if (𝑢 == Before) break;
+                const double Moved = std::fabs(𝑢 - Before) * Speed;                          // [len] - |ΔP| along the carrier
+                // A point off the carrier: steps below 10⁻⁹ of its distance leave the foot as good as the distance it serves.
+                if (Moved <= Floor + 1.0e-9 * Offset) break;
+                if (Moved <= 1.0e-12 * (1.0 + Length(Position)) && Moved >= 0.5 * Previous) break;   // Jitter floor on the carrier
+                Previous = Moved;
+            }
         }
         (void)Measure(𝑢);                                                                    // 𝑣* at the final 𝑢
         return { Fold(𝑢, Reference.X - 0.5 * Definition.Period, Definition.Period), 𝑣 };
@@ -538,11 +552,13 @@ Vector2 ProjectOntoRollingBall(const RollingBallSurface& Surface, Vector3 Positi
 Vector2 ProjectOntoRollingBallNear(const RollingBallSurface& Surface, Vector3 Position, Vector2 Reference) noexcept
 {
     const RollingBallDefinition& Definition = *Surface.Definition;
-    if (ChordCondition(Definition) || CanalCondition(Definition) || !std::isfinite(Reference.X))
-        return ProjectOntoRollingBall(Surface, Position, Reference);
+    if (!std::isfinite(Reference.X)) return ProjectOntoRollingBall(Surface, Position, Reference);
+    if (ChordCondition(Definition)) return ProjectOntoChord(Definition, Position, Reference, true);
     const double SpineLow = Definition.Period > 0.0 ? Reference.X - 0.5 * Definition.Period : (std::isfinite(Definition.SpineLow) ? Definition.SpineLow : 0.0);
     double 𝑢 = 0.0;
-    if (const auto* Traced = std::get_if<IntersectionCurve>(&Definition.Spine); Traced && Traced->Trace)
+    if (CanalCondition(Definition))
+        𝑢 = SolveCanalFoot(Definition, Position, SpineLow, Reference.X);
+    else if (const auto* Traced = std::get_if<IntersectionCurve>(&Definition.Spine); Traced && Traced->Trace)
         𝑢 = ProjectOntoIntersectionCurveNear(*Traced->Trace, Position, Reference.X, SpineLow);
     else
         𝑢 = ProjectOntoCurve(Definition.Spine, Position, SpineLow);
@@ -646,15 +662,27 @@ RollingBallDistance MeasureRollingBallDistance(const RollingBallSurface& Surface
 RollingBallDistance MeasureRollingBallDistanceNear(const RollingBallSurface& Surface, Vector3 Position, Vector2& Hint) noexcept
 {
     const RollingBallDefinition& Definition = *Surface.Definition;
-    if (ChordCondition(Definition) || CanalCondition(Definition) || !std::isfinite(Hint.X))
+    if (!std::isfinite(Hint.X))
     {
         const RollingBallDistance Full = MeasureRollingBallDistance(Surface, Position);
         Hint = ProjectOntoRollingBall(Surface, Full.Foot, Hint);
         return Full;
     }
+    if (ChordCondition(Definition))
+    {
+        Hint = ProjectOntoChord(Definition, Position, Hint, true);
+        const SurfaceSample Sample = EvaluateChord(Definition, Hint);
+        RollingBallDistance Outcome;
+        Outcome.Normal   = Normalize(Cross(Sample.DerivativeU, Sample.DerivativeV)) * Definition.Handedness;
+        Outcome.Distance = Dot(Position - Sample.Position, Outcome.Normal);
+        Outcome.Foot     = Sample.Position;
+        return Outcome;
+    }
     const double SpineLow = Definition.Period > 0.0 ? 0.0 : (std::isfinite(Definition.SpineLow) ? Definition.SpineLow : 0.0);
     double 𝑢 = 0.0;
-    if (const auto* Traced = std::get_if<IntersectionCurve>(&Definition.Spine); Traced && Traced->Trace)
+    if (CanalCondition(Definition))
+        𝑢 = SolveCanalFoot(Definition, Position, SpineLow, Hint.X);
+    else if (const auto* Traced = std::get_if<IntersectionCurve>(&Definition.Spine); Traced && Traced->Trace)
         𝑢 = Clamp(ProjectOntoIntersectionCurveNear(*Traced->Trace, Position, Hint.X, SpineLow), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
     else
         𝑢 = Clamp(ProjectOntoCurve(Definition.Spine, Position, SpineLow), Definition.SpineLow, Definition.SpineHigh, Definition.Period);
@@ -662,7 +690,7 @@ RollingBallDistance MeasureRollingBallDistanceNear(const RollingBallSurface& Sur
     const Vector3 Centre = EvaluateCurve(Definition.Spine, 𝑢).Position;
     const Vector3 Offset = Position - Centre;
     const double  Reach  = Length(Offset);
-    const double  Ball   = Definition.Radius;
+    const double  Ball   = CanalCondition(Definition) ? RadiusAt(Definition, 𝑢) : Definition.Radius;
     RollingBallDistance Outcome;
     const Vector3 Radial = Reach > 0.0 ? Offset * (1.0 / Reach) : ResolveSection(Definition, 𝑢).First;
     Outcome.Normal   = Radial * Definition.Handedness;
@@ -712,9 +740,10 @@ double ProjectOntoContactCurve(const ContactDefinition& Definition, Vector3 Posi
         const CurveSample Sample = EvaluateContactCurve(Definition, τ);
         const double      Slope  = Dot(Sample.Derivative, Sample.Derivative);
         if (!(Slope > 0.0)) break;
-        const double Step = Dot(Sample.Position - Position, Sample.Derivative) / Slope;
+        const double Step     = Dot(Sample.Position - Position, Sample.Derivative) / Slope;
+        const double Previous = τ;
         τ = Clamp(τ - Step, Definition.SpineLow, Definition.SpineHigh, Definition.Period);
-        if (std::fabs(Step) <= 1.0e-15 * (1.0 + std::fabs(τ))) break;
+        if (τ == Previous || std::fabs(τ - Previous) <= 1.0e-15 * (1.0 + std::fabs(τ))) break;
     }
     return Fold(τ, IntervalLow, Definition.Period);
 }

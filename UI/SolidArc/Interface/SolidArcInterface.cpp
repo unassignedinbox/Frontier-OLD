@@ -962,8 +962,8 @@ void ConfineBevelLimit(SolidArcWorkspaceState& State, int Parameter, bool Accept
     else if (Bevel.LimitGood > 0.0 && Value > Bevel.LimitGood) Bevel.LimitCeiling = Bevel.LimitCeiling > 0.0 ? std::min(Bevel.LimitCeiling, Value) : Value;
     if (!(Bevel.LimitCeiling > 0.0) || !(Bevel.LimitGood > 0.0) || (AcceptedCondition && !Bevel.LimitProbeCondition)) return;
     const double Gap    = Bevel.LimitCeiling - Bevel.LimitGood;                              // [len] - Unknown band
-    const double RelTol = Bevel.StageMs > 200.0 ? 5.0e-2 : Bevel.StageMs > 50.0 ? 2.0e-2 : 2.0e-3;
-    const double AbsTol = Bevel.StageMs > 50.0 ? 5.0e-4 : 1.0e-4;
+    const double RelTol = Bevel.StageMs > 400.0 ? 1.0 : Bevel.StageMs > 120.0 ? 1.2e-1 : Bevel.StageMs > 50.0 ? 2.0e-2 : 2.0e-3;
+    const double AbsTol = Bevel.StageMs > 400.0 ? 1.0e9 : Bevel.StageMs > 120.0 ? 1.0e-3 : Bevel.StageMs > 50.0 ? 5.0e-4 : 1.0e-4;
     if (Gap > std::max(AbsTol, RelTol * Bevel.LimitGood))
     {
         Value                     = std::round(0.5 * (Bevel.LimitGood + Bevel.LimitCeiling) * 1.0e6) * 1.0e-6;
@@ -991,6 +991,8 @@ void StageBevelPreview(SolidArcWorkspaceState& State)
     if (!Bevel.ActiveCondition) return;
     ResolveProfileCombination(Bevel);
     if (BevelStagedCurrent(Bevel)) return;
+    // Never run two synchronous kernel rebuilds in the same UI frame when a limit probe or slow preview already built this frame.
+    if (Bevel.LastStagedFrame == State.FrameNumber && (Bevel.LimitProbeCondition || Bevel.StageMs > 15.0)) return;
     // 💡 A slow preview (a blend along a cylinder–cylinder junction takes seconds) is rebuilt once the pointer rests
     //    (one size held for 0.15 s and 6 frames: a slow frame alone is no rest), not on every pixel of mouse adjust: the
     //    last preview stays up meanwhile. A typed (pinned) size, a new shape, verb or Boolean, and every fast preview
@@ -1000,11 +1002,13 @@ void StageBevelPreview(SolidArcWorkspaceState& State)
                           Bevel.StagedEndSize == Bevel.EndSize && Bevel.StagedReversed == Bevel.ReversedCondition && Bevel.StagedCombination == Bevel.Combination &&
                           Bevel.StagedDepth == Bevel.Depth;
     const bool Dragging = Bevel.DragHandle >= 0 || Bevel.PointerDragCondition;               // A handle / empty-space drag is mouse adjust too
-    if (SizeOnly && (!Bevel.PinnedCondition || Dragging) && Bevel.StageMs > 40.0)
+    if (SizeOnly && (!Bevel.PinnedCondition || Dragging) && Bevel.StageMs > 30.0)
     {
         if (Bevel.PendingSize != Bevel.Size) { Bevel.PendingSize = Bevel.Size; Bevel.PendingSince = Now; Bevel.PendingFrame = State.FrameNumber; return; }
         if (State.FrameNumber < Bevel.PendingFrame + 6 || Now - Bevel.PendingSince < 0.15) return;
     }
+    if (Bevel.LimitProbeCondition && Bevel.StageMs > 50.0 && Bevel.LastStagedFrame != UINT64_MAX && State.FrameNumber < Bevel.LastStagedFrame + 2) return;
+    Bevel.LastStagedFrame = State.FrameNumber;
     const int Parameter = ChangedBevelParameter(Bevel);                                      // [idx] - What the bound applies to
     Bevel.StagedDepth       = Bevel.Depth;
     Bevel.StagedCombination = Bevel.Combination;
@@ -2238,9 +2242,8 @@ void DrawDimensionLine(const SolidArcWorkspaceState& State, const OrbitCameraFra
 void DrawAngleDimension(const SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame, ImDrawList* Canvas, const OrthonormalFrame& Plane, Vector2 Vertex, Vector2 A, Vector2 B)
 {
     const double From  = std::atan2(A.Y - Vertex.Y, A.X - Vertex.X);
-    double       Sweep = std::atan2(B.Y - Vertex.Y, B.X - Vertex.X) - From;
-    while (Sweep > std::numbers::pi) Sweep -= 2.0 * std::numbers::pi;
-    while (Sweep < -std::numbers::pi) Sweep += 2.0 * std::numbers::pi;
+    const double Raw   = std::atan2(B.Y - Vertex.Y, B.X - Vertex.X) - From;
+    const double Sweep = std::isfinite(Raw) ? std::remainder(Raw, 2.0 * std::numbers::pi) : 0.0;
     const double Radius = 0.35 * std::min(Distance(A, Vertex), Distance(B, Vertex));
     if (Radius <= 0.0) return;
     std::vector<ImVec2> Pixels;
@@ -3475,9 +3478,9 @@ std::vector<ConstraintGlyph> LayoutConstraintGlyphs(const SolidArcWorkspaceState
                 return Unit(ImVec2(Far.x - Hub.x, Far.y - Hub.y), ImVec2(1, 0));
             };
             const ImVec2 A = Towards(MiddleP, U), B = Towards(MiddleQ, W);
-            float From = std::atan2(A.y, A.x), Sweep = std::atan2(B.y, B.x) - From;
-            while (Sweep > float(std::numbers::pi)) Sweep -= 2.0f * float(std::numbers::pi);
-            while (Sweep < -float(std::numbers::pi)) Sweep += 2.0f * float(std::numbers::pi);
+            const float From  = std::atan2(A.y, A.x);
+            const float Raw   = std::atan2(B.y, B.x) - From;
+            const float Sweep = std::isfinite(Raw) ? std::remainder(Raw, 2.0f * float(std::numbers::pi)) : 0.0f;
             char Text[32];
             std::snprintf(Text, sizeof(Text), "%.4g°", std::abs(MeasureSketchConstraint(Sketch, Constraint)) * 180.0 / std::numbers::pi);
             const float  Middle = From + Sweep * 0.5f;
@@ -3868,20 +3871,35 @@ void DriveConstraintSession(SolidArcWorkspaceState& State, const OrbitCameraFram
 // Dashed polyline (6 px on, 4 px off) over a dark casing: earlier sketches read on the background and on faces alike.
 void DrawDashedPolyline(ImDrawList* Canvas, const std::vector<ImVec2>& Pixels, ImU32 Colour, float Width)
 {
+    if (Pixels.size() < 2) return;
     Canvas->AddPolyline(Pixels.data(), int(Pixels.size()), OtherSketchCasing, Width + 2.0f);
-    constexpr float On = 6.0f, Period = 10.0f;
-    float Phase = 0.0f;                                                                      // [px] - Arc length into the current period
+    constexpr double On = 6.0, Period = 10.0;
+    double Phase = 0.0;                                                                      // [px] - Arc length into the current period
     for (size_t Index = 0; Index + 1 < Pixels.size(); ++Index)
     {
         const ImVec2 From = Pixels[Index], To = Pixels[Index + 1];
-        const float  Span = std::hypot(To.x - From.x, To.y - From.y);
-        float Travel = 0.0f;
-        while (Travel < Span)
+        if (!std::isfinite(From.x) || !std::isfinite(From.y) || !std::isfinite(To.x) || !std::isfinite(To.y)) continue;
+        const double Span = std::hypot(double(To.x) - double(From.x), double(To.y) - double(From.y));
+        if (!(Span > 0.0)) continue;
+        // Extreme zoomed / near-clip projection spans cannot resolve individual 6 px dashes; draw solid to avoid millions of vertices.
+        if (Span > 2048.0 * Period)
         {
-            const float Step = std::min(Span - Travel, Phase < On ? On - Phase : Period - Phase);
-            if (Phase < On && Span > 0.0f)
-                Canvas->AddLine(ImVec2(From.x + (To.x - From.x) * Travel / Span, From.y + (To.y - From.y) * Travel / Span),
-                                ImVec2(From.x + (To.x - From.x) * (Travel + Step) / Span, From.y + (To.y - From.y) * (Travel + Step) / Span), Colour, Width);
+            Canvas->AddLine(From, To, Colour, Width);
+            Phase = std::fmod(Phase + Span, Period);
+            continue;
+        }
+        double Travel = 0.0;
+        int    Guard  = 0;
+        while (Travel < Span && Guard++ < 4096)
+        {
+            const double Step = std::max(1.0e-3, std::min(Span - Travel, Phase < On ? On - Phase : Period - Phase));
+            if (Phase < On)
+            {
+                const float StartFrac = float(Travel / Span);
+                const float EndFrac   = float(std::min(Span, Travel + Step) / Span);
+                Canvas->AddLine(ImVec2(From.x + (To.x - From.x) * StartFrac, From.y + (To.y - From.y) * StartFrac),
+                                ImVec2(From.x + (To.x - From.x) * EndFrac, From.y + (To.y - From.y) * EndFrac), Colour, Width);
+            }
             Travel += Step;
             Phase   = std::fmod(Phase + Step, Period);
         }
@@ -4318,21 +4336,31 @@ bool CollectTypedAmount(std::string& Typed)
 void OpenTransformSession(SolidArcWorkspaceState& State, SolidArcTransformVerb Verb, bool DuplicateCondition)
 {
     SolidArcTransformTarget  TargetKind   = SolidArcTransformTarget::Bodies;
-    std::vector<std::string> Keys         = PickedBodies(State.Document);
+    std::vector<std::string> Keys         = {};
     std::string              PointOwner   = {};
     std::vector<int>         PointIndices = {};
     Vector3                  Pivot        = {};
+    Vector3                  FaceNormal   = { 0.0, 0.0, 1.0 };
     const char*              Noun         = "body(ies)";
 
-    if (!Keys.empty())
+    // Whole-body targets: Shift+D duplicate always copies owning bodies, and Mode 4 (Solid) or an explicit body pick moves whole bodies.
+    const bool ExplicitBodyCondition = DuplicateCondition || State.PickMode == SolidArcPickMode::Solid || !State.Document.Selection.Bodies.empty();
+    if (ExplicitBodyCondition)
     {
-        TargetKind = SolidArcTransformTarget::Bodies;
-        Pivot      = MeasureBodiesCentre(State.Scene, Keys);
+        Keys = PickedBodies(State.Document);
+        if (!Keys.empty())
+        {
+            TargetKind = SolidArcTransformTarget::Bodies;
+            Pivot      = MeasureBodiesCentre(State.Scene, Keys);
+        }
     }
-    else
+
+    if (Keys.empty() && !DuplicateCondition)
     {
-        // Mode 1 sub-object picks take priority before whole-curve fallback when control points / poles are explicitly picked.
-        if (!DuplicateCondition && (State.PickMode == SolidArcPickMode::ControlPoint || State.PickMode == SolidArcPickMode::Any || (State.PickMode==SolidArcPickMode::Edge && !State.SplineSpans.Indices.empty())))
+        // Sub-object picks take priority before whole-body/whole-curve fallback when no whole body is selected.
+        if (State.PickMode == SolidArcPickMode::ControlPoint
+            || (State.PickMode == SolidArcPickMode::Any && State.Document.Selection.Faces.empty() && State.Document.Selection.Edges.empty())
+            || (State.PickMode == SolidArcPickMode::Edge && !State.SplineSpans.Indices.empty()))
         {
             if (!State.SketchPoints.Points.empty() && !State.SketchPoints.Sketch.empty())
             {
@@ -4395,23 +4423,88 @@ void OpenTransformSession(SolidArcWorkspaceState& State, SolidArcTransformVerb V
                 }
             }
         }
-        if (Keys.empty())
+
+        if (Keys.empty() && (State.PickMode == SolidArcPickMode::Face || State.PickMode == SolidArcPickMode::Any) && !State.Document.Selection.Faces.empty())
         {
-            Keys = PickedSketches(State.Document);
-            if (Keys.empty()) Keys = SelectedSketchLabels(State.Document);
-            if (Keys.empty() && FocusedSketchCondition(State)) Keys = { State.FocusedStep };
-            if (!Keys.empty())
+            Vector3 Centre{}, Normal{}, CornerSum{};
+            double  Area        = 0.0;
+            int     CornerCount = 0;
+            for (const SolidArcSceneFace& Face : State.Scene.Faces)
             {
-                TargetKind = SolidArcTransformTarget::Sketches;
-                Pivot      = MeasureSketchesCentre(State.Document, Keys);
-                Noun       = "sketch(es)";
+                if (std::find(State.Document.Selection.Faces.begin(), State.Document.Selection.Faces.end(), Face.Name) == State.Document.Selection.Faces.end()) continue;
+                for (uint32_t Corner = Face.FirstCorner; Corner < Face.FirstCorner + Face.CornerCount; ++Corner)
+                {
+                    const SolidArcSceneCorner& Entry = State.Scene.Corners[Corner];
+                    CornerSum = CornerSum + Vector3{ Entry.Position[0], Entry.Position[1], Entry.Position[2] };
+                    ++CornerCount;
+                }
+                for (uint32_t Corner = Face.FirstCorner; Corner + 2 < Face.FirstCorner + Face.CornerCount; Corner += 3)
+                {
+                    const SolidArcSceneCorner* Triangle = &State.Scene.Corners[Corner];
+                    Vector3 Points[3], Normals{};
+                    for (int Index = 0; Index < 3; ++Index)
+                    {
+                        Points[Index] = { Triangle[Index].Position[0], Triangle[Index].Position[1], Triangle[Index].Position[2] };
+                        Normals       = Normals + Vector3{ Triangle[Index].Normal[0], Triangle[Index].Normal[1], Triangle[Index].Normal[2] };
+                    }
+                    const double Piece = 0.5 * Length(Cross(Points[1] - Points[0], Points[2] - Points[0]));
+                    Centre = Centre + (Points[0] + Points[1] + Points[2]) * (Piece / 3.0);
+                    Normal = Normal + Normals * Piece;
+                    Area  += Piece;
+                }
+            }
+            if (Area > 0.0 || CornerCount > 0)
+            {
+                TargetKind = SolidArcTransformTarget::Faces;
+                Keys       = State.Document.Selection.Faces;
+                Pivot      = Area > 0.0 ? Centre * (1.0 / Area) : CornerSum * (1.0 / double(CornerCount));
+                FaceNormal = Length(Normal) >= 1.0e-12 ? Normal * (1.0 / Length(Normal)) : Vector3{ 0.0, 0.0, 1.0 };
+                Noun       = "face(s)";
+            }
+        }
+
+        if (Keys.empty() && (State.PickMode == SolidArcPickMode::Edge || State.PickMode == SolidArcPickMode::Any) && !State.Document.Selection.Edges.empty())
+        {
+            Vector3 Sum{};
+            int     Count = 0;
+            for (const SolidArcSceneEdge& Edge : State.Scene.Edges)
+            {
+                if (std::find(State.Document.Selection.Edges.begin(), State.Document.Selection.Edges.end(), Edge.Name) == State.Document.Selection.Edges.end()) continue;
+                for (uint32_t Segment = Edge.FirstSegment; Segment < Edge.FirstSegment + Edge.SegmentCount; ++Segment)
+                {
+                    const SolidArcSceneSegment& Span = State.Scene.Segments[Segment];
+                    Sum = Sum + Vector3{ 0.5 * (double(Span.Start[0]) + double(Span.End[0])),
+                                         0.5 * (double(Span.Start[1]) + double(Span.End[1])),
+                                         0.5 * (double(Span.Start[2]) + double(Span.End[2])) };
+                    ++Count;
+                }
+            }
+            if (Count > 0)
+            {
+                TargetKind = SolidArcTransformTarget::Edges;
+                Keys       = State.Document.Selection.Edges;
+                Pivot      = Sum * (1.0 / double(Count));
+                Noun       = "edge(s)";
             }
         }
     }
 
     if (Keys.empty())
     {
-        Announce(State, std::string(DuplicateCondition ? "Duplicate" : TransformVerbLabel(Verb)) + " needs picked bodies (mode 4, or a face / edge of the body) or picked sketches");
+        Keys = PickedSketches(State.Document);
+        if (Keys.empty()) Keys = SelectedSketchLabels(State.Document);
+        if (Keys.empty() && FocusedSketchCondition(State)) Keys = { State.FocusedStep };
+        if (!Keys.empty())
+        {
+            TargetKind = SolidArcTransformTarget::Sketches;
+            Pivot      = MeasureSketchesCentre(State.Document, Keys);
+            Noun       = "sketch(es)";
+        }
+    }
+
+    if (Keys.empty())
+    {
+        Announce(State, std::string(DuplicateCondition ? "Duplicate" : TransformVerbLabel(Verb)) + " needs picked bodies, faces, edges, vertices, or sketches");
         return;
     }
     SolidArcTransformSession& Transform = State.Transform;
@@ -4423,6 +4516,7 @@ void OpenTransformSession(SolidArcWorkspaceState& State, SolidArcTransformVerb V
     Transform.TargetKind         = TargetKind;
     Transform.DuplicateCondition = DuplicateCondition;
     Transform.Keys               = Keys;
+    Transform.FaceNormal         = FaceNormal;
     Transform.PointOwner         = PointOwner;
     Transform.PointIndices       = PointIndices;
     Transform.SketchCondition    = (TargetKind == SolidArcTransformTarget::Sketches);
@@ -4500,12 +4594,66 @@ void CancelTransformSession(SolidArcWorkspaceState& State)
     }
     case SolidArcTransformTarget::Vertices:
     {
-        const std::vector<std::string> SavedEdges = Document.Selection.Edges, SavedVerts = Document.Selection.Vertices;
-        Document.Selection.Vertices = Transform.Keys;
+        const SolidArcSelection Saved = Document.Selection;
+        Document.Selection.Vertices   = Transform.Keys;
         Document.Selection.Edges.clear();
+        Document.Selection.Faces.clear();
         const SolidArcCommandOutcome Outcome = ReshapeSolidArcSelection(Document, Map, TransformVerbLabel(Transform.Verb));
-        if (Document.Selection.Edges.empty()) Document.Selection.Edges = SavedEdges;
-        if (!Outcome.AcceptedCondition) Document.Selection.Vertices = SavedVerts;
+        if (Document.Selection.Edges.empty()) Document.Selection.Edges = Saved.Edges;
+        if (Document.Selection.Faces.empty()) Document.Selection.Faces = Saved.Faces;
+        if (!Outcome.AcceptedCondition) Document.Selection.Vertices = Saved.Vertices;
+        return Outcome;
+    }
+    case SolidArcTransformTarget::Edges:
+    {
+        const SolidArcSelection Saved = Document.Selection;
+        Document.Selection.Edges      = Transform.Keys;
+        Document.Selection.Vertices.clear();
+        Document.Selection.Faces.clear();
+        const SolidArcCommandOutcome Outcome = ReshapeSolidArcSelection(Document, Map, TransformVerbLabel(Transform.Verb));
+        if (Document.Selection.Vertices.empty()) Document.Selection.Vertices = Saved.Vertices;
+        if (Document.Selection.Faces.empty()) Document.Selection.Faces = Saved.Faces;
+        if (!Outcome.AcceptedCondition) Document.Selection.Edges = Saved.Edges;
+        return Outcome;
+    }
+    case SolidArcTransformTarget::Faces:
+    {
+        const SolidArcSelection Saved = Document.Selection;
+        Document.Selection.Faces      = Transform.Keys;
+        Document.Selection.Edges.clear();
+        Document.Selection.Vertices.clear();
+        SolidArcCommandOutcome Outcome = ReshapeSolidArcSelection(Document, Map, TransformVerbLabel(Transform.Verb));
+        if (!Outcome.AcceptedCondition)
+        {
+            Document.Selection.Faces = Transform.Keys;
+            if (Transform.Verb == SolidArcTransformVerb::Move)
+            {
+                const Vector3 Moved       = Map.ColumnX * Transform.Pivot.X + Map.ColumnY * Transform.Pivot.Y + Map.ColumnZ * Transform.Pivot.Z + Map.Shift - Transform.Pivot;
+                const double  ShiftLength = Length(Moved);
+                const Vector3 Direction   = ShiftLength > 0.0 ? Moved * (1.0 / ShiftLength) : Transform.FaceNormal;
+                Outcome = std::abs(Dot(Direction, Transform.FaceNormal)) > 1.0 - 1.0e-5
+                        ? ChangeSolidArcSelection(Document, FaceOperationKind::Offset, Dot(Moved, Transform.FaceNormal))
+                        : ChangeSolidArcSelection(Document, FaceOperationKind::Tweak, ShiftLength, Direction);
+            }
+            else if (Transform.Verb == SolidArcTransformVerb::Rotate)
+            {
+                const Vector3 AxisVec{ Map.ColumnY.Z - Map.ColumnZ.Y, Map.ColumnZ.X - Map.ColumnX.Z, Map.ColumnX.Y - Map.ColumnY.X };
+                const double  Sine  = 0.5 * Length(AxisVec);
+                const double  Cosine = std::clamp(0.5 * (Map.ColumnX.X + Map.ColumnY.Y + Map.ColumnZ.Z - 1.0), -1.0, 1.0);
+                const double  Angle  = std::atan2(Sine, Cosine);
+                const Vector3 Axis   = Sine > 1.0e-12 ? Normalize(AxisVec)
+                                     : (Transform.Axis == 0 ? Vector3{ 1.0, 0.0, 0.0 } : Transform.Axis == 1 ? Vector3{ 0.0, 1.0, 0.0 } : Vector3{ 0.0, 0.0, 1.0 });
+                Outcome = ChangeSolidArcSelection(Document, FaceOperationKind::Rotate, Angle, Axis);
+            }
+            else
+            {
+                const double Factor = std::cbrt(std::max(1.0e-9, std::abs(Dot(Map.ColumnX, Cross(Map.ColumnY, Map.ColumnZ)))));
+                Outcome = ChangeSolidArcSelection(Document, FaceOperationKind::Scale, Factor);
+            }
+        }
+        if (Document.Selection.Edges.empty()) Document.Selection.Edges = Saved.Edges;
+        if (Document.Selection.Vertices.empty()) Document.Selection.Vertices = Saved.Vertices;
+        if (!Outcome.AcceptedCondition) Document.Selection.Faces = Saved.Faces;
         return Outcome;
     }
     case SolidArcTransformTarget::Bodies:
@@ -5067,7 +5215,9 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
             }
         }
     }
-    if (State.PickMode == SolidArcPickMode::ControlPoint && State.SketchPoints.Points.empty() && !Document.Selection.Vertices.empty())
+    if ((State.PickMode == SolidArcPickMode::ControlPoint
+         || (State.PickMode == SolidArcPickMode::Any && Document.Selection.Bodies.empty() && Document.Selection.Faces.empty() && Document.Selection.Edges.empty()))
+        && State.SketchPoints.Points.empty() && !Document.Selection.Vertices.empty())
     {
         ResolveShape(Document.Selection.Vertices, true);
         return;
@@ -5116,7 +5266,8 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
             }
         }
     }
-    if (State.PickMode == SolidArcPickMode::Face && !Document.Selection.Faces.empty())
+    if ((State.PickMode == SolidArcPickMode::Face || (State.PickMode == SolidArcPickMode::Any && Document.Selection.Bodies.empty()))
+        && !Document.Selection.Faces.empty())
     {
         Vector3 Centre, Normal;
         double  Area = 0.0;
@@ -5138,8 +5289,8 @@ void ResolveGizmoTarget(SolidArcWorkspaceState& State)
                 Area  += Piece;
             }
         }
-        if (Area <= 0.0 || Length(Normal) < 1.0e-12) return;
-        const Vector3 Up    = Normal * (1.0 / Length(Normal));
+        if (Area <= 0.0) return;
+        const Vector3 Up    = Length(Normal) >= 1.0e-12 ? Normal * (1.0 / Length(Normal)) : Vector3{ 0.0, 0.0, 1.0 };
         const Vector3 Seed  = std::abs(Up.X) < 0.9 ? Vector3{ 1.0, 0.0, 0.0 } : Vector3{ 0.0, 1.0, 0.0 };
         const Vector3 Along = Normalize(Seed - Up * Dot(Seed, Up));
         Gizmo.Target       = SolidArcGizmoTarget::Faces;
@@ -5392,15 +5543,51 @@ void FitGizmoToView(SolidArcWorkspaceState& State)
     }
     case SolidArcGizmoTarget::Faces:
     {
-        if (GizmoRotateHandle(Handle)) return ChangeSolidArcSelection(Document, FaceOperationKind::Rotate, Gizmo.Angle, Gizmo.Pose.Axes[Axis]);
-        if (GizmoScaleHandle(Gizmo, Handle)) return ChangeSolidArcSelection(Document, FaceOperationKind::Scale, Gizmo.Factor);
-        const double  ShiftLength = Length(Gizmo.Shift);
-        const Vector3 Direction   = ShiftLength > 0.0 ? Gizmo.Shift * (1.0 / ShiftLength) : Gizmo.FaceNormal;
-        if (Handle == GizmoHandle::TranslateZ && std::abs(Dot(Gizmo.Pose.Axes[2], Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
-            return ChangeSolidArcSelection(Document, FaceOperationKind::Offset, Dot(Gizmo.Shift, Gizmo.FaceNormal));
-        if (std::abs(Dot(Direction, Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
-            return ChangeSolidArcSelection(Document, FaceOperationKind::Offset, Dot(Gizmo.Shift, Gizmo.FaceNormal));
-        return ChangeSolidArcSelection(Document, FaceOperationKind::Tweak, ShiftLength, Direction);
+        const SolidArcSelection Saved = Document.Selection;
+        const auto TryReshape = [&]()
+        {
+            Document.Selection.Faces = Gizmo.Names;
+            Document.Selection.Edges.clear();
+            Document.Selection.Vertices.clear();
+            SolidArcCommandOutcome Reshaped = ReshapeSolidArcSelection(Document, GizmoMap(Gizmo), Verb);
+            if (Document.Selection.Edges.empty()) Document.Selection.Edges = Saved.Edges;
+            if (Document.Selection.Vertices.empty()) Document.Selection.Vertices = Saved.Vertices;
+            if (!Reshaped.AcceptedCondition) Document.Selection = Saved;
+            return Reshaped;
+        };
+        const auto TryAnalytic = [&]()
+        {
+            Document.Selection.Faces = Gizmo.Names;
+            if (GizmoRotateHandle(Handle))
+                return ChangeSolidArcSelection(Document, FaceOperationKind::Rotate, Gizmo.Angle, Gizmo.Pose.Axes[Axis]);
+            if (GizmoScaleHandle(Gizmo, Handle))
+                return ChangeSolidArcSelection(Document, FaceOperationKind::Scale, Gizmo.Factor);
+            const double  ShiftLength = Length(Gizmo.Shift);
+            const Vector3 Direction   = ShiftLength > 0.0 ? Gizmo.Shift * (1.0 / ShiftLength) : Gizmo.FaceNormal;
+            if ((Handle == GizmoHandle::TranslateZ && std::abs(Dot(Gizmo.Pose.Axes[2], Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
+                || std::abs(Dot(Direction, Gizmo.FaceNormal)) > 1.0 - 1.0e-5)
+                return ChangeSolidArcSelection(Document, FaceOperationKind::Offset, Dot(Gizmo.Shift, Gizmo.FaceNormal));
+            return ChangeSolidArcSelection(Document, FaceOperationKind::Tweak, ShiftLength, Direction);
+        };
+
+        // Infinite planes are invariant under in-plane translation, rotation about their own normal, and scaling about an in-plane pivot:
+        // route those through direct vertex Reshape first so planar faces shear, twist, and scale instead of succeeding as carrier no-ops.
+        const double  ShiftLength     = Length(Gizmo.Shift);
+        const Vector3 Direction       = ShiftLength > 0.0 ? Gizmo.Shift * (1.0 / ShiftLength) : Gizmo.FaceNormal;
+        const bool    InPlaneMove     = !GizmoRotateHandle(Handle) && !GizmoScaleHandle(Gizmo, Handle)
+                                     && Handle != GizmoHandle::TranslateZ && std::abs(Dot(Direction, Gizmo.FaceNormal)) <= 1.0e-4;
+        const bool    NormalTwist     = GizmoRotateHandle(Handle) && std::abs(Dot(Gizmo.Pose.Axes[Axis], Gizmo.FaceNormal)) > 1.0 - 1.0e-5;
+        const bool    PreferReshape   = InPlaneMove || NormalTwist || GizmoScaleHandle(Gizmo, Handle);
+        if (PreferReshape)
+        {
+            SolidArcCommandOutcome Reshaped = TryReshape();
+            if (Reshaped.AcceptedCondition) return Reshaped;
+            return TryAnalytic();
+        }
+        SolidArcCommandOutcome Analytic = TryAnalytic();
+        if (Analytic.AcceptedCondition) return Analytic;
+        SolidArcCommandOutcome Reshaped = TryReshape();
+        return Reshaped.AcceptedCondition ? Reshaped : Analytic;
     }
     case SolidArcGizmoTarget::Shape:
     {
@@ -5474,11 +5661,10 @@ void DriveGizmoDrag(SolidArcWorkspaceState& State, const OrbitCameraFrame& Frame
     {
         if (const std::optional<double> Raw = MeasureGizmoAngle(Ray, Pose.Origin, Pose.Axes[Axis], Pose.Axes[(Axis + 1) % 3]))
         {
-            double Step = *Raw - Gizmo.GrabValue;                                            // unwrap: the drag may pass ±π
-            while (Step > std::numbers::pi)  Step -= 2.0 * std::numbers::pi;
-            while (Step < -std::numbers::pi) Step += 2.0 * std::numbers::pi;
+            const double Delta = *Raw - Gizmo.GrabValue;                                     // unwrap: the drag may pass ±π
+            const double Step  = std::isfinite(Delta) ? std::remainder(Delta, 2.0 * std::numbers::pi) : 0.0;
             Gizmo.Sweep    += Step;
-            Gizmo.GrabValue    = *Raw;
+            Gizmo.GrabValue = *Raw;
         }
         Gizmo.Angle   = Snapped(Gizmo.Sweep * 180.0 / std::numbers::pi, TurnSnap) * std::numbers::pi / 180.0;
         Gizmo.Readout = Compose("%s %.1f°", Name, Gizmo.Angle * 180.0 / std::numbers::pi);
@@ -12256,25 +12442,35 @@ void DrawDrawingSheetCard(SolidArcWorkspaceState& State)
 void DrawPatternedPolyline(ImDrawList* Canvas, const std::vector<ImVec2>& Points, const std::vector<float>& Pattern, ImU32 Colour, float Width)
 {
     if (Points.size() < 2) return;
-    if (Pattern.empty()) { Canvas->AddPolyline(Points.data(), int(Points.size()), Colour, Width); return; }
+    double Cycle = 0.0;
+    for (float Entry : Pattern) if (std::isfinite(Entry) && Entry > 0.0f) Cycle += double(Entry);
+    if (Pattern.empty() || !(Cycle > 1.0e-3)) { Canvas->AddPolyline(Points.data(), int(Points.size()), Colour, Width); return; }
     size_t Phase     = 0;
-    float  Remaining = Pattern[0];
+    double Remaining = std::max(1.0e-3, double(Pattern[0]));
     for (size_t Index = 1; Index < Points.size(); ++Index)
     {
         ImVec2       From   = Points[Index - 1];
         const ImVec2 To     = Points[Index];
-        float        Length = std::hypot(To.x - From.x, To.y - From.y);
-        if (Length <= 0.0f) continue;
-        const ImVec2 Along((To.x - From.x) / Length, (To.y - From.y) / Length);
-        while (Length > 0.0f)
+        if (!std::isfinite(From.x) || !std::isfinite(From.y) || !std::isfinite(To.x) || !std::isfinite(To.y)) continue;
+        double Length = std::hypot(double(To.x) - double(From.x), double(To.y) - double(From.y));
+        if (!(Length > 0.0)) continue;
+        if (Length > 2048.0 * Cycle)
         {
-            const float  Piece = std::min(Remaining, Length);
-            const ImVec2 End(From.x + Along.x * Piece, From.y + Along.y * Piece);
+            Canvas->AddLine(From, To, Colour, Width);
+            continue;
+        }
+        const double AlongX = (double(To.x) - double(From.x)) / Length;
+        const double AlongY = (double(To.y) - double(From.y)) / Length;
+        int          Guard  = 0;
+        while (Length > 0.0 && Guard++ < 8192)
+        {
+            const double Piece = std::max(1.0e-3, std::min(Remaining, Length));
+            const ImVec2 End(float(double(From.x) + AlongX * Piece), float(double(From.y) + AlongY * Piece));
             if (Phase % 2 == 0) Canvas->AddLine(From, End, Colour, Width);
             From       = End;
             Length    -= Piece;
             Remaining -= Piece;
-            if (Remaining <= 1.0e-4f) { Phase = (Phase + 1) % Pattern.size(); Remaining = Pattern[Phase]; }
+            if (Remaining <= 1.0e-4) { Phase = (Phase + 1) % Pattern.size(); Remaining = std::max(1.0e-3, double(Pattern[Phase])); }
         }
     }
 }
@@ -14441,18 +14637,21 @@ void DrawViewportBar(SolidArcWorkspaceState& State, SolidArcSheet& Sheet, const 
     // Fold stages when the viewport narrows (each keeps every control reachable): 1 Display glyph, 2 projection glyph,
     // 3 Construct glyph, 4 a 70 px view select, 5 no view select (the orientation cube and Keypad 1 / 3 / 7 remain).
     const char* Projection   = State.Camera.OrthographicEnabled ? "Parallel" : "Perspective";
+    const char* SplitLabel   = ViewportLayoutShortLabel(State.SplitView.Layout);
     const float ChipHeight   = 2.0f + 14.0f + 11.0f * SolidArcStyleTokens::FontScale;
     const float ChipFull     = 2.0f + 26.0f + 15.0f + 9.0f + Sheet.Measure("Construct", 11.0f);   // [px]
     const float DisplayFull  = 10.0f + Sheet.Measure("Display", 11.0f) + 26.0f;                    // [px]
+    const float DimFull      = 16.0f + Sheet.Measure("Dim", 11.0f);                                // [px]
+    const float SplitFull    = 38.0f + Sheet.Measure(SplitLabel, 11.0f);                           // [px]
     const float ProjectFull  = 16.0f + Sheet.Measure(Projection, 11.0f);                           // [px]
     int Stage = 0;
     for (; Stage < 5; ++Stage)
     {
-        const float Chip    = Stage >= 3 ? 28.0f : ChipFull;
+        const float Chip    = Stage >= 3 ? ChipHeight : ChipFull;
         const float View    = Stage >= 5 ? 0.0f : Stage >= 4 ? 70.0f + 4.0f + 23.0f : 98.0f + 4.0f + 23.0f;
-        const float Display = (Stage >= 1 ? 51.0f : DisplayFull) + 4.0f + 15.0f + (Stage >= 3 ? 0.0f : 86.0f);
-        const float Right   = 4.0f * (28.0f + 4.0f) + (Stage >= 2 ? 28.0f : ProjectFull);
-        if (24.0f + Chip + View + Display + 8.0f + Right <= Bar.MaximumX - Bar.MinimumX) break;
+        const float Display = 4.0f + 15.0f + (Stage >= 1 ? 51.0f : DisplayFull) + 6.0f + (Stage >= 3 ? 30.0f : (DimFull + 6.0f + SplitFull));
+        const float Right   = 3.0f * (28.0f + 4.0f) + (Stage >= 2 ? 28.0f : ProjectFull);
+        if (24.0f + Chip + View + Display + 12.0f + Right <= Bar.MaximumX - Bar.MinimumX) break;
     }
 
     // .construct-chip — #202020, #ffffff12 hairline, radius 20, padding 7 13, gap 9; plus glyph 15, 11 px #e0e0e0.
@@ -18508,7 +18707,7 @@ void DrawOperationsCard(SolidArcWorkspaceState& State, SolidArcSheet& Sheet)
     if (CanLoftOperation) Operations.push_back({ "Loft", IconSymbol::SolidArcSurface, "Loft · L" });
     if (SelectedSketchLabels(State.Document).size() >= 2) Operations.push_back({ "Join", IconSymbol::SolidArcLink, "Join · J" });
     if (SelectedSketchLabels(State.Document).size() >= 2) Operations.push_back({ "Flow", IconSymbol::SolidArcCurve, "Flow along curve" });
-    if (!Selection.Bodies.empty())
+    if (!Selection.Bodies.empty() || !Selection.Faces.empty() || !Selection.Edges.empty() || !Selection.Vertices.empty())
     {
         Operations.push_back({ "Move", IconSymbol::SolidArcMove, "Move · G" });
         Operations.push_back({ "Rotate", IconSymbol::SolidArcRotate, "Rotate · R" });
@@ -18569,10 +18768,12 @@ void DrawNormalsCard(SolidArcWorkspaceState& State, SolidArcSheet& Sheet)
 // 📝 Transform tab: G / R / S on the picked bodies (Plasticity transform gizmos with typed values in the viewport).
 void DrawTransformCard(SolidArcWorkspaceState& State, SolidArcSheet& Sheet)
 {
-    const float       Width = ImGui::GetContentRegionAvail().x - 2.0f * CardInset;
-    const bool        Picked = !State.Document.Selection.Bodies.empty() && !State.Bevel.ActiveCondition;
-    const std::string Lead  = Picked ? "Move, rotate or scale the picked bodies: drag in the viewport or type a value, Enter commits one step."
-                                     : "Pick bodies in mode 4 (solid) to move, rotate or scale them.";
+    const SolidArcSelection& Selection = State.Document.Selection;
+    const float       Width  = ImGui::GetContentRegionAvail().x - 2.0f * CardInset;
+    const bool        Picked = (!Selection.Bodies.empty() || !Selection.Faces.empty() || !Selection.Edges.empty()
+                             || !Selection.Vertices.empty() || !Selection.Curves.empty()) && !State.Bevel.ActiveCondition;
+    const std::string Lead   = Picked ? "Move, rotate or scale the picked faces, edges, vertices, curves, or bodies: drag in the viewport or type a value, Enter commits one step."
+                                      : "Pick faces (3), edges (2), vertices (1), curves, or bodies (4) to move, rotate or scale them.";
     const float       LeadHeight = MeasureParagraph(Sheet, Width, Lead);
     const PlaneExtent Card = PlaceSheetCard(Sheet, 2.0f * CardInset + CardHeadingHeight + LeadHeight + 16.0f + OperationGridHeight(3));
     const float Left = Card.MinimumX + CardInset;

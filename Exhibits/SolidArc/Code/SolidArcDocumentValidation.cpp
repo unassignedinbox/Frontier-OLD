@@ -166,6 +166,8 @@ namespace
     GateTally HeaderDimToggleGate    = { "W93", "Viewport Header 'Dim' (@DimensionTool) Visibility Toggle: shows/hides all viewport dimension lines (State.DimensionsEnabled) independently of the interactive creation tool (@SketchDimension / D), closing active session on hide and auto-restoring visibility on D", "exact" };
     GateTally TwistedNurbsBevelGate  = { "W94", "Non-freezing Fillet & Chamfer on twisted bilinear NURBS reshaped bodies (image-2.png repro): sub-second ChartCarrier rolling-ball spine marching, tangential Newton guard, memoized NURBS quadtree/rate audits across all 12 reshaped edges + multi-edge Fillet pair", "< 1.5 s · sound" };
     GateTally RepeatedReshapeGate    = { "W95", "Repeated multi-pass Vertex Reshape on already-bent NURBS faces & multi-body histories: pre-move corner reconstruction on 4-line NurbsSurface faces and per-body DirectEditInsertion across separate beveled bodies, Undo/Redo & TOML reload", "≤ 10⁻⁶ · sound" };
+    GateTally SubObjectTransformGate = { "W96", "Sub-object Face / Edge / Vertex Transform Isolation: Mode 3 & Mode 5 face picks route gizmo and G/R/S transforms to the selected face (normal offset, in-plane shear, frustum scale, in-plane NURBS twist) and Mode 2 edge picks reshape only that edge without moving the whole body, while Mode 4 preserves whole-body transforms", "≤ 10⁻⁶ · sound" };
+    GateTally FreezeGuardGate        = { "W97", "UI & Bevel Non-Freeze Guards: astronomical-span zoomed dashed/patterned polylines render in < 50 ms with bounded vertex counts (no float-ULP hang), and singular NURBS bevel limit probes execute at most 1 synchronous kernel rebuild per UI frame and settle cleanly", "< 0.05 s · ≤ 1/frame" };
 
     std::vector<std::string> Journal;                                                        // [-] - Narrative rows for the exhibit
 
@@ -5479,6 +5481,332 @@ void ValidateBatch7DimensionsBevelAndReshape()
     }
 }
 
+void ValidateBatch8SubObjectEditAndFreezeGuards()
+{
+    using namespace Frontier;
+    using namespace Frontier::SolidArc;
+    using namespace Frontier::GeometryProcessing;
+    const auto Format = [](const char* Pattern, auto... Values) { char Text[1400]; std::snprintf(Text, sizeof(Text), Pattern, Values...); return std::string(Text); };
+
+    // =========================================================================================================
+    // W96 — Sub-object Face / Edge / Vertex Transform Isolation (Bug 1 regression gate)
+    // =========================================================================================================
+    {
+        HeadlessUiHarness Ui;
+        SolidArcConstructRequest BoxReq;
+        BoxReq.Kind     = SolidArcConstructKind::Block;
+        BoxReq.Position = { 0.0, 0.0, 0.0 };
+        BoxReq.Width    = 2.0;
+        BoxReq.Depth    = 2.0;
+        BoxReq.Height   = 2.0;
+        Expect(ConstructSolidArcPrimitive(Ui.State.Document, BoxReq));
+        RefreshSolidArcScene(Ui.State, false);
+        PresentOrbitView(Ui.State.Camera, OrbitViewPreset::Isometric);
+        Ui.StepFrame();
+
+        auto FindTopFace = [&]() -> std::string
+        {
+            for (const SolidArcSceneFace& Face : Ui.State.Scene.Faces)
+            {
+                if (Face.CornerCount < 3) continue;
+                double MeanZ = 0.0;
+                for (uint32_t Index = Face.FirstCorner; Index < Face.FirstCorner + Face.CornerCount; ++Index)
+                    MeanZ += double(Ui.State.Scene.Corners[Index].Position[2]);
+                MeanZ /= double(Face.CornerCount);
+                if (MeanZ > 1.9) return Face.Name;
+            }
+            return {};
+        };
+
+        auto FindTopFrontEdge = [&]() -> std::string
+        {
+            for (const SolidArcSceneEdge& Edge : Ui.State.Scene.Edges)
+            {
+                if (Edge.SegmentCount == 0) continue;
+                const SolidArcSceneSegment& Span = Ui.State.Scene.Segments[Edge.FirstSegment];
+                const double MidY = 0.5 * (double(Span.Start[1]) + double(Span.End[1]));
+                const double MidZ = 0.5 * (double(Span.Start[2]) + double(Span.End[2]));
+                if (MidZ > 1.9 && MidY > 1.9) return Edge.Name;
+            }
+            return {};
+        };
+
+        // ① Mode 3 & Mode 5 face G-move: normal offset (+1 Z) and in-plane slide (+0.5 X) keep base anchored at (0,0,0)!
+        const std::string TopFace = FindTopFace();
+        Ui.State.PickMode = SolidArcPickMode::Face;
+        SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Face, TopFace, false);
+        Ui.StepFrame();
+
+        std::string Err1;
+        const bool FaceOffsetOk = !TopFace.empty() && Ui.RunScript(
+            "expect gizmo-target == faces\n"
+            "key G\n"
+            "frames 1\n"
+            "expect transform == 1\n"
+            "key Z\n"
+            "type 1\n"
+            "key Enter\n"
+            "frames 2\n"
+            "expect transform == 0\n"
+            "expect volume ~ 12\n"
+            "expect sound == 1\n",
+            Err1);
+        RefreshSolidArcScene(Ui.State, false);
+        const double BaseAfterOffsetErr = std::max({ std::abs(Ui.State.Scene.BoundsLow[0] - 0.0),
+                                                     std::abs(Ui.State.Scene.BoundsLow[1] - 0.0),
+                                                     std::abs(Ui.State.Scene.BoundsLow[2] - 0.0),
+                                                     std::abs(Ui.State.Scene.BoundsHigh[2] - 3.0) });
+
+        // Switch to Mode 5 (Any) with only the top face selected (no whole body selected) and slide +0.5 along X (in-plane shear):
+        const std::string TopFaceAfterOffset = FindTopFace();
+        Ui.State.PickMode = SolidArcPickMode::Any;
+        Ui.State.Document.Selection = {};
+        SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Face, TopFaceAfterOffset, false);
+        Ui.StepFrame();
+
+        std::string Err2;
+        const bool FaceShearOk = !TopFaceAfterOffset.empty() && Ui.RunScript(
+            "expect gizmo-target == faces\n"
+            "key G\n"
+            "frames 1\n"
+            "key X\n"
+            "type 0.5\n"
+            "key Enter\n"
+            "frames 2\n"
+            "expect transform == 0\n"
+            "expect volume ~ 12\n"
+            "expect sound == 1\n",
+            Err2);
+        RefreshSolidArcScene(Ui.State, false);
+        const double BaseAfterShearErr = std::max({ std::abs(Ui.State.Scene.BoundsLow[0] - 0.0),
+                                                    std::abs(Ui.State.Scene.BoundsLow[2] - 0.0),
+                                                    std::abs(Ui.State.Scene.BoundsHigh[0] - 2.5),
+                                                    std::abs(Ui.State.Scene.BoundsHigh[2] - 3.0) });
+        const double WorstMoveErr = std::max(BaseAfterOffsetErr, BaseAfterShearErr);
+        Tally(SubObjectTransformGate, WorstMoveErr, FaceOffsetOk && FaceShearOk && WorstMoveErr <= 1.0e-5,
+              FaceOffsetOk && FaceShearOk
+                  ? Format("Mode 3 & Mode 5 face G-move isolates top face: +1 Z offset & +0.5 X in-plane shear keep base at (0,0,0), BoundsHigh=(%.2f, %.2f, %.2f), V=%.2f m³",
+                           Ui.State.Scene.BoundsHigh[0], Ui.State.Scene.BoundsHigh[1], Ui.State.Scene.BoundsHigh[2], Ui.State.Document.Summary.Volume)
+                  : ("Face G-move failed: " + Err1 + " | " + Err2));
+
+        // ② Undo back to 2×2×2 cube; test Face S (0.5 frustum), Face R Z 20 (in-plane NURBS twist), and Mode 2 Edge G Z 0.5 (wedge):
+        UndoSolidArcCommand(Ui.State.Document);
+        UndoSolidArcCommand(Ui.State.Document);
+        RefreshSolidArcScene(Ui.State, true);
+        Ui.State.PickMode = SolidArcPickMode::Face;
+        SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Face, FindTopFace(), false);
+        Ui.StepFrame();
+
+        std::string ErrScale;
+        const bool FaceScaleOk = Ui.RunScript(
+            "key S\n"
+            "frames 1\n"
+            "type 0.5\n"
+            "key Enter\n"
+            "frames 2\n"
+            "expect sound == 1\n",
+            ErrScale);
+        RefreshSolidArcScene(Ui.State, true);
+        const double ExpectedFrustumV = 14.0 / 3.0;                                          // h/3 * (A1 + A2 + sqrt(A1*A2)) = 2/3 * (4 + 1 + 2)
+        const double FrustumErr       = std::max(std::abs(Ui.State.Document.Summary.Volume - ExpectedFrustumV),
+                                                 double(std::abs(Ui.State.Scene.BoundsLow[2] - 0.0)));
+
+        UndoSolidArcCommand(Ui.State.Document);
+        RefreshSolidArcScene(Ui.State, true);
+        SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Face, FindTopFace(), false);
+        Ui.StepFrame();
+
+        std::string ErrTwist;
+        const bool FaceTwistOk = Ui.RunScript(
+            "key R\n"
+            "frames 1\n"
+            "key Z\n"
+            "type 20\n"
+            "key Enter\n"
+            "frames 2\n"
+            "expect sound == 1\n",
+            ErrTwist);
+        RefreshSolidArcScene(Ui.State, true);
+        const bool TwistBaseAnchored = std::abs(Ui.State.Scene.BoundsLow[2] - 0.0) <= 1.0e-5 && Ui.State.Scene.BoundsHigh[0] > 2.05;
+
+        UndoSolidArcCommand(Ui.State.Document);
+        RefreshSolidArcScene(Ui.State, true);
+        Ui.State.PickMode = SolidArcPickMode::Edge;
+        const std::string TopEdge = FindTopFrontEdge();
+        Ui.State.Document.Selection = {};
+        SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Edge, TopEdge, false);
+        Ui.StepFrame();
+
+        std::string ErrEdge;
+        const bool EdgeMoveOk = !TopEdge.empty() && Ui.RunScript(
+            "key G\n"
+            "frames 1\n"
+            "key Z\n"
+            "type 0.5\n"
+            "key Enter\n"
+            "frames 2\n"
+            "expect volume ~ 9\n"
+            "expect sound == 1\n",
+            ErrEdge);
+        RefreshSolidArcScene(Ui.State, true);
+        const double EdgeErr = std::max({ FrustumErr,
+                                          double(std::abs(Ui.State.Scene.BoundsLow[2] - 0.0)),
+                                          double(std::abs(Ui.State.Scene.BoundsHigh[2] - 2.5)) });
+        Tally(SubObjectTransformGate, EdgeErr, FaceScaleOk && FaceTwistOk && TwistBaseAnchored && EdgeMoveOk && EdgeErr <= 1.0e-5,
+              FaceScaleOk && FaceTwistOk && TwistBaseAnchored && EdgeMoveOk
+                  ? Format("Face S 0.5 frustum (V=%.4f vs 4.6667), Face R Z 20° bilinear NURBS twist, and Mode 2 Edge G Z +0.5 wedge (V=%.2f) all keep base anchored at Z=0",
+                           ExpectedFrustumV, Ui.State.Document.Summary.Volume)
+                  : ("Sub-object S/R/Edge failed: " + ErrScale + " | " + ErrTwist + " | " + ErrEdge));
+
+        // ③ Planar face in-plane gizmo handle drag (@GizmoTranslateX) reshapes instead of failing as carrier no-op, and Mode 4 still moves whole body:
+        UndoSolidArcCommand(Ui.State.Document);
+        RefreshSolidArcScene(Ui.State, true);
+        Ui.State.PickMode = SolidArcPickMode::Face;
+        Ui.State.Document.Selection = {};
+        SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Face, FindTopFace(), false);
+        Ui.StepFrame();
+
+        std::string ErrGizmo;
+        const bool GizmoInPlaneOk = Ui.RunScript(
+            "expect gizmo-target == faces\n"
+            "drag left @GizmoTranslateX by 60 0 8\n"
+            "frames 2\n"
+            "expect gizmo-commits == 1\n"
+            "expect volume ~ 8\n"
+            "expect sound == 1\n",
+            ErrGizmo);
+        RefreshSolidArcScene(Ui.State, true);
+        double BottomShift = 0.0, TopMinX = 1e9, TopMaxX = -1e9, TopMinY = 1e9, TopMaxY = -1e9;
+        for (const SolidArcSceneCorner& Corner : Ui.State.Scene.Corners)
+        {
+            if (std::abs(Corner.Position[2] - 0.0f) < 1.0e-3f)
+            {
+                BottomShift = std::max(BottomShift, double(std::max(0.0f - Corner.Position[0], Corner.Position[0] - 2.0f)));
+                BottomShift = std::max(BottomShift, double(std::max(0.0f - Corner.Position[1], Corner.Position[1] - 2.0f)));
+            }
+            else if (std::abs(Corner.Position[2] - 2.0f) < 1.0e-3f)
+            {
+                TopMinX = std::min(TopMinX, double(Corner.Position[0]));
+                TopMaxX = std::max(TopMaxX, double(Corner.Position[0]));
+                TopMinY = std::min(TopMinY, double(Corner.Position[1]));
+                TopMaxY = std::max(TopMaxY, double(Corner.Position[1]));
+            }
+        }
+        const bool GizmoShearedOnlyTop = BottomShift <= 1.0e-4
+                                      && (std::abs(TopMinX - 0.0) > 1.0e-3 || std::abs(TopMaxX - 2.0) > 1.0e-3
+                                       || std::abs(TopMinY - 0.0) > 1.0e-3 || std::abs(TopMaxY - 2.0) > 1.0e-3);
+
+        // Mode 4 whole-body G X 3 shifts both BoundsLow and BoundsHigh by +3:
+        if (GizmoInPlaneOk) UndoSolidArcCommand(Ui.State.Document);
+        RefreshSolidArcScene(Ui.State, true);
+        Ui.State.PickMode = SolidArcPickMode::Solid;
+        Ui.State.Document.Selection = {};
+        const std::string WholeBodyKey = Ui.State.Document.Summary.Bodies.empty() ? std::string{} : Ui.State.Document.Summary.Bodies.front().Key;
+        if (!WholeBodyKey.empty()) SelectSolidArcName(Ui.State.Document, SolidArcSelectionKind::Body, WholeBodyKey, false);
+        Ui.StepFrame();
+        std::string ErrBody;
+        const bool WholeBodyOk = Ui.RunScript(
+            "expect gizmo-target == bodies\n"
+            "key G\n"
+            "frames 1\n"
+            "key X\n"
+            "type 3\n"
+            "key Enter\n"
+            "frames 2\n"
+            "expect volume ~ 8\n"
+            "expect sound == 1\n",
+            ErrBody);
+        RefreshSolidArcScene(Ui.State, false);
+        const double WholeBodyErr = std::max(std::abs(Ui.State.Scene.BoundsLow[0] - 3.0), std::abs(Ui.State.Scene.BoundsHigh[0] - 5.0));
+        Tally(SubObjectTransformGate, WholeBodyErr, GizmoInPlaneOk && GizmoShearedOnlyTop && WholeBodyOk && WholeBodyErr <= 1.0e-5,
+              GizmoInPlaneOk && GizmoShearedOnlyTop && WholeBodyOk
+                  ? Format("Gizmo @GizmoTranslateX shears planar face in-plane (sound, V=8), and Mode 4 G X 3 moves whole body to [%.1f, %.1f]",
+                           Ui.State.Scene.BoundsLow[0], Ui.State.Scene.BoundsHigh[0])
+                  : ("Gizmo/Mode4 check failed: " + ErrGizmo + " | " + ErrBody));
+    }
+
+    // =========================================================================================================
+    // W97 — Extreme-Span Dashed Polyline & Singular Bevel Limit-Probe Non-Freeze Guards (Bug 2 regression gate)
+    // =========================================================================================================
+    {
+        // ① Astronomical zoom (Distance = 1e-7 -> projected spans > 10^8 px > 2^24 float ULP threshold) on dashed sketches + dimensions:
+        HeadlessUiHarness Ui;
+        Expect(DrawSolidArcSketch(Ui.State.Document, DrawingOf(SolidArcDrawingKind::Rectangle, 0, { { -50.0, -50.0 }, { 50.0, 50.0 } })));
+        Expect(DrawSolidArcSketch(Ui.State.Document, DrawingOf(SolidArcDrawingKind::Circle, 0, { { 0.0, 0.0 }, { 40.0, 0.0 } }, false, true)));
+        SolidArcConstructRequest BoxReq;
+        BoxReq.Kind   = SolidArcConstructKind::Block;
+        BoxReq.Width  = 2.0;
+        BoxReq.Depth  = 2.0;
+        BoxReq.Height = 2.0;
+        Expect(ConstructSolidArcPrimitive(Ui.State.Document, BoxReq));
+        RefreshSolidArcScene(Ui.State, false);
+        Ui.State.Style.XRayEnabled = true;
+        Ui.State.Camera.Distance   = 1.0e-7;
+        const auto ZoomStart = std::chrono::steady_clock::now();
+        int MaxVertices = 0;
+        for (int Frame = 0; Frame < 4; ++Frame)
+        {
+            Ui.StepFrame();
+            if (const ImDrawData* Draw = ImGui::GetDrawData()) MaxVertices = std::max(MaxVertices, Draw->TotalVtxCount);
+        }
+        const double ZoomSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - ZoomStart).count();
+        const bool   ZoomSafeOk  = ZoomSeconds < 0.05 && MaxVertices > 0 && MaxVertices < 120000;
+        Tally(FreezeGuardGate, ZoomSeconds, ZoomSafeOk,
+              Format("4 UI frames at Camera.Distance=1e-7 (projected spans > 10^8 px) finished in %.2f ms, peak ImDrawData=%d verts (zero float-ULP hang)",
+                     ZoomSeconds * 1.0e3, MaxVertices));
+    }
+    {
+        // ② Twisted NURBS bevel session at oversized pinned radius: max 1 synchronous kernel rebuild per UI frame, settles cleanly:
+        HeadlessUiHarness BevelUi;
+        SolidArcConstructRequest PrismReq;
+        PrismReq.Kind   = SolidArcConstructKind::Block;
+        PrismReq.Width  = 1.6;
+        PrismReq.Depth  = 1.5;
+        PrismReq.Height = 2.2;
+        Expect(ConstructSolidArcPrimitive(BevelUi.State.Document, PrismReq));
+        const std::string BodyKey = BevelUi.State.Document.Summary.Bodies.front().Key;
+        BevelUi.State.Document.Selection          = {};
+        BevelUi.State.Document.Selection.Bodies   = { BodyKey };
+        BevelUi.State.Document.Selection.Vertices = { "Vertex(Extrude#2.Cap(End)|Extrude#2.Side(Line1)|Extrude#2.Side(Line4))" };
+        AffineMap TwistMap{};
+        TwistMap.ColumnX = { 1, 0, 0 }; TwistMap.ColumnY = { 0, 1, 0 }; TwistMap.ColumnZ = { 0, 0, 1 };
+        TwistMap.Shift   = { 0.65, 0.45, 0.0 };
+        Expect(ReshapeSolidArcSelection(BevelUi.State.Document, TwistMap, "Move"));
+        RefreshSolidArcScene(BevelUi.State, false);
+
+        std::string PickedEdge;
+        for (const SolidArcSceneEdge& Edge : BevelUi.State.Scene.Edges)
+        {
+            if (Edge.SegmentCount == 0) continue;
+            const SolidArcSceneSegment& Span = BevelUi.State.Scene.Segments[Edge.FirstSegment];
+            if (Span.Start[2] > 2.0f && Span.End[2] > 2.0f) { PickedEdge = Edge.Name; break; }
+        }
+        BevelUi.State.PickMode = SolidArcPickMode::Edge;
+        BevelUi.State.Document.Selection = {};
+        SelectSolidArcName(BevelUi.State.Document, SolidArcSelectionKind::Edge, PickedEdge, false);
+        BevelUi.StepFrame();
+
+        std::string ErrBevel;
+        BevelUi.RunScript("key B\nframes 1\n", ErrBevel);
+        int MaxBuildsPerFrame = 0;
+        const auto ProbeStart = std::chrono::steady_clock::now();
+        // Push bevel size far past breakdown limit to exercise ConfineBevelLimit + StageBevelPreview per-frame cap:
+        BevelUi.State.Bevel.Size            = 2.5;
+        BevelUi.State.Bevel.PinnedCondition = true;
+        for (int Frame = 0; Frame < 8; ++Frame)
+        {
+            const int BeforeCount = BevelUi.State.Bevel.StageCount;
+            BevelUi.StepFrame();
+            MaxBuildsPerFrame = std::max(MaxBuildsPerFrame, BevelUi.State.Bevel.StageCount - BeforeCount);
+        }
+        const double ProbeSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - ProbeStart).count();
+        const bool   ProbeSafeOk  = BevelUi.State.Bevel.ActiveCondition && MaxBuildsPerFrame <= 1 && ProbeSeconds < 3.0;
+        Tally(FreezeGuardGate, double(MaxBuildsPerFrame) * 1.0e-2, ProbeSafeOk,
+              Format("Oversized NURBS bevel limit probe (Size=2.5 m): max %d kernel rebuild/frame across 8 frames in %.2f s (settled Size=%.4g m)",
+                     MaxBuildsPerFrame, ProbeSeconds, BevelUi.State.Bevel.Size));
+    }
+}
+
 int main()
 {
     const auto Start = std::chrono::steady_clock::now();
@@ -5546,6 +5874,13 @@ int main()
         for (const std::string& Row : Journal) std::printf("%s\n", Row.c_str());
         const long TotalFail = AxisSlideDimEditGate.Failures + HeaderDimToggleGate.Failures
                              + TwistedNurbsBevelGate.Failures + RepeatedReshapeGate.Failures;
+        return TotalFail ? 1 : 0;
+    }
+    if (std::getenv("SOLIDARC_DOCVAL_BATCH8"))                                            // Quick rerun of W96 .. W97 alone
+    {
+        ValidateBatch8SubObjectEditAndFreezeGuards();
+        for (const std::string& Row : Journal) std::printf("%s\n", Row.c_str());
+        const long TotalFail = SubObjectTransformGate.Failures + FreezeGuardGate.Failures;
         return TotalFail ? 1 : 0;
     }
     if (std::getenv("SOLIDARC_DOCVAL_STAGE3"))                                            // Quick rerun of W72..W78
@@ -11070,7 +11405,10 @@ int main()
     // ---- W92 … W95 Axis-Guided Dimension Sliding, Header Dim Toggle, Twisted NURBS Bevels, and Repeated Vertex Reshape
     ValidateBatch7DimensionsBevelAndReshape();
 
-    for (const GateTally* Gate : { &ConstructGate, &PickGate, &BlendGate, &FaceGate, &ParameterGate, &AtomicGate, &HistoryGate, &FileGate, &VariableGate, &DrawingGate, &SurfacingGate, &PanelGate, &EvaluationGate, &BlueprintGate, &MatcapGate, &BodiesGate, &CutGate, &TrimGate, &MoveGate, &CopyGate, &HideGate, &CurveGate, &ConstrainGate, &ConflictGate, &DragGate, &ReferenceGate, &SplineGate, &LinkGate, &RevolveGate, &EvolutionGate, &ReplayGate, &XRayGate, &MeasureGate, &SectionGate, &SnapGate, &JointGate, &SheetGate, &ExchangeGate, &BoundGate, &PrimitiveGate, &InsetGate, &SectionLoftGate, &GizmoGate, &PointGate, &ShellGate, &DetachGate, &CornerGate, &FillGate, &FilletDragGate, &OrientGate, &TangentGate, &KnifeGate, &HandleGate, &SolidKnifeGate, &PocketBevelGate, &ReachGate, &SplitGate, &LoopGate, &PieceGate, &ManifoldGate, &ImprintGate, &PointCutGate, &CurveFlowGate, &EdgeNotchGate, &EdgePathGate, &WrapGate, &ReshapeGate, &DeleteGate, &CurveAskGate, &FullReachGate, &BevelMergeGate, &CutterSpeedGate, &ParametricVarGate, &LiveBooleanGate, &EdgeWeightGate, &LinearCircArrayGate, &CurveSurfArrayGate, &CurveBendStackGate, &CompoundCutterGate, &LiveEditableGate, &GizmoAllViewsGate, &ContinuedLoftGate, &HotkeysOutlinerGate, &DimensionLinesGate, &MultiSelectSyncGate, &GridCubeUvGate, &BlenderTransformGate, &NumpadCameraGate, &SplitViewportGate, &GizmoZoomGate, &InteractiveDimToolGate, &AxisSlideDimEditGate, &HeaderDimToggleGate, &TwistedNurbsBevelGate, &RepeatedReshapeGate })
+    // ---- W96 … W97 Sub-object Face / Edge / Vertex Transform Isolation and UI / Bevel Non-Freeze Guards
+    ValidateBatch8SubObjectEditAndFreezeGuards();
+
+    for (const GateTally* Gate : { &ConstructGate, &PickGate, &BlendGate, &FaceGate, &ParameterGate, &AtomicGate, &HistoryGate, &FileGate, &VariableGate, &DrawingGate, &SurfacingGate, &PanelGate, &EvaluationGate, &BlueprintGate, &MatcapGate, &BodiesGate, &CutGate, &TrimGate, &MoveGate, &CopyGate, &HideGate, &CurveGate, &ConstrainGate, &ConflictGate, &DragGate, &ReferenceGate, &SplineGate, &LinkGate, &RevolveGate, &EvolutionGate, &ReplayGate, &XRayGate, &MeasureGate, &SectionGate, &SnapGate, &JointGate, &SheetGate, &ExchangeGate, &BoundGate, &PrimitiveGate, &InsetGate, &SectionLoftGate, &GizmoGate, &PointGate, &ShellGate, &DetachGate, &CornerGate, &FillGate, &FilletDragGate, &OrientGate, &TangentGate, &KnifeGate, &HandleGate, &SolidKnifeGate, &PocketBevelGate, &ReachGate, &SplitGate, &LoopGate, &PieceGate, &ManifoldGate, &ImprintGate, &PointCutGate, &CurveFlowGate, &EdgeNotchGate, &EdgePathGate, &WrapGate, &ReshapeGate, &DeleteGate, &CurveAskGate, &FullReachGate, &BevelMergeGate, &CutterSpeedGate, &ParametricVarGate, &LiveBooleanGate, &EdgeWeightGate, &LinearCircArrayGate, &CurveSurfArrayGate, &CurveBendStackGate, &CompoundCutterGate, &LiveEditableGate, &GizmoAllViewsGate, &ContinuedLoftGate, &HotkeysOutlinerGate, &DimensionLinesGate, &MultiSelectSyncGate, &GridCubeUvGate, &BlenderTransformGate, &NumpadCameraGate, &SplitViewportGate, &GizmoZoomGate, &InteractiveDimToolGate, &AxisSlideDimEditGate, &HeaderDimToggleGate, &TwistedNurbsBevelGate, &RepeatedReshapeGate, &SubObjectTransformGate, &FreezeGuardGate })
     {
         std::printf("| %s | %s | %s | %.3g | %ld | %s |\n", Gate->Code, Gate->Subject, Gate->Limit, Gate->Worst, Gate->Checks, Gate->Failures ? "🔴" : "🟢");
         Failures += Gate->Failures;

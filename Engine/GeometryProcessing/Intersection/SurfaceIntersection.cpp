@@ -94,14 +94,27 @@ namespace
         return Probe;
     }
 
+    [[nodiscard]] PairProbe ProbePairNear(const IntersectionContext& Context, Vector3 Position, Vector2& FirstHint, Vector2& SecondHint)
+    {
+        PairProbe Probe;
+        Probe.First  = MeasureSurfaceDistanceNear(Context.First, Position, FirstHint);
+        Probe.Second = MeasureSurfaceDistanceNear(Context.Second, Position, SecondHint);
+        Probe.Cross  = Cross(Probe.First.Normal, Probe.Second.Normal);
+        Probe.Sine   = Length(Probe.Cross);
+        return Probe;
+    }
+
     // 📝 Newton in 3D on { d₁(X) = 0, d₂(X) = 0, Π·(X − Q) = 0 } with rows N₁, N₂, Π — parameter-free, so poles and the
     //    apex are ordinary points. Inverse of the row matrix: (r₀·(b×c) + r₁·(c×a) + r₂·(a×b)) / (a·(b×c)).
-    [[nodiscard]] bool CorrectOntoBoth(const IntersectionContext& Context, Vector3& Position, Vector3 PlaneNormal, Vector3 PlanePoint)
+    [[nodiscard]] bool CorrectOntoBoth(const IntersectionContext& Context, Vector3& Position, Vector3 PlaneNormal, Vector3 PlanePoint, Vector2 FirstSeed = { NAN, NAN },
+                                       Vector2 SecondSeed = { NAN, NAN })
     {
         Context.Outcome.Statistics.Corrections += 1;
+        Vector2 FirstHint  = FirstSeed;
+        Vector2 SecondHint = SecondSeed;
         for (int Iteration = 0; Iteration < 16; ++Iteration)
         {
-            const PairProbe Probe       = ProbePair(Context, Position);
+            const PairProbe Probe       = ProbePairNear(Context, Position, FirstHint, SecondHint);
             const Vector3&  A           = Probe.First.Normal;
             const Vector3&  B           = Probe.Second.Normal;
             const double    Determinant = Dot(A, Cross(B, PlaneNormal));                     // [-] - a·(b×c)
@@ -111,31 +124,34 @@ namespace
             Position = Position - Step;
             if (Length(Step) <= 1.0e-15 * (1.0 + Length(Position))) break;
         }
-        const PairProbe Final     = ProbePair(Context, Position);
+        const PairProbe Final     = ProbePairNear(Context, Position, FirstHint, SecondHint);
         const double    Tolerance = std::max(1.0e-11 * (1.0 + Context.Scale), 1.0e-3 * Context.Settings.Precision);
         return std::fabs(Final.First.Distance) <= Tolerance && std::fabs(Final.Second.Distance) <= Tolerance;
     }
 
     // 📝 Singular / touch point: Gauss–Newton on R(X) = (d₁, d₂, L·(N₁ × N₂)) — both distances zero AND normals parallel.
-    [[nodiscard]] bool RefineSpecialPoint(const IntersectionContext& Context, Vector3& Position)
+    [[nodiscard]] bool RefineSpecialPoint(const IntersectionContext& Context, Vector3& Position, Vector2 FirstSeed = { NAN, NAN }, Vector2 SecondSeed = { NAN, NAN })
     {
-        const double Weight = std::max(1.0, Context.Scale);                                  // [len] - Balances units
-        const auto   Residual = [&](Vector3 Probe)
+        const double Weight     = std::max(1.0, Context.Scale);                              // [len] - Balances units
+        Vector2      FirstHint  = FirstSeed;
+        Vector2      SecondHint = SecondSeed;
+        const auto   Residual   = [&](Vector3 Probe, Vector2& HintA, Vector2& HintB)
         {
-            const PairProbe Pair = ProbePair(Context, Probe);
+            const PairProbe Pair = ProbePairNear(Context, Probe, HintA, HintB);
             return std::array<double, 5>{ Pair.First.Distance, Pair.Second.Distance, Pair.Cross.X * Weight, Pair.Cross.Y * Weight, Pair.Cross.Z * Weight };
         };
         const double Increment = 1.0e-7 * (1.0 + Context.Scale);                             // [len] - Difference step
         for (int Iteration = 0; Iteration < 40; ++Iteration)
         {
-            const std::array<double, 5> Value = Residual(Position);
+            const std::array<double, 5> Value = Residual(Position, FirstHint, SecondHint);
             std::array<std::array<double, 3>, 5> Jacobian{};
             for (int Axis = 0; Axis < 3; ++Axis)
             {
                 Vector3 Forward = Position, Backward = Position;
                 (Axis == 0 ? Forward.X : Axis == 1 ? Forward.Y : Forward.Z) += Increment;
                 (Axis == 0 ? Backward.X : Axis == 1 ? Backward.Y : Backward.Z) -= Increment;
-                const std::array<double, 5> Plus = Residual(Forward), Minus = Residual(Backward);
+                Vector2 PlusA = FirstHint, PlusB = SecondHint, MinusA = FirstHint, MinusB = SecondHint;
+                const std::array<double, 5> Plus = Residual(Forward, PlusA, PlusB), Minus = Residual(Backward, MinusA, MinusB);
                 for (int Row = 0; Row < 5; ++Row) Jacobian[Row][Axis] = (Plus[Row] - Minus[Row]) / (2.0 * Increment);
             }
             double Normal[3][3] = {}, Gradient[3] = {};                                      // [-] - JᵀJ, JᵀR
@@ -156,7 +172,7 @@ namespace
             Position = Position - Step;
             if (Length(Step) <= 1.0e-14 * (1.0 + Context.Scale)) break;
         }
-        const PairProbe Final = ProbePair(Context, Position);
+        const PairProbe Final = ProbePairNear(Context, Position, FirstHint, SecondHint);
         return std::fabs(Final.First.Distance) <= 1.0e-9 * (1.0 + Context.Scale) && std::fabs(Final.Second.Distance) <= 1.0e-9 * (1.0 + Context.Scale) && Final.Sine <= 1.0e-5;
     }
 
@@ -621,6 +637,11 @@ namespace
         return { Position, ProjectOntoSurface(Context.First, Position, FirstReference), ProjectOntoSurface(Context.Second, Position, SecondReference) };
     }
 
+    [[nodiscard]] IntersectionChartPoint ChartPointNear(const IntersectionContext& Context, Vector3 Position, Vector2 FirstReference, Vector2 SecondReference)
+    {
+        return { Position, ProjectOntoSurfaceNear(Context.First, Position, FirstReference), ProjectOntoSurfaceNear(Context.Second, Position, SecondReference) };
+    }
+
     // 💡 NURBS and open rolling-ball feet are confined to their domains, so a point marched past a NURBS edge or open
     //    spine end still projects inside the box (and its signed distance there can stay ≈ 0 on the clamped end-ball):
     //    the point is on the carrier only when its evaluated foot actually reaches it (≤ 10·precision).
@@ -642,26 +663,31 @@ namespace
         const double MinimumStep = 1.0e-9 * (1.0 + Context.Scale);                           // [len] - Give-up step
         HalfTrace    Trace;
         Trace.Chart.push_back(Seed);
-        IntersectionChartPoint Current  = Seed;
-        Vector3                Tangent  = Normalize(ProbePair(Context, Seed.Position).Cross) * Sign;
-        double                 Step     = 0.25 * Settings.MaximumStep;                       // [len] - Current step
-        double                 Travel   = 0.0;                                               // [len] - Arc length so far
+        IntersectionChartPoint Current   = Seed;
+        Vector2                SeedA     = Seed.First;
+        Vector2                SeedB     = Seed.Second;
+        Vector3                Tangent   = Normalize(ProbePairNear(Context, Seed.Position, SeedA, SeedB).Cross) * Sign;
+        double                 Step      = 0.25 * Settings.MaximumStep;                      // [len] - Current step
+        double                 Travel    = 0.0;                                              // [len] - Arc length so far
+        int                    TinySteps = 0;                                                // [-]   - Consecutive near-minimum steps
         while (static_cast<int>(Trace.Chart.size()) < Settings.PointLimit)
         {
             // ---- Predict, correct, and judge the step.
             Vector3 Corrected = Current.Position + Tangent * Step;
             Vector3 NextTangent{};
-            bool    Accepted  = CorrectOntoBoth(Context, Corrected, Tangent, Current.Position + Tangent * Step);
+            Vector2 StepHintA = Current.First;
+            Vector2 StepHintB = Current.Second;
+            bool    Accepted  = CorrectOntoBoth(Context, Corrected, Tangent, Current.Position + Tangent * Step, StepHintA, StepHintB);
             if (Accepted)
             {
-                const PairProbe Probe = ProbePair(Context, Corrected);
+                const PairProbe Probe = ProbePairNear(Context, Corrected, StepHintA, StepHintB);
                 if (Probe.Sine < Settings.SingularSine)
                 {
                     // 📝 Approaching N₁ ∥ N₂: locate the special point and end the branch there.
                     Vector3 Special = Corrected;
-                    if (RefineSpecialPoint(Context, Special) && Distance(Special, Current.Position) <= 4.0 * Step)
+                    if (RefineSpecialPoint(Context, Special, StepHintA, StepHintB) && Distance(Special, Current.Position) <= 4.0 * Step)
                     {
-                        Trace.Chart.push_back(ChartPoint(Context, Special, Current.First, Current.Second));
+                        Trace.Chart.push_back(ChartPointNear(Context, Special, StepHintA, StepHintB));
                         RegisterSpecialPoint(Context, Special, SpecialPointCategory::Singular);
                         Trace.Termination = BranchTermination::Singular;
                         return Trace;
@@ -679,7 +705,9 @@ namespace
                         const Vector3 Chord    = Corrected - Current.Position;
                         const Vector3 Midpoint = (Corrected + Current.Position) * 0.5;
                         Vector3       OnCurve  = Midpoint;
-                        Accepted = CorrectOntoBoth(Context, OnCurve, Normalize(Chord), Midpoint) && Distance(OnCurve, Midpoint) <= Settings.ChordTolerance;
+                        Vector2       MidHintA = Current.First;
+                        Vector2       MidHintB = Current.Second;
+                        Accepted = CorrectOntoBoth(Context, OnCurve, Normalize(Chord), Midpoint, MidHintA, MidHintB) && Distance(OnCurve, Midpoint) <= Settings.ChordTolerance;
                     }
                 }
             }
@@ -688,8 +716,10 @@ namespace
                 Context.Outcome.Statistics.StepRejections += 1;
                 Step *= 0.5;
                 if (Step >= MinimumStep) continue;
-                Vector3 Special = Current.Position;
-                if (RefineSpecialPoint(Context, Special) && Distance(Special, Current.Position) <= 1.0e-6 * (1.0 + Context.Scale))
+                Vector3 Special      = Current.Position;
+                Vector2 SpecialHintA = Current.First;
+                Vector2 SpecialHintB = Current.Second;
+                if (RefineSpecialPoint(Context, Special, SpecialHintA, SpecialHintB) && Distance(Special, Current.Position) <= 1.0e-6 * (1.0 + Context.Scale))
                 {
                     RegisterSpecialPoint(Context, Special, SpecialPointCategory::Singular);
                 }
@@ -697,7 +727,7 @@ namespace
                 return Trace;
             }
 
-            IntersectionChartPoint Next = ChartPoint(Context, Corrected, Current.First, Current.Second);
+            IntersectionChartPoint Next = ChartPointNear(Context, Corrected, StepHintA, StepHintB);
 
             // ---- Boundary: bisect the step to the box edge.
             if (!InsideBoxes(Context, Next))
@@ -706,20 +736,24 @@ namespace
                 IntersectionChartPoint Edge = Current;
                 for (int Halving = 0; Halving < 60; ++Halving)
                 {
-                    const double Middle = 0.5 * (Within + Outside);
-                    Vector3      Probe  = Current.Position + Tangent * Middle;
-                    if (!CorrectOntoBoth(Context, Probe, Tangent, Probe)) { Outside = Middle; continue; }
-                    const IntersectionChartPoint Candidate = ChartPoint(Context, Probe, Current.First, Current.Second);
+                    const double Middle     = 0.5 * (Within + Outside);
+                    Vector3      Probe      = Current.Position + Tangent * Middle;
+                    Vector2      ProbeHintA = Edge.First;
+                    Vector2      ProbeHintB = Edge.Second;
+                    if (!CorrectOntoBoth(Context, Probe, Tangent, Probe, ProbeHintA, ProbeHintB)) { Outside = Middle; continue; }
+                    const IntersectionChartPoint Candidate = ChartPointNear(Context, Probe, ProbeHintA, ProbeHintB);
                     if (InsideBoxes(Context, Candidate)) { Within = Middle; Edge = Candidate; }
                     else Outside = Middle;
                 }
+                Edge = ChartPoint(Context, Edge.Position, Edge.First, Edge.Second);
                 if (Distance(Edge.Position, Current.Position) > 1.0e-9 * (1.0 + Context.Scale)) Trace.Chart.push_back(Edge);
                 Trace.Termination = BranchTermination::Boundary;
                 return Trace;
             }
 
             // ---- Closure: the step passes the seed again.
-            Travel += Distance(Corrected, Current.Position);
+            const double Moved = Distance(Corrected, Current.Position);
+            Travel += Moved;
             if (Trace.Chart.size() >= 3 && Travel > 2.0 * Step)
             {
                 const Vector3 Span = Corrected - Current.Position;
@@ -730,6 +764,17 @@ namespace
                     return Trace;
                 }
             }
+
+            // ---- Stagnation guard: prevent 4096 microscopic steps oscillating near MinimumStep at a singular pinch.
+            if (Moved <= 8.0 * MinimumStep)
+            {
+                if (++TinySteps >= 32)
+                {
+                    Trace.Termination = BranchTermination::Singular;
+                    return Trace;
+                }
+            }
+            else TinySteps = 0;
 
             Trace.Chart.push_back(Next);
             Current = Next;
@@ -972,15 +1017,15 @@ namespace
                 if (Iteration >= 3 && Distance(OnFirst, OnSecond) <= Context.Settings.ChordTolerance && OnKnownBranch(Context, Position)) return;
                 if (Iteration >= 8 && Distance(Position, A.Centre) > 4.0 * (A.Radius + B.Radius)) return;
             }
-            const PairProbe Probe = ProbePair(Context, Position);
+            const PairProbe Probe = ProbePairNear(Context, Position, HintA, HintB);
             if (std::fabs(Probe.Second.Distance) > 2.0 * (A.Radius + B.Radius)) return;
             if (Probe.Sine < Context.Settings.SingularSine)
             {
                 Vector3 Special = Position;
-                if (RefineSpecialPoint(Context, Special) && Distance(Special, A.Centre) <= 2.0 * (A.Radius + B.Radius)) RegisterSpecialPoint(Context, Special, SpecialPointCategory::Touch);
+                if (RefineSpecialPoint(Context, Special, HintA, HintB) && Distance(Special, A.Centre) <= 2.0 * (A.Radius + B.Radius)) RegisterSpecialPoint(Context, Special, SpecialPointCategory::Touch);
                 return;
             }
-            if (CorrectOntoBoth(Context, Position, Normalize(Probe.Cross), Position) && Distance(Position, A.Centre) <= 2.0 * (A.Radius + B.Radius))
+            if (CorrectOntoBoth(Context, Position, Normalize(Probe.Cross), Position, HintA, HintB) && Distance(Position, A.Centre) <= 2.0 * (A.Radius + B.Radius))
             {
                 Context.Outcome.Statistics.LoopSeeds += 1;
                 Seeds.push_back(Position);
@@ -1034,10 +1079,12 @@ namespace
         const Vector3 Chord    = End.Position - Start.Position;
         const Vector3 Midpoint = (Start.Position + End.Position) * 0.5;
         if (Length(Chord) <= 1.0e-9 * (1.0 + Context.Scale)) return;
-        Vector3 OnCurve = Midpoint;
-        if (!CorrectOntoBoth(Context, OnCurve, Normalize(Chord), Midpoint)) return;
+        Vector3       OnCurve   = Midpoint;
+        const Vector2 MidFirst  = (Start.First + End.First) * 0.5;
+        const Vector2 MidSecond = (Start.Second + End.Second) * 0.5;
+        if (!CorrectOntoBoth(Context, OnCurve, Normalize(Chord), Midpoint, MidFirst, MidSecond)) return;
         if (Distance(OnCurve, Midpoint) <= 0.5 * Context.Settings.ChordTolerance) return;
-        const IntersectionChartPoint Inserted = ChartPoint(Context, OnCurve, (Start.First + End.First) * 0.5, (Start.Second + End.Second) * 0.5);
+        const IntersectionChartPoint Inserted = ChartPointNear(Context, OnCurve, MidFirst, MidSecond);
         Chart.insert(Chart.begin() + static_cast<std::ptrdiff_t>(Segment) + 1, Inserted);
         RefineSingularChord(Context, Chart, Segment + 1, Depth + 1);
         RefineSingularChord(Context, Chart, Segment, Depth + 1);
@@ -1051,7 +1098,11 @@ namespace
             if (Branch.Category != BranchCategory::Traced || Branch.Chart.size() < 3) { Result.push_back(std::move(Branch)); continue; }
             const size_t Count = Branch.Chart.size();
             std::vector<double> Sines(Count);
-            for (size_t Index = 0; Index < Count; ++Index) Sines[Index] = ProbePair(Context, Branch.Chart[Index].Position).Sine;
+            for (size_t Index = 0; Index < Count; ++Index)
+            {
+                Vector2 HintA = Branch.Chart[Index].First, HintB = Branch.Chart[Index].Second;
+                Sines[Index]  = ProbePairNear(Context, Branch.Chart[Index].Position, HintA, HintB).Sine;
+            }
             std::vector<size_t> Splits;                                                      // [idx] - Chart indices of singular points
             for (size_t Index = 0; Index < Count; ++Index)
             {
@@ -1060,11 +1111,11 @@ namespace
                 const double Before = Sines[(Index + Count - 1) % Count], After = Sines[(Index + 1) % Count];
                 if (Sines[Index] > Before || Sines[Index] > After || Sines[Index] > 0.5) continue;
                 Vector3 Special = Branch.Chart[Index].Position;
-                if (!RefineSpecialPoint(Context, Special)) continue;
+                if (!RefineSpecialPoint(Context, Special, Branch.Chart[Index].First, Branch.Chart[Index].Second)) continue;
                 const double Reach = std::max(Distance(Branch.Chart[(Index + 1) % Count].Position, Branch.Chart[Index].Position),
                                               Distance(Branch.Chart[(Index + Count - 1) % Count].Position, Branch.Chart[Index].Position));
                 if (Distance(Special, Branch.Chart[Index].Position) > Reach) continue;
-                Branch.Chart[Index] = ChartPoint(Context, Special, Branch.Chart[Index].First, Branch.Chart[Index].Second);
+                Branch.Chart[Index] = ChartPointNear(Context, Special, Branch.Chart[Index].First, Branch.Chart[Index].Second);
                 RegisterSpecialPoint(Context, Special, SpecialPointCategory::Singular);
                 if (Splits.empty() || Splits.back() != Index) Splits.push_back(Index);
             }

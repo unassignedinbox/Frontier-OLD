@@ -40,14 +40,14 @@ namespace
             while (Span > Degree && Knots[Span] >= Knots[Span + 1]) --Span;                  // Skip empty spans at the end
             return Span;
         }
-        if (τ <= Knots[Degree])
+        if (!std::isfinite(τ) || τ <= Knots[Degree])
         {
             int Span = Degree;
             while (Span < Last && Knots[Span] >= Knots[Span + 1]) ++Span;
             return Span;
         }
         int Low = Degree, High = Last + 1, Middle = (Low + High) / 2;
-        while (τ < Knots[Middle] || τ >= Knots[Middle + 1])
+        while (High - Low > 1 && (τ < Knots[Middle] || τ >= Knots[Middle + 1]))
         {
             if (τ < Knots[Middle]) High = Middle; else Low = Middle;
             Middle = (Low + High) / 2;
@@ -532,12 +532,16 @@ std::vector<NurbsBezierPiece> DecomposeNurbsCurve(const NurbsCurveDefinition& De
     const NurbsDomain Domain = MeasureNurbsCurveDomain(Definition);
     if (Definition.Period > 0.0)
     {
+        if (!(Domain.High > Domain.Low) || !std::isfinite(Low) || !std::isfinite(High) || !(High > Low)) return Pieces;
         // Fold the interval start into the domain and split at every seam crossing.
         const double Shift = FoldInto(Low, Domain.Low, Definition.Period) - Low;            // [-] - Multiple of the period
         double Start = Low + Shift, Remaining = High - Low;
-        while (Remaining > 1.0e-15 * Definition.Period)
+        if (Start >= Domain.High) Start = Domain.Low;
+        int Wraps = 0;
+        while (Remaining > 1.0e-15 * Definition.Period && Wraps++ < 256)
         {
             const double End = std::min(Domain.High, Start + Remaining);
+            if (!(End > Start)) { Start = Domain.Low; continue; }
             NurbsCurveDefinition Open = Definition;
             Open.Period = 0.0;
             for (NurbsBezierPiece& Piece : DecomposeNurbsCurve(Open, Start, End))
