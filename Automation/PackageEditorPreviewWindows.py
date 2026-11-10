@@ -51,13 +51,13 @@ def LocateSolidArcExecutable(Executable, Requested=None):
 
 
 def LocateTextureExecutable(Executable, Requested=None):
-    # 📝 The browser's New dialog › Texture library starts TextureWorkspace.exe beside Frontier.exe (target TextureStudio).
+    # 📝 Standalone TextureWorkspace.exe still ships beside Frontier.exe when the TextureStudio target is built alongside it.
     Payload = Executable.read_bytes()
-    Required = Requested is not None or any(Marker in Payload for Marker in
+    Candidate = Requested.resolve() if Requested is not None else Executable.with_name('TextureWorkspace.exe')
+    Required = Requested is not None or Candidate.is_file() or any(Marker in Payload for Marker in
         (b'TextureWorkspace.exe', 'TextureWorkspace.exe'.encode('utf-16-le')))
     if not Required:
         return None
-    Candidate = Requested.resolve() if Requested is not None else Executable.with_name('TextureWorkspace.exe')
     if not Candidate.is_file():
         raise RuntimeError('Frontier starts TextureWorkspace.exe from its New dialog; build the TextureStudio target beside it')
     VerifyExecutable(Candidate)

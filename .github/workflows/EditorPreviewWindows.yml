@@ -64,6 +64,8 @@ jobs:
         run: |
           python Automation/PackageEditorPreviewWindows.py `
             --executable Build/Windows/Release/Frontier.exe `
+            --solidarc-executable Build/Windows/Release/SolidArcWorkspace.exe `
+            --texture-executable Build/Windows/Release/TextureWorkspace.exe `
             --toolchain 'ClangCL, Visual Studio 2022, Windows x64 Release (GitHub windows-2022)' `
             --omit-material-archives `
             --output Binaries/FrontierSceneViewport-Windows-x64.zip
