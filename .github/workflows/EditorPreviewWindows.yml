@@ -2,7 +2,7 @@ name: Windows binaries (Frontier + SolidArc + TextureWorkspace)
 
 on:
   push:
-    branches: ['main', 'arena/bfba53e1-frontier']
+    branches: ['main', 'arena/bfba53e1-frontier', 'arena/255c3b21-frontier']
   workflow_dispatch:
 
 permissions:
