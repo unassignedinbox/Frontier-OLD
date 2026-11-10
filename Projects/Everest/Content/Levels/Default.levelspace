@@ -11,7 +11,7 @@ name = "Render settings"
 enabled = true
 hardware_ray_query = true          # RTX ReSTIR path tracer; false: GTX distance-field GI
 quality_tier = 2                   # 0 low, 1 medium, 2 high
-analytic_illumination = false      # the fast closed-form preview instead of the global illumination (a debug view)
+direct_shading = false             # the fast direct-lighting preview instead of global illumination (a debug view)
 # Resolution & sampling
 render_scale = 1.0                 # viewport scale, under the grade's pixel ceiling
 trace_scale = 2                    # GI and reflections: 1 full, 2 half, 4 quarter
@@ -72,48 +72,6 @@ live_refresh = true
 target_rate = 60
 
 [[records]]
-identity = "rec_editor_camera"
-type = "Camera"
-name = "Editor Camera"
-[records.configuration]
-enabled = true
-active = true
-role = "editor"
-focal_length_mm = 17.537
-sensor_width_mm = 36.0
-aperture_f_number = 2.8
-subject_distance_m = 12.0
-near_clip_m = 0.05
-far_clip_m = 25000.0
-shake_enabled = false
-motion_blur_mode = "off"
-motion_blur_strength = 0.35
-position_m = [-61.9997, -34.0018, 9.0052]
-orientation_deg = [-5.23, 37.57, 0.0]
-
-[[records]]
-identity = "rec_vehicle_camera"
-type = "Camera"
-name = "Vehicle Camera"
-[records.configuration]
-enabled = true
-active = false
-role = "vehicle"
-focal_length_mm = 24.0
-sensor_width_mm = 36.0
-aperture_f_number = 2.8
-subject_distance_m = 8.0
-near_clip_m = 0.05
-far_clip_m = 25000.0
-shake_enabled = true
-shake_amplitude_m = 0.0015
-shake_max_offset_m = 0.006
-motion_blur_mode = "off"
-motion_blur_strength = 0.35
-position_m = [-14.0, 6.0, 3.2]
-orientation_deg = [-6.0, 0.0, 0.0]
-
-[[records]]
 identity = "rec_solar"
 type = "Solar"
 name = "Sun"
@@ -128,7 +86,7 @@ kelvin = 5778.0
 identity = "rec_flare"
 type = "OpticalFlare"
 name = "Lens Flare"
-parent = "rec_editor_camera"
+parent = "rec_solar"
 [records.configuration]
 enabled = true
 intensity = 0.62
@@ -1835,3 +1793,11 @@ position_m = [-36.0, 8.5, 0.0]
 orientation_deg = [0.0, 0.0, 0.0]
 scale = [1.0, 1.0, 1.0]
 fracture = false
+
+[[records]]
+identity = "rec_particles"
+type = "Particles"
+name = "Particle Effects"
+[records.configuration]
+enabled = true
+space_file = "Default.Particle_Effects.particlespace"

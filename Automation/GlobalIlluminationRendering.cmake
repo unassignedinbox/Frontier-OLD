@@ -10,7 +10,7 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.cpp
     Frontier/Engine/Rendering/GlobalIllumination/BoundingStructure.cpp
     Frontier/Engine/Rendering/GlobalIllumination/ShaderInterchange.cpp
-    Frontier/Engine/Rendering/GlobalIllumination/OccupantDistanceSpace.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/SubjectDistanceSpace.cpp
     Frontier/Engine/Rendering/GlobalIllumination/IlluminationConstants.cpp
     Frontier/Engine/Rendering/GlobalIllumination/SceneDistanceSpace.cpp
     Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp
@@ -24,7 +24,7 @@ add_library(FrontierGlobalIllumination STATIC
     Frontier/Engine/Rendering/GlobalIllumination/EnvironmentEncoding.cpp
     Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
     Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp
-    Frontier/Engine/Rendering/GlobalIllumination/OccupantRelocation.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/SubjectRelocation.cpp
     Frontier/Engine/Rendering/GlobalIllumination/PickProjection.cpp
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingProjection.cpp)
 
@@ -125,11 +125,10 @@ endif()
 #    and queue (the editor's Scene Viewport, Exhibits/SceneViewport).
 add_library(FrontierSceneViewport STATIC
     Frontier/Engine/Geometry/ShapeArchive.cpp
-    Frontier/Engine/Rendering/SceneViewport/CameraEffects.cpp
     Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
     Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
 target_include_directories(FrontierSceneViewport PUBLIC "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
-target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering FrontierAnalyticIllumination)
+target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering FrontierDirectShading)
 if(TARGET FrontierGlobalIlluminationShaders)
     add_dependencies(FrontierSceneViewport FrontierGlobalIlluminationShaders)
 endif()
@@ -139,14 +138,14 @@ endif()
 if(TARGET FrontierVirtualizedGeometryShaders)
     add_dependencies(FrontierSceneViewport FrontierVirtualizedGeometryShaders)
 endif()
-if(TARGET FrontierAnalyticIlluminationShaders)
-    add_dependencies(FrontierSceneViewport FrontierAnalyticIlluminationShaders)
+if(TARGET FrontierDirectShadingShaders)
+    add_dependencies(FrontierSceneViewport FrontierDirectShadingShaders)
 endif()
 
 # 📝 The editor loads EngineContent/ShaderArchives/{GlobalIllumination,Environment} beside Frontier.exe. The stored archives arrive
 #    with the EngineContent copy; a set this build compiled replaces its stored copy afterwards.
 if(TARGET Frontier)
-    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry AnalyticIllumination ParticleSimulation)
+    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry DirectShading ParticleSimulation)
         if(TARGET Frontier${SCENE_SHADERS}Shaders)
             add_dependencies(Frontier Frontier${SCENE_SHADERS}Shaders)
             add_custom_command(TARGET Frontier POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -207,9 +206,11 @@ if(BUILD_TESTING)
     #    output is not compared.
     set(FRONTIER_PINNED_SLANG "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/")
     set(FRONTIER_COMPARED_SHADER_SETS)
-    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry AnalyticIllumination ParticleSimulation)
+    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry DirectShading ParticleSimulation FluidSimulation)
         if(SCENE_SHADERS STREQUAL "Environment")
             set(SCENE_SLANGC "${FRONTIER_ENV_SLANGC}")
+        elseif(SCENE_SHADERS STREQUAL "FluidSimulation")
+            set(SCENE_SLANGC "${FRONTIER_FLUID_SLANGC}")
         else()
             set(SCENE_SLANGC "${FRONTIER_GLOBAL_ILLUMINATION_SLANGC}")
         endif()
@@ -228,5 +229,5 @@ if(BUILD_TESTING)
         endif()
     endif()
     add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
-        --verify --sets GlobalIllumination Environment VirtualizedGeometry AnalyticIllumination ParticleSimulation Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
+        --verify --sets GlobalIllumination Environment VirtualizedGeometry DirectShading ParticleSimulation FluidSimulation Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
 endif()

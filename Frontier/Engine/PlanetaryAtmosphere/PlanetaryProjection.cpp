@@ -7,6 +7,7 @@
 #include "Engine/PlanetaryAtmosphere/PlanetaryProjection.h"
 
 #include "Engine/PlanetaryAtmosphere/AtmosphereProjection.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <array>
@@ -30,8 +31,8 @@ namespace Frontier
 namespace
 {
 
-constexpr float π     = 3.14159265358979323846f;
-constexpr float Twoπ  = 6.28318530717958647692f;
+constexpr float π     = MathConstantsF::Pi;
+constexpr float Twoπ  = MathConstantsF::TwoPi;
 
 inline Vec3 Add3(Vec3 A, Vec3 B) noexcept { return {A.X + B.X, A.Y + B.Y, A.Z + B.Z}; }
 inline Vec3 Sub3(Vec3 A, Vec3 B) noexcept { return {A.X - B.X, A.Y - B.Y, A.Z - B.Z}; }

@@ -84,7 +84,7 @@ struct FacetHit
 {
     double   Travel   = 0.0;   // [m] from the near plane
     double   Margin   = 0.0;   // [m] distance from the hit to the facet's nearest edge
-    uint32_t Occupant = OccupantPick::NoOccupant;
+    uint32_t Occupant = SubjectPick::NoSubject;
 };
 
 // 📝 What a ray through a pixel's centre meets, and whether a rasteriser must agree: the nearest hit is decided unless another
@@ -92,7 +92,7 @@ struct FacetHit
 //    occupant does not continue past.
 struct RayAnswer
 {
-    uint32_t Occupant = OccupantPick::NoOccupant;
+    uint32_t Occupant = SubjectPick::NoSubject;
     bool     Decided  = true;
 };
 
@@ -200,7 +200,7 @@ std::string DescribePassage(const std::vector<WorldFacet>& Facets, const Vector3
 //    ray enters; a box around the camera counts at its far wall. Occupants no record owns held no box.
 uint32_t CastBoxes(const SceneStructure& Scene, const std::vector<char>& Owned, const Vector3& Origin, const Vector3& Direction)
 {
-    uint32_t Nearest = OccupantPick::NoOccupant;
+    uint32_t Nearest = SubjectPick::NoSubject;
     double   Best    = std::numeric_limits<double>::max();
     for (const DrawRun& Run : Scene.DrawRuns)
         for (uint32_t Occupant = Run.First; Occupant < Run.First + Run.Count; ++Occupant)
@@ -273,7 +273,7 @@ int main(int ArgumentCount, char** Arguments)
         if (Pipeline == nullptr) throw std::runtime_error("no Render settings record");
         Pipeline->AccessConfiguration().QualityTier          = 0;
         Pipeline->AccessConfiguration().HardwareRayQueryTier = false;
-        Pipeline->AccessConfiguration().AnalyticIllumination = true;
+        Pipeline->AccessConfiguration().DirectShading        = true;
         Pipeline->AccessConfiguration().AdvanceRevision();
         // 📝 A 4 m engine torus lying on open ground: its bounding box covers its 1.6 m hole.
         const Frontier::RecordToken TorusToken = World.ConstructRecord("Geometry", "Torus");
@@ -338,7 +338,7 @@ int main(int ArgumentCount, char** Arguments)
                             "|---|---:|---:|---:|---:|---:|---:|\n";
         size_t TotalDecided = 0, TotalAgree = 0, TotalCompared = 0, TotalBox = 0, TotalPicks = 0, TotalCovered = 0, TotalMisnamed = 0;
         double TotalMilliseconds = 0.0;
-        uint32_t                OwnedOccupant = OccupantPick::NoOccupant;
+        uint32_t                OwnedOccupant = SubjectPick::NoSubject;
         std::array<uint32_t, 2> OwnedPixel{}, SkyPixel{};
         bool                    SkyFound = false;
         for (const ViewSample& View : Views)
@@ -352,8 +352,8 @@ int main(int ArgumentCount, char** Arguments)
                 for (uint32_t Column = 0; Column < 6; ++Column)
                 {
                     const std::array<uint32_t, 2> Pixel = {static_cast<uint32_t>((Column + 0.5) / 6.0 * Extent[0]), static_cast<uint32_t>((Row + 0.5) / 4.0 * Extent[1])};
-                    OccupantPick Pick;
-                    if (!Viewport->PickOccupants(View.Camera, Extent, Pixel, Pick, &Diagnostic)) throw std::runtime_error("pick failed: " + Diagnostic);
+                    SubjectPick Pick;
+                    if (!Viewport->PickSubjects(View.Camera, Extent, Pixel, Pick, &Diagnostic)) throw std::runtime_error("pick failed: " + Diagnostic);
                     ++Picks;
                     Milliseconds += Pick.Milliseconds;
                     const bool Whole = (Row * 6 + Column) % 4 == 0;
@@ -369,7 +369,7 @@ int main(int ArgumentCount, char** Arguments)
                             const Vector3 Half = TransformPoint(Unprojection, {NdcX, NdcY, 0.5});
                             const Vector3 Direction = NormalizeVector(SubtractVector(Half, Near));
                             const RayAnswer Answer  = CastRay(Facets, Near, Direction, PixelSlope);
-                            const uint32_t  Seen    = Pick.QueryOccupant(OffsetX, OffsetY);
+                            const uint32_t  Seen    = Pick.QuerySubject(OffsetX, OffsetY);
                             ++Compared;
                             if (!Answer.Decided) continue;
                             ++Decided;
@@ -384,16 +384,16 @@ int main(int ArgumentCount, char** Arguments)
                             {
                                 // 📝 Records compared, not parts: a box on another part of the same record selects the same thing.
                                 const uint32_t Boxed = CastBoxes(Scene, Owned, Near, Direction);
-                                const auto     Drawn = Answer.Occupant != OccupantPick::NoOccupant ? Objects.QueryOwner(Answer.Occupant) : std::nullopt;
-                                BoxDiffers += (Boxed != OccupantPick::NoOccupant ? Objects.QueryOwner(Boxed) : std::nullopt) != Drawn ? 1 : 0;
+                                const auto     Drawn = Answer.Occupant != SubjectPick::NoSubject ? Objects.QueryOwner(Answer.Occupant) : std::nullopt;
+                                BoxDiffers += (Boxed != SubjectPick::NoSubject ? Objects.QueryOwner(Boxed) : std::nullopt) != Drawn ? 1 : 0;
                                 // 📝 For the editor's path below: a pixel of the default view on a record's part, and one on the sky.
-                                if (&View == &Views[0] && OwnedOccupant == OccupantPick::NoOccupant && Answer.Occupant != OccupantPick::NoOccupant &&
+                                if (&View == &Views[0] && OwnedOccupant == SubjectPick::NoSubject && Answer.Occupant != SubjectPick::NoSubject &&
                                     Owned[Answer.Occupant])
                                 {
                                     OwnedOccupant = Answer.Occupant;
                                     OwnedPixel    = Pixel;
                                 }
-                                if (&View == &Views[0] && !SkyFound && Answer.Occupant == OccupantPick::NoOccupant)
+                                if (&View == &Views[0] && !SkyFound && Answer.Occupant == SubjectPick::NoSubject)
                                 {
                                     SkyFound = true;
                                     SkyPixel = Pixel;
@@ -413,9 +413,9 @@ int main(int ArgumentCount, char** Arguments)
                     const RayAnswer Answer    = CastRay(Facets, Near, Direction, PixelSlope);
                     if (!Answer.Decided) continue;
                     const uint32_t Boxed = CastBoxes(Scene, Owned, Near, Direction);
-                    const auto     Drawn = Answer.Occupant != OccupantPick::NoOccupant ? Objects.QueryOwner(Answer.Occupant) : std::nullopt;
+                    const auto     Drawn = Answer.Occupant != SubjectPick::NoSubject ? Objects.QueryOwner(Answer.Occupant) : std::nullopt;
                     ++Covered;
-                    Misnamed += (Boxed != OccupantPick::NoOccupant ? Objects.QueryOwner(Boxed) : std::nullopt) != Drawn ? 1 : 0;
+                    Misnamed += (Boxed != SubjectPick::NoSubject ? Objects.QueryOwner(Boxed) : std::nullopt) != Drawn ? 1 : 0;
                 }
             TotalCovered += Covered;
             TotalMisnamed += Misnamed;
@@ -438,7 +438,7 @@ int main(int ArgumentCount, char** Arguments)
 
         // ④ the torus's hole: a click there picks what is seen through it, where the torus's bounding box took the click
         {
-            uint32_t TorusOccupant = OccupantPick::NoOccupant;
+            uint32_t TorusOccupant = SubjectPick::NoSubject;
             for (uint32_t Occupant = 0; Occupant < Scene.Occupants.size(); ++Occupant)
                 if (Objects.QueryOwner(Occupant) == TorusToken.Value) TorusOccupant = Occupant;
             const ViewportCamera          Hole           = LookFrom({-44.0, -27.0, 14.0}, {-44.0, -21.0, 0.6});
@@ -446,29 +446,29 @@ int main(int ArgumentCount, char** Arguments)
             const Transform               Unprojection   = InvertTransform(ViewProjection);
             const Vector3                 Centre         = TransformPoint(ViewProjection, {-44.0, -21.0, 0.6});
             const std::array<uint32_t, 2> Pixel = {static_cast<uint32_t>((Centre[0] * 0.5 + 0.5) * Extent[0]), static_cast<uint32_t>((0.5 - Centre[1] * 0.5) * Extent[1])};
-            OccupantPick Pick;
-            if (!Viewport->PickOccupants(Hole, Extent, Pixel, Pick, &Diagnostic)) throw std::runtime_error("pick failed: " + Diagnostic);
+            SubjectPick Pick;
+            if (!Viewport->PickSubjects(Hole, Extent, Pixel, Pick, &Diagnostic)) throw std::runtime_error("pick failed: " + Diagnostic);
             const double    NdcX      = (Pixel[0] + 0.5) / Extent[0] * 2.0 - 1.0;
             const double    NdcY      = 1.0 - (Pixel[1] + 0.5) / Extent[1] * 2.0;
             const Vector3   Near      = TransformPoint(Unprojection, {NdcX, NdcY, 1.0});
             const Vector3   Direction = NormalizeVector(SubtractVector(TransformPoint(Unprojection, {NdcX, NdcY, 0.5}), Near));
             const RayAnswer Answer    = CastRay(Facets, Near, Direction, 2.0 * std::tan(0.5 * Hole.VerticalFieldOfView) / Extent[1]);
-            const uint32_t  Seen      = Pick.QueryOccupant(0, 0);
+            const uint32_t  Seen      = Pick.QuerySubject(0, 0);
             const uint32_t  Boxed     = CastBoxes(Scene, Owned, Near, Direction);
             size_t          Ring      = 0;
-            for (const uint32_t Occupant : Pick.Occupants) Ring += Occupant == TorusOccupant ? 1 : 0;
+            for (const uint32_t Occupant : Pick.Subjects) Ring += Occupant == TorusOccupant ? 1 : 0;
             const auto Picked = Objects.ResolvePickedRecord(Pick);
-            Report(TorusOccupant != OccupantPick::NoOccupant && Answer.Decided && Seen == Answer.Occupant && Seen != TorusOccupant && Boxed == TorusOccupant &&
+            Report(TorusOccupant != SubjectPick::NoSubject && Answer.Decided && Seen == Answer.Occupant && Seen != TorusOccupant && Boxed == TorusOccupant &&
                        Picked != TorusToken.Value,
-                   "the torus (" + (TorusOccupant != OccupantPick::NoOccupant ? "reserve occupant #" + std::to_string(TorusOccupant) : std::string("not placed")) +
+                   "the torus (" + (TorusOccupant != SubjectPick::NoSubject ? "reserve occupant #" + std::to_string(TorusOccupant) : std::string("not placed")) +
                        ") through its hole (pixel " + std::to_string(Pixel[0]) + ", " + std::to_string(Pixel[1]) + "): the GPU pick finds #" + std::to_string(Seen) + " (" +
                        (Seen < Scene.Occupants.size() ? Scene.Occupants[Seen].Name : std::string("nothing")) + ") as the triangles do, the torus's box took it " +
                        "(#" + std::to_string(Boxed) + "); " + std::to_string(Ring) + " of 81 neighbourhood texels show the torus's ring");
         }
 
         // ⑤ the editor's path: a click's serial and stage point answered with the record drawn there, from the last image
-        Report(OwnedOccupant != OccupantPick::NoOccupant && SkyFound, "the default view has a pixel on a record's part and one on the sky");
-        if (OwnedOccupant != OccupantPick::NoOccupant)
+        Report(OwnedOccupant != SubjectPick::NoSubject && SkyFound, "the default view has a pixel on a record's part and one on the sky");
+        if (OwnedOccupant != SubjectPick::NoSubject)
         {
             Request.PickSerial = 1;
             Request.PickPoint  = {(OwnedPixel[0] + 0.5) / Extent[0], (OwnedPixel[1] + 0.5) / Extent[1]};

@@ -669,6 +669,15 @@ void SolarInspector::ConstructInspector()
         Changed |= SliderRow::Construct(Page, "SunGlow", "Optical aureole", Parameters.AureoleGain, 0.0f, AureoleMaximum, 0.01f, "\xC3\x97");
         CaptionText::Construct(Page, "Disc diagram is exaggerated for editing; the sky uses the actual angular diameter. The Sun disc quick toggle remains in Overview.");
         Page.EndCard();
+
+        // ── 08 / SUBCOMPONENT ──────────────────────────────────────────────────────────────────────────────────────
+        Page.BeginCard(SubcomponentLook(), "Connected optics", "08 / SUBCOMPONENT");
+        CaptionText::Construct(Page, "Lens flare is a separate optical subcomponent. Opening it does not change sunlight or exposure.");
+        if (NextButton::Construct(Page, "##OpenLensFlare", "Open Lens Flare \xE2\x86\x97"))
+        {
+            InspectorRuntime::Instance().RequestSelection("OpticalFlare");
+        }
+        Page.EndCard();
     }
 
     FooterRow::Construct(Page, "DIRECTIONAL LIGHT / Z UP", "Settings apply live \xE2\x86\x97");

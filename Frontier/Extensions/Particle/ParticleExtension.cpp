@@ -57,7 +57,7 @@ ParticleViewportOutcome ParticleExtension::Render(const ParticleViewportRequest&
     // 📝 On the editor's queue the previous interface frame may still sample the presented image; this refresh writes it.
     if (HostDeviceAttached_) Sequence_->AccessExchange()->AwaitIdle();
     std::string Diagnostic;
-    if (!Sequence_->Refresh(*Request.Plan, *Request.Effects, &Diagnostic))
+    if (!Sequence_->Refresh(*Request.Plan, *Request.Effects, &Diagnostic, Request.FieldSampler.get()))
     {
         Outcome.Image.Failure = "Particle refresh failed: " + Diagnostic;
         return Outcome;

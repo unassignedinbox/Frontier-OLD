@@ -24,6 +24,7 @@ add_library(FrontierEnvironmentRendering STATIC
     Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleLightning.cpp
     Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.cpp
     Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpaceCodec.cpp
+    Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleTriggerRouter.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereScattering.cpp
     Frontier/Engine/PlanetaryAtmosphere/AstronomicalEphemeris.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereProjection.cpp

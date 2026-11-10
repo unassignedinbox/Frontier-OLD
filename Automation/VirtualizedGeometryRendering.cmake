@@ -9,7 +9,8 @@ add_library(FrontierVirtualizedGeometry STATIC
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingSelection.cpp
     Frontier/Engine/Rendering/VirtualizedGeometry/VisibilityResolve.cpp
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingArchive.cpp)
-target_include_directories(FrontierVirtualizedGeometry PUBLIC "${CMAKE_SOURCE_DIR}/Frontier/Engine")
+# 📝 The public nesting headers include repo-rooted "Frontier/..." paths, so consumers need the source root too.
+target_include_directories(FrontierVirtualizedGeometry PUBLIC "${CMAKE_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/Frontier/Engine")
 target_compile_features(FrontierVirtualizedGeometry PUBLIC cxx_std_20)
 # 📝 Parity with the demo's JavaScript doubles needs plain IEEE evaluation: no fused multiply-adds.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

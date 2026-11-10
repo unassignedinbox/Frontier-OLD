@@ -157,11 +157,13 @@ Banner('Accelerate and damp types: the eos taxonomy');
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-Banner('Levelspace: keys marked existing are the ones WorldSpace.cpp reads today');
+Banner('Levelspace: keys marked existing are the ones DynamicsSpaceCodecs.cpp reads today');
 {
-    const WorldSpace = readFileSync(join(Root, 'Frontier/Engine/Scene/WorldSpace.cpp'), 'utf8');
-    const Body = Name => { const Start = WorldSpace.indexOf(`void ${Name}::DeserializeConfiguration`); return WorldSpace.slice(Start, WorldSpace.indexOf('\n}\n', Start)); };
-    const Readable = new Set([...Body('WindRecord').matchAll(/"([a-z_]+)"/g), ...Body('ForceFieldRecord').matchAll(/"([a-z_]+)"/g)].map(Match => Match[1]));
+    const Codecs = readFileSync(join(Root, 'Frontier/Engine/Scene/DynamicsSpaceCodecs.cpp'), 'utf8');
+    const SchemaBody = Name => { const Start = Codecs.indexOf(`struct SpaceSchema<${Name}>`); return Codecs.slice(Start, Codecs.indexOf('\n};\n', Start)); };
+    const FnBody = Name => { const Start = Codecs.indexOf(`void ${Name}::DeserializeConfiguration`); return Codecs.slice(Start, Codecs.indexOf('\n}\n', Start)); };
+    const Combined = [SchemaBody('WindConfiguration'), SchemaBody('ForceFieldConfiguration'), FnBody('WindRecord'), FnBody('ForceFieldRecord')].join('\n');
+    const Readable = new Set([...Combined.matchAll(/"([a-z_]+)"/g)].map(Match => Match[1]));
     const Structural = new Set(['identity', 'type', 'name', 'parent']);
     const Claimed = [...F.ExistingKeys].filter(Key => !Structural.has(Key));
     const Missing = Claimed.filter(Key => !Readable.has(Key));

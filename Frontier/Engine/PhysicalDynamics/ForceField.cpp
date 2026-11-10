@@ -6,6 +6,10 @@
 //    multi-species particle drag.
 
 #include "Engine/PhysicalDynamics/ForceField.h"
+#include "Engine/PhysicalDynamics/ForceFieldSpaceCodec.h"
+#include "Frontier/Engine/Foundation/Constants.h"
+
+#include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -15,10 +19,10 @@ namespace Frontier
 namespace
 {
 
-constexpr double π      = 3.14159265358979323846;
-constexpr double Twoπ   = 6.28318530717958647692;
-constexpr double ρAir0  = 1.225; // [kg/m³] sea-level standard air density
-constexpr double GravG  = 9.80665;
+constexpr double π      = MathConstantsD::Pi;
+constexpr double Twoπ   = MathConstantsD::TwoPi;
+constexpr double ρAir0  = PhysicsConstantsD::StandardSeaLevelDensityKgM3; // [kg/m³] sea-level standard air density
+constexpr double GravG  = PhysicsConstantsD::StandardGravityMps2;
 
 inline double Smooth01(double Value) noexcept
 {
@@ -330,6 +334,7 @@ void ForceFieldSpace::SetElapsedSeconds(double Seconds) noexcept
 void ForceFieldSpace::SetWindProfile(const PlanetaryWindProfile& Profile) noexcept
 {
     Wind_ = Profile;
+    Wind_.RegionRadiusMeters = std::clamp(Wind_.RegionRadiusMeters, 100.0, 50000.0);
     PrepareAuthoredSources();
 }
 
@@ -388,13 +393,94 @@ SpatialVector ForceFieldSpace::EvaluateContribution(ForceContribution Contributi
     }
     if (Solo == kSoloWind) return Out;
     const ForceWindReading Wind = QueryAuthoredWind();
-    for (size_t Index = 0; Index < Authored_.size(); ++Index)
+    switch (Contribution)
     {
-        if (Authored_[Index].Contribution != Contribution) continue;
-        if (Solo >= 0 && static_cast<size_t>(Solo) != Index) continue;
-        (void)EvaluatePreparedForceSource(Authored_[Index], Wind, WorldPointMeters, Out);
+    case ForceContribution::Flow:
+        AccumulateContributionBucket<ForceContribution::Flow>(WorldPointMeters, Wind, Solo, Out);
+        break;
+    case ForceContribution::Accelerate:
+        AccumulateContributionBucket<ForceContribution::Accelerate>(WorldPointMeters, Wind, Solo, Out);
+        break;
+    case ForceContribution::Damp:
+        AccumulateContributionBucket<ForceContribution::Damp>(WorldPointMeters, Wind, Solo, Out);
+        break;
     }
     return Out;
+}
+
+Vec3d ForceFieldSpace::SampleFieldFlow(const Vec3d& FieldPointMeters,
+                                       double       CellSpanMeters,
+                                       bool         IncludeCurlSwirl) const noexcept
+{
+    const ForceFieldSample Sample = EvaluateStepSample(
+        { FieldPointMeters.X, FieldPointMeters.Y, FieldPointMeters.Z }, IncludeCurlSwirl, CellSpanMeters);
+    return { Sample.AirVelocityMps.X, Sample.AirVelocityMps.Y, Sample.AirVelocityMps.Z };
+}
+
+Vec3d ForceFieldSpace::SampleFieldContribution(ForceContribution Contribution,
+                                               const Vec3d&      FieldPointMeters,
+                                               double            CellSpanMeters,
+                                               bool              IncludeCurlSwirl,
+                                               int32_t           Solo) const noexcept
+{
+    const SpatialVector V = EvaluateContribution(
+        Contribution, { FieldPointMeters.X, FieldPointMeters.Y, FieldPointMeters.Z }, CellSpanMeters, IncludeCurlSwirl, Solo);
+    return { V.X, V.Y, V.Z };
+}
+
+FieldPointSample ForceFieldSpace::EvaluateFullField(const Vec3d& FieldPointMeters,
+                                                    bool         IncludeCurlSwirl,
+                                                    double       CellSpanMeters) const noexcept
+{
+    const ForceFieldSample S = EvaluateStepSample(
+        { FieldPointMeters.X, FieldPointMeters.Y, FieldPointMeters.Z }, IncludeCurlSwirl, CellSpanMeters);
+    FieldPointSample Out;
+    Out.AirVelocityMps               = { S.AirVelocityMps.X, S.AirVelocityMps.Y, S.AirVelocityMps.Z };
+    Out.RadialPressureGradientPaPerM = { S.RadialPressureGradientPaPerM.X,
+                                         S.RadialPressureGradientPaPerM.Y,
+                                         S.RadialPressureGradientPaPerM.Z };
+    Out.PressureDeficitPascals       = S.PressureDeficitPascals;
+    Out.FunnelCondensationDensity    = S.FunnelCondensationDensity;
+    Out.HelicalTwistRadians          = S.HelicalTwistRadians;
+    Out.ParticulateExtinctionPerM    = S.ParticulateExtinctionPerM;
+    Out.ParticulateScatteringAlbedo  = { S.ParticulateScatteringAlbedo.R,
+                                         S.ParticulateScatteringAlbedo.G,
+                                         S.ParticulateScatteringAlbedo.B };
+    return Out;
+}
+
+void ForceFieldSpace::SerializeDomainState(toml::table& Out) const
+{
+    ForceSpaceDocument Doc;
+    Doc.Enabled            = Enabled_;
+    Doc.GroundPlaneYMeters = GroundPlaneYMeters_;
+    Doc.ElapsedSeconds     = ElapsedSeconds_;
+    Doc.AuthoredSeconds    = AuthoredSeconds_;
+    Doc.Wind               = Wind_;
+    Doc.Spatial            = Spatial_;
+    Doc.Replication        = Replication_;
+    EncodeSpaceTable(Out, Doc);
+}
+
+void ForceFieldSpace::DeserializeDomainState(const toml::table& In)
+{
+    ForceSpaceDocument Doc;
+    Doc.Enabled            = Enabled_;
+    Doc.GroundPlaneYMeters = GroundPlaneYMeters_;
+    Doc.ElapsedSeconds     = ElapsedSeconds_;
+    Doc.AuthoredSeconds    = AuthoredSeconds_;
+    Doc.Wind               = Wind_;
+    Doc.Spatial            = Spatial_;
+    Doc.Replication        = Replication_;
+    DecodeSpaceTable(In, Doc);
+    Enabled_            = Doc.Enabled;
+    GroundPlaneYMeters_ = Doc.GroundPlaneYMeters;
+    ElapsedSeconds_     = Doc.ElapsedSeconds;
+    AuthoredSeconds_    = Doc.AuthoredSeconds;
+    Wind_               = Doc.Wind;
+    Spatial_            = Doc.Spatial;
+    Replication_        = Doc.Replication;
+    AdvanceRevision();
 }
 
 SpatialVector ForceFieldSpace::SampleStep(SpatialVector WorldPointMeters) const noexcept
@@ -430,6 +516,14 @@ SpatialVector ForceFieldSpace::SampleSwirl(SpatialVector WorldPointMeters, doubl
 SpatialVector ForceFieldSpace::EvaluateWindFlow(SpatialVector WorldPointMeters, bool IncludeCurlSwirl, double CellSpanMeters) const noexcept
 {
     if (!Enabled_) return {};
+    double RegionFade = 1.0;
+    if (Wind_.Bounded)
+    {
+        const double Radius = std::max(100.0, Wind_.RegionRadiusMeters);
+        const double Share = std::hypot(WorldPointMeters.X, WorldPointMeters.Z) / Radius;
+        if (Share >= 1.0) return {};
+        RegionFade = 1.0 - Smooth01(Share);
+    }
     const double AltAboveGroundM = std::max(0.0, WorldPointMeters.Y - GroundPlaneYMeters_);
     const double AltKm           = AltAboveGroundM * 1.0e-3;
     double       Bearing         = Wind_.BearingRadians + Wind_.VeerRadiansPerKilometer * AltKm;
@@ -466,6 +560,9 @@ SpatialVector ForceFieldSpace::EvaluateWindFlow(SpatialVector WorldPointMeters, 
         Flow.Y += Eddy.Y;
         Flow.Z += Eddy.Z;
     }
+    Flow.X *= RegionFade;
+    Flow.Y *= RegionFade;
+    Flow.Z *= RegionFade;
     return Flow;
 }
 
@@ -1149,7 +1246,7 @@ uint32_t ForceFieldSpace::AppendGpuForceRecords(std::vector<std::array<float, 4>
         const float                     Env    = static_cast<float>(Prepared.Activation.Envelope);
         if (!Column.Enabled || Column.Category != ForceSourceCategory::TornadoColumn || Env <= 1.0e-4f) continue;
         const double Inner = std::max(1.0, Column.InnerRadiusMetres);
-        const double Phase = std::fmod(Column.Strength / Inner * AuthoredSeconds_, 6.283185307179586);
+        const double Phase = std::fmod(Column.Strength / Inner * AuthoredSeconds_, Twoπ);
         OutFloat4Table.push_back({static_cast<float>(Prepared.CentreMetres.X), static_cast<float>(Prepared.CentreMetres.Y),
                                   static_cast<float>(Prepared.CentreMetres.Z), 1.0f});
         OutFloat4Table.push_back({static_cast<float>(Column.HeightMetres), static_cast<float>(Inner),

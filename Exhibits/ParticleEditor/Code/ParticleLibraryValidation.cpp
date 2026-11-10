@@ -2,7 +2,7 @@
                                                         PARTICLELIBRARYVALIDATION.CPP
 ==========================================================================================================================================*/
 // 🧩 The C++ Particle editor's library and GPU payloads against the approved prototype: the 52 presets decoded from
-//    ParticleLibrary.toml, every effect uniform, light-fibre uniform and path samples, the refresh constants, the wind
+//    ParticleLibrary.particlespace, every effect uniform, light-fibre uniform and path samples, the refresh constants, the wind
 //    components, the acceleration fields, the lensing block and the eos force taxonomy's readings.
 //
 //     ParticleLibraryValidation <repository root>
@@ -130,9 +130,9 @@ int main(int ArgumentCount, char** Arguments)
 
     ParticleEffectLibrary Library;
     std::string           Diagnostic;
-    if (!Library.Decode(Root / "EngineContent/ParticleArchives/ParticleLibrary.toml", Diagnostic))
+    if (!Library.Decode(Root / "EngineContent/ParticleArchives/ParticleLibrary.particlespace", Diagnostic))
     {
-        std::printf("  🔴 ParticleLibrary.toml: %s\n", Diagnostic.c_str());
+        std::printf("  🔴 ParticleLibrary.particlespace: %s\n", Diagnostic.c_str());
         return 1;
     }
     std::map<int, int> Behaviours;

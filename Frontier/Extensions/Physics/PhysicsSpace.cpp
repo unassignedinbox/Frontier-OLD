@@ -1,166 +1,184 @@
 /*==========================================================================================================================================
                                                               PHYSICSSPACE.CPP
 ==========================================================================================================================================*/
-// 🧩 The PhysicsSpace on Jolt: one Jolt solver with the extension's layers, box and sphere bodies, contact tally and stepping.
+// 🧩 PhysicsSpace: bridges IPhysicsSubstrate (JoltSubstrate default or injected backend) and .physicsspace document codecs.
 
 #include "Frontier/Extensions/Physics/PhysicsSpace.h"
 
-#include "Frontier/Extensions/Physics/JoltExtension.h"
+#include "Frontier/Engine/Foundation/Math.h"
+#include "Frontier/Extensions/Physics/JoltSubstrate.h"
 
-#include <Jolt/Physics/Body/BodyCreationSettings.h>
-#include <Jolt/Physics/Body/BodyInterface.h>
-#include <Jolt/Physics/Collision/ContactListener.h>
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Collision/Shape/SphereShape.h>
-#include <Jolt/Physics/PhysicsSystem.h>
-
-#include <algorithm>
-#include <atomic>
-#include <cmath>
 #include <limits>
 
 namespace Frontier
 {
 
-namespace
+PhysicsSpace::PhysicsSpace(const PhysicsSpaceSettings& Settings)
+    : Settings_(Settings), Substrate(std::make_unique<JoltSubstrate>(Settings))
 {
-
-// 📝 Counts the contacts Jolt adds (callbacks arrive on the job threads).
-class ContactTally final : public JPH::ContactListener
-{
-  public:
-    void OnContactAdded(const JPH::Body&, const JPH::Body&, const JPH::ContactManifold&, JPH::ContactSettings&) override
-    {
-        Added.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    std::atomic<uint64_t> Added{ 0 };
-};
-
-JPH::Vec3 ToVector(const std::array<double, 3>& Value)
-{
-    return JPH::Vec3(static_cast<float>(Value[0]), static_cast<float>(Value[1]), static_cast<float>(Value[2]));
 }
 
-} // namespace
-
-struct PhysicsSpace::Implementation
+PhysicsSpace::PhysicsSpace(std::unique_ptr<IPhysicsSubstrate> CustomSubstrate, const PhysicsSpaceSettings& Settings)
+    : Settings_(Settings), Substrate(std::move(CustomSubstrate))
 {
-    JoltExtension          Backend;
-    JPH::PhysicsSystem     Solver;
-    ContactTally           Contacts;
-    std::vector<JPH::BodyID> Bodies;
-
-    explicit Implementation(uint32_t Workers) : Backend(Workers) {}
-};
-
-PhysicsSpace::PhysicsSpace(const PhysicsSpaceSettings& Settings) : Detail(std::make_unique<Implementation>(Settings.Workers))
-{
-    const JPH::uint Bodies = std::max<JPH::uint>(16, Settings.MaximumBodies);
-    Detail->Solver.Init(Bodies, 0, Bodies, Bodies, Detail->Backend.QueryLayers(), Detail->Backend.QueryLayerFilter(), Detail->Backend.QueryPairFilter());
-    Detail->Solver.SetGravity(ToVector(Settings.GravityMps2));
-    Detail->Solver.SetContactListener(&Detail->Contacts);
 }
 
-PhysicsSpace::~PhysicsSpace()
-{
-    JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterface();
-    for (const JPH::BodyID& Body : Detail->Bodies)
-    {
-        Interface.RemoveBody(Body);
-        Interface.DestroyBody(Body);
-    }
-}
+PhysicsSpace::~PhysicsSpace() = default;
 
 uint32_t PhysicsSpace::AddBody(const PhysicsBodyDescriptor& Descriptor)
 {
-    constexpr uint32_t Refused = std::numeric_limits<uint32_t>::max();
-    JPH::RefConst<JPH::Shape> Shape;
-    if (Descriptor.Shape == PhysicsShape::Sphere)
+    if (!Substrate || Descriptors.size() >= Settings_.MaximumBodies)
     {
-        if (!(Descriptor.HalfExtentMetres[0] > 1.0e-3)) return Refused;
-        Shape = new JPH::SphereShape(static_cast<float>(Descriptor.HalfExtentMetres[0]));
+        return std::numeric_limits<uint32_t>::max();
     }
-    else
+    const uint32_t Index = Substrate->AddBody(Descriptor);
+    if (Index == std::numeric_limits<uint32_t>::max())
     {
-        const JPH::Vec3 Half = ToVector(Descriptor.HalfExtentMetres);
-        if (!(Half.ReduceMin() > 1.0e-3f)) return Refused;
-        // 📝 The convex radius rounds the box's edges; it must stay below half the smallest side.
-        Shape = new JPH::BoxShape(Half, std::min(JPH::cDefaultConvexRadius, 0.5f * Half.ReduceMin()));
+        return Index;
     }
-    const bool                Moving = Descriptor.Motion == PhysicsMotion::Moving;
-    JPH::BodyCreationSettings Settings(Shape, JPH::RVec3(ToVector(Descriptor.PositionMetres)),
-                                       JPH::Quat(static_cast<float>(Descriptor.Orientation[0]), static_cast<float>(Descriptor.Orientation[1]),
-                                                 static_cast<float>(Descriptor.Orientation[2]), static_cast<float>(Descriptor.Orientation[3]))
-                                           .Normalized(),
-                                       Moving ? JPH::EMotionType::Dynamic : JPH::EMotionType::Static, Moving ? JoltLayers::Moving : JoltLayers::Fixed);
-    Settings.mFriction       = static_cast<float>(Descriptor.Friction);
-    Settings.mRestitution    = static_cast<float>(Descriptor.Restitution);
-    Settings.mLinearDamping  = static_cast<float>(Descriptor.LinearDamping);
-    Settings.mUserData       = Descriptor.Record;
-    if (Moving)
-    {
-        Settings.mLinearVelocity  = ToVector(Descriptor.LinearVelocityMps);
-        Settings.mAngularVelocity = ToVector(Descriptor.AngularVelocityRads);
-        if (Descriptor.MassKilograms > 0.0)
-        {
-            Settings.mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
-            Settings.mMassPropertiesOverride.mMass = static_cast<float>(Descriptor.MassKilograms);
-        }
-    }
-    JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterface();
-    const JPH::BodyID   Body      = Interface.CreateAndAddBody(Settings, Moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
-    if (Body.IsInvalid()) return Refused;
-    Detail->Bodies.push_back(Body);
     Descriptors.push_back(Descriptor);
-    return static_cast<uint32_t>(Descriptors.size() - 1);
+    return Index;
 }
 
 void PhysicsSpace::Prepare()
 {
-    Detail->Solver.OptimizeBroadPhase();
+    if (Substrate)
+    {
+        Substrate->Prepare();
+    }
 }
 
 void PhysicsSpace::Step(double DeltaSeconds, uint32_t CollisionSteps)
 {
-    if (!(DeltaSeconds > 0.0)) return;
-    (void)Detail->Solver.Update(static_cast<float>(DeltaSeconds), static_cast<int>(std::max(1u, CollisionSteps)), &Detail->Backend.AccessTemporary(),
-                                &Detail->Backend.AccessJobs());
+    if (!Substrate || !(DeltaSeconds > 0.0))
+    {
+        return;
+    }
+    Substrate->Step(DeltaSeconds, CollisionSteps);
     SimulatedSeconds += DeltaSeconds;
+}
+
+void PhysicsSpace::SetGravity(const std::array<double, 3>& GravityMps2)
+{
+    Settings_.GravityMps2 = GravityMps2;
+    if (Substrate)
+    {
+        Substrate->SetGravity(GravityMps2);
+    }
 }
 
 PhysicsBodyReading PhysicsSpace::ReadBody(uint32_t Index) const
 {
-    PhysicsBodyReading Reading;
-    if (Index >= Detail->Bodies.size()) return Reading;
-    const JPH::BodyInterface& Interface = Detail->Solver.GetBodyInterfaceNoLock();
-    const JPH::BodyID         Body      = Detail->Bodies[Index];
-    JPH::RVec3                Position;
-    JPH::Quat                 Rotation;
-    Interface.GetPositionAndRotation(Body, Position, Rotation);
-    const JPH::Vec3 Linear  = Interface.GetLinearVelocity(Body);
-    const JPH::Vec3 Angular = Interface.GetAngularVelocity(Body);
-    Reading.PositionMetres      = { Position.GetX(), Position.GetY(), Position.GetZ() };
-    Reading.Orientation         = { Rotation.GetX(), Rotation.GetY(), Rotation.GetZ(), Rotation.GetW() };
-    Reading.LinearVelocityMps   = { Linear.GetX(), Linear.GetY(), Linear.GetZ() };
-    Reading.AngularVelocityRads = { Angular.GetX(), Angular.GetY(), Angular.GetZ() };
-    Reading.Awake               = Interface.IsActive(Body);
-    return Reading;
+    return Substrate ? Substrate->ReadBody(Index) : PhysicsBodyReading{};
 }
 
 size_t PhysicsSpace::QueryAwakeCount() const
 {
-    return Detail->Solver.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+    return Substrate ? Substrate->QueryAwakeCount() : 0;
 }
 
 uint64_t PhysicsSpace::QueryContactsAdded() const noexcept
 {
-    return Detail->Contacts.Added.load(std::memory_order_relaxed);
+    return Substrate ? Substrate->QueryContactsAdded() : 0;
 }
 
 uint32_t PhysicsSpace::QueryWorkers() const noexcept
 {
-    return Detail->Backend.QueryWorkers();
+    return Substrate ? Substrate->QueryWorkers() : 0;
+}
+
+std::vector<PhysicsImpactEvent> PhysicsSpace::DrainImpactEvents()
+{
+    return Substrate ? Substrate->DrainImpactEvents() : std::vector<PhysicsImpactEvent>{};
+}
+
+uint64_t PhysicsSpace::QueryImpactCount() const
+{
+    return Substrate ? Substrate->QueryImpactCount() : 0;
+}
+
+PhysicsSpaceDocument PhysicsSpace::ExportDocument() const
+{
+    PhysicsSpaceDocument Doc;
+    Doc.GravityMps2   = Settings_.GravityMps2;
+    Doc.MaximumBodies = Settings_.MaximumBodies;
+    Doc.Workers       = Settings_.Workers;
+    Doc.Bodies.reserve(Descriptors.size());
+    for (size_t Index = 0; Index < Descriptors.size(); ++Index)
+    {
+        const PhysicsBodyDescriptor& Desc    = Descriptors[Index];
+        const PhysicsBodyReading     Current = ReadBody(static_cast<uint32_t>(Index));
+        PhysicsBodyDocumentEntry     Entry;
+        Entry.Record           = Desc.Record;
+        Entry.Shape            = Desc.Shape;
+        Entry.HalfExtentMetres = Desc.HalfExtentMetres;
+        Entry.PositionMetres   = Current.PositionMetres;
+        Entry.Orientation      = Current.Orientation;
+        Entry.Motion           = Desc.Motion;
+        Entry.MassKilograms    = Desc.MassKilograms;
+        Entry.Friction         = Desc.Friction;
+        Entry.Restitution      = Desc.Restitution;
+        Entry.LinearDamping    = Desc.LinearDamping;
+        Entry.SurfaceClass     = Desc.SurfaceClass;
+        Doc.Bodies.push_back(Entry);
+    }
+    return Doc;
+}
+
+bool PhysicsSpace::ImportDocument(const PhysicsSpaceDocument& Document)
+{
+    Settings_.GravityMps2   = Document.GravityMps2;
+    Settings_.MaximumBodies = Document.MaximumBodies;
+    Settings_.Workers       = Document.Workers;
+    if (Substrate)
+    {
+        Substrate->SetGravity(Document.GravityMps2);
+    }
+    for (const PhysicsBodyDocumentEntry& Entry : Document.Bodies)
+    {
+        PhysicsBodyDescriptor Desc;
+        Desc.Record           = Entry.Record;
+        Desc.Shape            = Entry.Shape;
+        Desc.HalfExtentMetres = Entry.HalfExtentMetres;
+        Desc.PositionMetres   = Entry.PositionMetres;
+        Desc.Orientation      = Entry.Orientation;
+        Desc.Motion           = Entry.Motion;
+        Desc.MassKilograms    = Entry.MassKilograms;
+        Desc.Friction         = Entry.Friction;
+        Desc.Restitution      = Entry.Restitution;
+        Desc.LinearDamping    = Entry.LinearDamping;
+        Desc.SurfaceClass     = Entry.SurfaceClass;
+        if (AddBody(Desc) == std::numeric_limits<uint32_t>::max())
+        {
+            return false;
+        }
+    }
+    Prepare();
+    return true;
+}
+
+bool WritePhysicsSpace(const PhysicsSpace&          Space,
+                       const std::filesystem::path& FilePath,
+                       std::string*                 OutDiagnostic)
+{
+    return EncodeSpaceFile(FilePath,
+                           PhysicsSpaceExtension,
+                           PhysicsSpaceFormat,
+                           PhysicsSpaceVersion,
+                           Space.ExportDocument(),
+                           OutDiagnostic);
+}
+
+bool ReadPhysicsSpace(const std::filesystem::path& FilePath,
+                      PhysicsSpace&                OutSpace,
+                      std::string*                 OutDiagnostic)
+{
+    PhysicsSpaceDocument Doc;
+    if (!DecodeSpaceFile(FilePath, PhysicsSpaceExtension, PhysicsSpaceFormat, PhysicsSpaceVersion, Doc, OutDiagnostic))
+    {
+        return false;
+    }
+    return OutSpace.ImportDocument(Doc);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -169,29 +187,17 @@ uint32_t PhysicsSpace::QueryWorkers() const noexcept
 
 std::array<double, 4> ResolvePhysicsOrientation(const std::array<double, 3>& OrientationDegrees) noexcept
 {
-    // 📝 q = qz(γ) · qy(β) · qx(α), half angles.
-    constexpr double Radians = 3.14159265358979323846 / 360.0;
-    const double     Cx = std::cos(OrientationDegrees[0] * Radians), Sx = std::sin(OrientationDegrees[0] * Radians);
-    const double     Cy = std::cos(OrientationDegrees[1] * Radians), Sy = std::sin(OrientationDegrees[1] * Radians);
-    const double     Cz = std::cos(OrientationDegrees[2] * Radians), Sz = std::sin(OrientationDegrees[2] * Radians);
-    return { Sx * Cy * Cz - Cx * Sy * Sz, Cx * Sy * Cz + Sx * Cy * Sz, Cx * Cy * Sz - Sx * Sy * Cz, Cx * Cy * Cz + Sx * Sy * Sz };
+    return Quatd::FromEulerDegreesZYX({ OrientationDegrees[0], OrientationDegrees[1], OrientationDegrees[2] }).ToArray();
 }
 
 std::array<double, 3> ResolvePhysicsEulerDegrees(const std::array<double, 4>& Q) noexcept
 {
-    // 📝 From the rotation's columns: β = asin(−R₂₀), α = atan2(R₂₁, R₂₂), γ = atan2(R₁₀, R₀₀).
-    constexpr double Degrees = 180.0 / 3.14159265358979323846;
-    const double     X = Q[0], Y = Q[1], Z = Q[2], W = Q[3];
-    const double     R00 = 1.0 - 2.0 * (Y * Y + Z * Z), R10 = 2.0 * (X * Y + Z * W), R20 = 2.0 * (X * Z - Y * W);
-    const double     R21 = 2.0 * (Y * Z + X * W), R22 = 1.0 - 2.0 * (X * X + Y * Y);
-    return { std::atan2(R21, R22) * Degrees, std::asin(std::clamp(-R20, -1.0, 1.0)) * Degrees, std::atan2(R10, R00) * Degrees };
+    return Quatd{ Q[0], Q[1], Q[2], Q[3] }.ToEulerDegreesZYX().ToArray();
 }
 
 std::array<double, 3> RotatePhysicsVector(const std::array<double, 4>& Q, const std::array<double, 3>& V) noexcept
 {
-    // 📝 v' = v + 2 w (q × v) + 2 q × (q × v)
-    const double Tx = 2.0 * (Q[1] * V[2] - Q[2] * V[1]), Ty = 2.0 * (Q[2] * V[0] - Q[0] * V[2]), Tz = 2.0 * (Q[0] * V[1] - Q[1] * V[0]);
-    return { V[0] + Q[3] * Tx + (Q[1] * Tz - Q[2] * Ty), V[1] + Q[3] * Ty + (Q[2] * Tx - Q[0] * Tz), V[2] + Q[3] * Tz + (Q[0] * Ty - Q[1] * Tx) };
+    return Quatd{ Q[0], Q[1], Q[2], Q[3] }.RotateVector({ V[0], V[1], V[2] }).ToArray();
 }
 
 } // namespace Frontier

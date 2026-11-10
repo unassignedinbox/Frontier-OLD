@@ -4,6 +4,7 @@
 // 🧩 GeometryHierarchy.js statement for statement: weld, edge incidence, cluster partition, quadric simplification, nesting
 //    build, validation and tier collection. JavaScript Map/Set iteration order is kept wherever it reaches a result.
 #include "NestingConstruction.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 #include <algorithm>
 #include <atomic>
 #include <bit>
@@ -20,7 +21,7 @@ namespace
 constexpr uint32_t DefaultTriangleLimit     = 128;
 constexpr double   DefaultSharpNormalCosine = 0x1.6a09e667f3bcdp-1;   // [-] Math.cos((45 * Math.PI) / 180) in V8, bit for bit
 constexpr double   UvMatchTolerance         = 1e-5;                   // [-] UV wedge identity tolerance
-constexpr double   CirclePi                 = 3.141592653589793;      // [-] Math.PI
+constexpr double   CirclePi                 = MathConstantsD::Pi;      // [-] Math.PI
 
 [[nodiscard]] Point2 ReadCornerUv(const std::vector<double>& CornerUvs, uint32_t Triangle, uint32_t Corner) noexcept
 {

@@ -14,7 +14,6 @@ import { TyreSlipSolver } from "./TyreSlipSolver.js";
 import { VehicleGeometry, ResolveSuspensionPair, ResolveSuspensionMountLocal, ResolveInertia, AntiRollBars,
          EngineSheet, TurbochargerSheet, TransmissionSheet, ChassisSheet } from "./VehicleSpecification.js";
 import { ResolveCourseHeight, ResolveCourseNormal, SpawnPoint } from "./CourseStructure.js";
-import { CastSurfaceRay, QuerySurfaceHullContact } from "./RampSurfaceProjection.js";
 import { AddVector, SubtractVector, ScaleVector, CrossVector, DotVector, NormalizeVector, LengthVector, MultiplyAddVector,
          RotateVector, ConjugateQuaternion, MultiplyQuaternion, ConstructAxisQuaternion, IntegrateQuaternion,
          ConstructRigidTransform, ClampScalar } from "./TransformProjection.js";
@@ -92,8 +91,6 @@ export class VehicleSolver
         this.StaticLength = 0.6436 - 0.0914;
         this.InertiaBody = ResolveInertia();
         this.Obstacles   = Obstacles;
-        this.Surfaces    = [];
-        this.AeroGripScale = 0.0;
         this.Accumulator = 0.0;
         this.LineLock    = true;    // [-] assist: both pedals near standstill hold only the front brakes
         this.Burnout     = false;   // [-] line lock currently engaged
@@ -206,7 +203,7 @@ export class VehicleSolver
     //    piece it is already riding; anything taller is an obstacle the hull and wheels push against instead.
     ResolveGround(X, Y, Ceiling, Wheel = null)
     {
-        const Course = ResolveCourseHeight(X, Y, Ceiling);
+        const Course = ResolveCourseHeight(X, Y);
         if (this.Support && this.Support.Support.length > 0)
         {
             const Hit = this.Support.QuerySupport(X, Y, Ceiling);
@@ -230,13 +227,12 @@ export class VehicleSolver
             this.AngularVelocity = [0.0, 0.0, 0.0];
             return;
         }
-        const StepDt = this.SubstepOverride || SubstepSeconds;
         this.NearObstacles = this.ResolveNearObstacles();
-        this.Accumulator = Math.min(this.Accumulator + Math.max(0.0, Seconds), StepDt * MaximumSubsteps);
-        while (this.Accumulator >= StepDt)
+        this.Accumulator = Math.min(this.Accumulator + Math.max(0.0, Seconds), SubstepSeconds * MaximumSubsteps);
+        while (this.Accumulator >= SubstepSeconds)
         {
-            this.Step(Command, StepDt);
-            this.Accumulator -= StepDt;
+            this.Step(Command, SubstepSeconds);
+            this.Accumulator -= SubstepSeconds;
         }
     }
 
@@ -381,55 +377,17 @@ export class VehicleSolver
             const Stack = { Mount, Normal: [0.0, 0.0, 1.0], Contact: false, MaximumLength, BumpLength, Length: MaximumLength,
                             TouchLength: Infinity, Projection: 1.0 };
             const Riding = Wheel.SupportBody;
-            const MaximumCast = MaximumLength + Wheel.Radius + 0.45;
-            const SurfaceHit = this.Surfaces.length > 0 ? CastSurfaceRay(this.Surfaces, Mount, Axis, MaximumCast) : null;
-            let GroundTravel = Infinity;
-            let GroundSurface = null;
             if (Axis[2] < -0.25)
             {
-                GroundSurface = this.ResolveGround(Mount[0], Mount[1], Mount[2], Wheel);
-                GroundTravel = (Mount[2] - GroundSurface.Height) / -Axis[2];
+                // 📝 The strut casts onto the course — or onto a heavy piece of debris lying on it (ResolveGround).
+                let Surface = this.ResolveGround(Mount[0], Mount[1], Mount[2], Wheel);
+                let Travel = (Mount[2] - Surface.Height) / -Axis[2];
                 for (let Iteration = 0; Iteration < 3; ++Iteration)
                 {
-                    const ClampedTravel = ClampScalar(GroundTravel, 0.0, MaximumCast + 0.5);
-                    const Footing = MultiplyAddVector(Mount, Axis, ClampedTravel);
-                    GroundSurface = this.ResolveGround(Footing[0], Footing[1], Mount[2], Wheel);
-                    GroundTravel = (Mount[2] - GroundSurface.Height) / -Axis[2];
+                    const Footing = MultiplyAddVector(Mount, Axis, Travel);
+                    Surface = this.ResolveGround(Footing[0], Footing[1], Mount[2], Wheel);
+                    Travel = (Mount[2] - Surface.Height) / -Axis[2];
                 }
-                if (GroundTravel < -Wheel.Radius || GroundTravel > MaximumCast + 0.5)
-                    GroundTravel = Infinity;
-            }
-            if (SurfaceHit && (GroundTravel === Infinity || SurfaceHit.Travel <= GroundTravel + 1.0e-4))
-            {
-                // 📝 3D stunt-surface contact: works at 45° banks, 90° vert walls, 125° over-vert & 180° upside-down loops/pipes.
-                Wheel.GroundHeight = undefined;
-                Wheel.SupportBody = null;
-                Stack.Normal = SurfaceHit.Normal;
-                const Heading = RotateVector(MultiplyQuaternion(Orientation, ConstructAxisQuaternion([0.0, 0.0, 1.0], Wheel.Steer)), [1.0, 0.0, 0.0]);
-                const Tangent = NormalizeVector(SubtractVector(Heading, ScaleVector(Stack.Normal, DotVector(Heading, Stack.Normal))));
-                let EffectiveTravel = SurfaceHit.Travel;
-                for (const Along of [-2, 2])
-                {
-                    const Offset = Along * 0.12;
-                    const Drop = Wheel.Radius - Math.sqrt(Math.max(0.0, Wheel.Radius ** 2 - Offset * Offset));
-                    const ArcHit = CastSurfaceRay([SurfaceHit.Surface], AddVector(Mount, ScaleVector(Tangent, Offset)), Axis, MaximumCast);
-                    if (ArcHit)
-                        EffectiveTravel = Math.min(EffectiveTravel, ArcHit.Travel + Drop);
-                }
-                Stack.Projection = Math.max(DotVector(Stack.Normal, Upward), 0.3);
-                Stack.TouchLength = EffectiveTravel - Wheel.Radius / Stack.Projection;
-                if (Stack.TouchLength < MaximumLength)
-                {
-                    Stack.Contact = true;
-                    Stack.Stiffness = Wheel.Shredded ? RimStiffness : TyreSidewallStiffness + TyreAirStiffness * Math.max(0.0, Wheel.Pressure);
-                    Stack.Pinch = Wheel.Radius - VehicleGeometry.TyreRimRadius - TyrePinchClearance;
-                }
-            }
-            else if (Axis[2] < -0.25 && GroundTravel < Infinity)
-            {
-                // 📝 The strut casts onto the course — or onto a heavy piece of debris lying on it (ResolveGround).
-                const Surface = GroundSurface;
-                const Travel = GroundTravel;
                 Wheel.GroundHeight = Surface.Height;
                 Wheel.SupportBody = null;
                 const Ground = MultiplyAddVector(Mount, Axis, Travel);
@@ -730,11 +688,9 @@ export class VehicleSolver
             Wheel.SpinAngle = (Wheel.SpinAngle + Wheel.Spin * Δτ) % (2.0 * Math.PI);
         }
 
-        // ⑤ aerodynamics: drag at the centre of mass, plus physical ground-effect downforce along −Upward when active
+        // ⑤ aerodynamics: drag at the centre of mass, downforce at the axles
         const Drag = ScaleVector(this.LinearVelocity, -0.5 * ChassisSheet.AirDensity * ChassisSheet.DragArea * Speed);
         Force = AddVector(Force, Drag);
-        if (this.AeroGripScale > 0.0 && this.Wheels.some((Wheel) => Wheel.Contact))
-            Force = MultiplyAddVector(Force, Upward, -Downforce * 3.4 * this.AeroGripScale);
 
         // ⑥ chassis integration (semi-implicit), inertia carried into the world frame
         const Acceleration = ScaleVector(Force, 1.0 / VehicleGeometry.Mass);
@@ -781,41 +737,24 @@ export class VehicleSolver
             return P[0] + Reach > Box.Minimum[0] && P[0] - Reach < Box.Maximum[0] && P[1] + Reach > Box.Minimum[1] && P[1] - Reach < Box.Maximum[1]
                 && P[2] + Reach > Box.Minimum[2] && P[2] - Reach < Box.Maximum[2];
         });
-        const ActiveSurfaces = this.Surfaces.filter((Surface) =>
-        {
-            const P = this.Position, Reach = this.HullReach;
-            return P[0] + Reach > Surface.WorldMinimum[0] && P[0] - Reach < Surface.WorldMaximum[0] &&
-                   P[1] + Reach > Surface.WorldMinimum[1] && P[1] - Reach < Surface.WorldMaximum[1] &&
-                   P[2] + Reach > Surface.WorldMinimum[2] && P[2] - Reach < Surface.WorldMaximum[2];
-        });
-        const GroundNear = ResolveCourseHeight(this.Position[0], this.Position[1], this.Position[2]);
+        const GroundNear = ResolveCourseHeight(this.Position[0], this.Position[1]);
         const MayTouchGround = this.Position[2] - this.HullReach < GroundNear + 2.5;
         for (let Index = 0; Index < this.HullPoints.length; ++Index)
         {
             const Local = this.HullPoints[Index];
             // 📝 Upright, only the lower half of the hull can meet the road.
-            if (Upright && Boxes.length === 0 && ActiveSurfaces.length === 0 && Local[2] > 0.15)
+            if (Upright && Boxes.length === 0 && Local[2] > 0.15)
                 continue;
             const Point = AddVector(this.Position, RotateVector(this.Orientation, Local));
             let Normal = null, Depth = 0.0, Surface = -1;
             if (MayTouchGround)
             {
-                const Ground = ResolveCourseHeight(Point[0], Point[1], this.Position[2]);
+                const Ground = ResolveCourseHeight(Point[0], Point[1]);
                 if (Point[2] - Radius < Ground)
                 {
                     Normal = ResolveCourseNormal(Point[0], Point[1]);
                     Depth = (Ground + Radius - Point[2]) * Normal[2];
                     Surface = -1;
-                }
-            }
-            if (ActiveSurfaces.length > 0)
-            {
-                const RampHit = QuerySurfaceHullContact(ActiveSurfaces, Point, Radius);
-                if (RampHit && RampHit.Depth > Depth)
-                {
-                    Normal = RampHit.Normal;
-                    Depth = RampHit.Depth;
-                    Surface = RampHit.SurfaceIndex;
                 }
             }
             for (let BoxIndex = 0; BoxIndex < Boxes.length; ++BoxIndex)
@@ -906,20 +845,11 @@ export class VehicleSolver
         {
             const Centre = AddVector(this.Position, RotateVector(this.Orientation, [X, Y, Z]));
             let Normal = null, Depth = 0.0;
-            const Ground = ResolveCourseHeight(Centre[0], Centre[1], this.Position[2]);
+            const Ground = ResolveCourseHeight(Centre[0], Centre[1]);
             if (Centre[2] - Radius < Ground)
             {
                 Normal = [0.0, 0.0, 1.0];
                 Depth = Ground + Radius - Centre[2];
-            }
-            if (this.Surfaces.length > 0)
-            {
-                const RampHit = QuerySurfaceHullContact(this.Surfaces, Centre, Radius);
-                if (RampHit && RampHit.Depth > Depth)
-                {
-                    Normal = RampHit.Normal;
-                    Depth = RampHit.Depth;
-                }
             }
             for (const Box of this.NearObstacles || this.Obstacles)
             {

@@ -19,14 +19,14 @@ namespace Frontier::GlobalIllumination
 //                                                   OCCUPANT PICK
 //------------------------------------------------------------------------------------------------------------------------
 
-uint32_t OccupantPick::QueryOccupant(int32_t OffsetX, int32_t OffsetY) const noexcept
+uint32_t SubjectPick::QuerySubject(int32_t OffsetX, int32_t OffsetY) const noexcept
 {
     const int32_t Span   = static_cast<int32_t>(QuerySpan());
     const int32_t Column = static_cast<int32_t>(Reach) + OffsetX;
     const int32_t Row    = static_cast<int32_t>(Reach) + OffsetY;
-    if (Column < 0 || Row < 0 || Column >= Span || Row >= Span) return NoOccupant;
+    if (Column < 0 || Row < 0 || Column >= Span || Row >= Span) return NoSubject;
     const size_t Index = static_cast<size_t>(Row) * static_cast<size_t>(Span) + static_cast<size_t>(Column);
-    return Index < Occupants.size() ? Occupants[Index] : NoOccupant;
+    return Index < Subjects.size() ? Subjects[Index] : NoSubject;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -73,7 +73,7 @@ void PickProjection::Construct(const std::shared_ptr<DeviceRegion>& OccupantRegi
 }
 
 bool PickProjection::Pick(const SceneStructure& Scene, const std::shared_ptr<DeviceRegion>& VertexRegion, const Transform& ViewProjection,
-                          std::array<uint32_t, 2> ScreenExtent, std::array<uint32_t, 2> Pixel, OccupantPick& Outcome, std::string* OutDiagnostic)
+                          std::array<uint32_t, 2> ScreenExtent, std::array<uint32_t, 2> Pixel, SubjectPick& Outcome, std::string* OutDiagnostic)
 {
     const auto Start = std::chrono::steady_clock::now();
     Outcome = {};
@@ -131,12 +131,12 @@ bool PickProjection::Pick(const SceneStructure& Scene, const std::shared_ptr<Dev
         if (OutDiagnostic) *OutDiagnostic = "occupant pick failed" + (Diagnostic.empty() ? std::string() : ": " + Diagnostic);
         return false;
     }
-    Outcome.Occupants.resize(static_cast<size_t>(Span) * Span);
-    for (size_t Texel = 0; Texel < Outcome.Occupants.size(); ++Texel)
+    Outcome.Subjects.resize(static_cast<size_t>(Span) * Span);
+    for (size_t Texel = 0; Texel < Outcome.Subjects.size(); ++Texel)
     {
         uint32_t Value = 0;
         std::memcpy(&Value, Bytes.data() + Texel * 4, 4);
-        Outcome.Occupants[Texel] = Value == 0 ? OccupantPick::NoOccupant : Value - 1u;
+        Outcome.Subjects[Texel] = Value == 0 ? SubjectPick::NoSubject : Value - 1u;
     }
     Outcome.Milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
     return true;

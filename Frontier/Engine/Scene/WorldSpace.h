@@ -44,10 +44,12 @@ class SceneRecordBase : public RecordEntry
     [[nodiscard]] RecordToken        QueryToken() const noexcept { return Token(); }
     [[nodiscard]] const std::string& QueryTypeIdentifier() const noexcept { return TypeIdentifier; }
     [[nodiscard]] const std::string& QueryRecordName() const noexcept { return StoredName; }
-    [[nodiscard]] RecordToken        QueryParentToken() const noexcept { return StoredParent; }
+    [[nodiscard]] RecordToken        QueryEnclosureToken() const noexcept { return StoredEnclosure; }
+    [[nodiscard]] RecordToken        QueryParentToken() const noexcept { return StoredEnclosure; }
 
     void AssignRecordName(std::string NewName);
-    void AssignParentToken(RecordToken ParentToken);
+    void AssignEnclosureToken(RecordToken EnclosureToken);
+    void AssignParentToken(RecordToken EnclosureToken) { AssignEnclosureToken(EnclosureToken); }
     void ConfigureEditorPresentation(const char* GlyphIdentifier,
                                      const char* GroupName        = "",
                                      const char* SubtitleCategory = "",
@@ -60,7 +62,7 @@ class SceneRecordBase : public RecordEntry
   private:
     std::string TypeIdentifier;
     std::string StoredName;
-    RecordToken StoredParent{};
+    RecordToken StoredEnclosure{};
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -79,7 +81,7 @@ class TypedSceneRecord final : public SceneRecordBase
                      const char*          InAccentHex = "")
         : SceneRecordBase(InClassification, InTypeIdentifier, std::move(InDisplayName))
     {
-        ConfigureEditorPresentation(InIconIdentifier, InGroupName, InTypeIdentifier.data(), InAccentHex);
+        ConfigureEditorPresentation(InIconIdentifier, InGroupName, QueryTypeIdentifier().c_str(), InAccentHex);
 #if FRONTIER_EDITOR
         if constexpr (!std::is_void_v<InspectorType>)
         {
@@ -100,7 +102,6 @@ class TypedSceneRecord final : public SceneRecordBase
 
 #if FRONTIER_EDITOR
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration, RenderSettingsInspector>;
-using CameraRecord         = TypedSceneRecord<CameraConfiguration, CameraInspector>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration, SolarInspector>;
 using OpticalFlareRecord   = TypedSceneRecord<OpticalFlareConfiguration, OpticalFlareInspector>;
 using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration, AtmosphereInspector>;
@@ -119,7 +120,6 @@ using ParticleRecord       = TypedSceneRecord<ParticleConfiguration, ParticleIns
 using GeometryRecord       = TypedSceneRecord<GeometryConfiguration, GeometryInspector>;
 #else
 using RenderPipelineRecord = TypedSceneRecord<RenderPipelineConfiguration>;
-using CameraRecord         = TypedSceneRecord<CameraConfiguration>;
 using SolarRecord          = TypedSceneRecord<SolarConfiguration>;
 using OpticalFlareRecord   = TypedSceneRecord<OpticalFlareConfiguration>;
 using AtmosphereRecord     = TypedSceneRecord<AtmosphereConfiguration>;
@@ -142,7 +142,7 @@ using GeometryRecord       = TypedSceneRecord<GeometryConfiguration>;
 //                                      COMPOSABLE MULTI-CONFIGURATION SCENE RECORDS
 //------------------------------------------------------------------------------------------------------------------------
 
-// SpatialNodeRecord: pure coordinate frame with zero mass and zero surface material.
+// SpatialNodeRecord: pure coordinate space with zero mass and zero surface material.
 class SpatialNodeRecord final : public SceneRecordBase
 {
   public:
@@ -207,7 +207,7 @@ class ThermalBodyRecord final : public SceneRecordBase
     SurfaceOpticsConfiguration Optics{};
 };
 
-// ChemicalVesselRecord: spatial transform + thermodynamics + chemical stoichiometry/Arrhenius kinetics (no surface material required).
+// ChemicalVesselRecord: spatial transform + thermodynamics + chemical stoichiometry/Arrhenius kinetics.
 class ChemicalVesselRecord final : public SceneRecordBase
 {
   public:
@@ -257,17 +257,72 @@ class WorldSpace
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> EnumerateRegisteredTypes() const;
 
     RecordToken ConstructRecord(std::string_view TypeIdentifier,
-                                std::string      DisplayName = {},
-                                RecordToken      ParentToken = {});
+                                std::string      DisplayName    = {},
+                                RecordToken      EnclosureToken = {});
+    RecordToken CloneRecord(RecordToken SourceToken, std::string NewDisplayName = {});
     bool        DestroyRecord(RecordToken Token);
     void        Clear();
 
     void AdvanceSimulation(float DeltaSeconds);
 
-    [[nodiscard]] size_t             QueryRecordCount() const noexcept { return OwnedRecords.size(); }
-    [[nodiscard]] SceneRecordBase*   FindRecord(RecordToken Token) noexcept;
-    [[nodiscard]] SceneRecordBase*   FindFirstByType(std::string_view TypeIdentifier) noexcept;
+    [[nodiscard]] size_t                              QueryRecordCount() const noexcept { return OwnedRecords.size(); }
+    [[nodiscard]] SceneRecordBase*                    FindRecord(RecordToken Token) noexcept;
+    [[nodiscard]] const SceneRecordBase*              FindRecord(RecordToken Token) const noexcept;
+    [[nodiscard]] SceneRecordBase*                    FindFirstByType(std::string_view TypeIdentifier) noexcept;
     [[nodiscard]] std::vector<const SceneRecordBase*> FindAllByType(std::string_view TypeIdentifier) const;
+
+    template <typename RecordT>
+    [[nodiscard]] RecordT* FindFirst() noexcept
+    {
+        for (std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
+        {
+            if (auto* Casted = dynamic_cast<RecordT*>(Entry.get()))
+            {
+                return Casted;
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename RecordT>
+    [[nodiscard]] const RecordT* FindFirst() const noexcept
+    {
+        for (const std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
+        {
+            if (const auto* Casted = dynamic_cast<const RecordT*>(Entry.get()))
+            {
+                return Casted;
+            }
+        }
+        return nullptr;
+    }
+
+    template <typename RecordT>
+    [[nodiscard]] std::vector<RecordT*> FindAll()
+    {
+        std::vector<RecordT*> Matches;
+        for (std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
+        {
+            if (auto* Casted = dynamic_cast<RecordT*>(Entry.get()))
+            {
+                Matches.push_back(Casted);
+            }
+        }
+        return Matches;
+    }
+
+    template <typename CallableT>
+    void ForEachRecord(CallableT&& Visitor)
+    {
+        for (std::unique_ptr<SceneRecordBase>& Entry : OwnedRecords)
+        {
+            if (Entry)
+            {
+                Visitor(*Entry);
+            }
+        }
+    }
+
     [[nodiscard]] const std::string& QueryWorldName() const noexcept { return WorldName; }
     void                             ConfigureWorldName(std::string Name) { WorldName = std::move(Name); }
 

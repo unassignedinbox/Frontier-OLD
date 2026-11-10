@@ -12,6 +12,7 @@
 
 #include "Engine/PlanetaryAtmosphere/AtmosphereScattering.h"
 #include "Engine/Rendering/ClusterNesting.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <array>
@@ -152,7 +153,7 @@ class LunarDiscProjection
                         SpectrumRgb                   SunIrradiance) noexcept
         : Profile_(Profile), SunIrradiance_(SunIrradiance)
     {
-        constexpr double π               = 3.14159265358979323846;
+        constexpr double π               = MathConstantsD::Pi;
         const double     DirectionLength = Length(Profile.Direction);
         const double     SunLength       = Length(SunDirection);
         if (!Profile.Albedo || !Profile.Albedo->Loaded() || !std::isfinite(DirectionLength) || DirectionLength < 1e-12 ||

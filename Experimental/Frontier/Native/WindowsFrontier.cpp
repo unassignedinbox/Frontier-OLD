@@ -228,12 +228,18 @@ int main()
     std::unique_ptr<Frontier::RenderingExtension> SceneView;
     Frontier::ViewportTexture SceneViewTexture;
     int SceneViewJournalEntries = 0; // 📝 the first statuses and every new target reach the diagnostic file, capped
+    // 📝 The main viewport's independent particle sequence, sampled as a transparent layer over the scene image.
+    std::unique_ptr<Frontier::ParticleExtension> SceneParticleView;
+    Frontier::ViewportTexture SceneParticleViewTexture;
+    int SceneParticleViewJournalEntries = 0;
     // 📝 The Particle editor's viewport: the GPU particle engine on the same device, its image sampled in GENERAL layout.
     std::unique_ptr<Frontier::ParticleExtension> ParticleView;
     Frontier::ViewportTexture ParticleViewTexture;
     int ParticleViewJournalEntries = 0;
     const auto RetireSceneView = [&]()
     {
+        SceneParticleView.reset(); // 📝 Drain the overlay queue before the scene targets or device are retired.
+        SceneParticleViewTexture.Retire();
         SceneView.reset(); // 📝 Waits for the device before releasing anything the interface could still sample.
         SceneViewTexture.Retire();
         Frontier::InspectorRuntime::Instance().RegisterParticleViewportPresenter({});
@@ -491,6 +497,7 @@ int main()
                         SceneView->Render(Request, EverestSpace->QueryWorldSpace(), EverestSpace->QueryElapsedSeconds());
                     Image.Status  = Outcome.Status;
                     Image.Readout = Outcome.Readout;
+                    Image.Extent  = Outcome.Extent;
                     if ((SceneViewTexture.QueryChanged(Outcome.View) || SceneViewJournalEntries < 12) && SceneViewJournalEntries < 32)
                     {
                         Frontier::DiagnosticJournal::Append("SceneViewport", (Outcome.View ? "image " : "no image ") + Outcome.Status);
@@ -503,6 +510,32 @@ int main()
                 {
                     Image.Status = std::string("Scene viewport failed: ") + Failure.what();
                     Frontier::DiagnosticJournal::Append("SceneViewportRefused", Failure.what());
+                }
+                return Image;
+            };
+            EverestSpace->PresentParticleViewport = [&](const Frontier::ParticleViewportRequest &Request)
+            {
+                Frontier::ParticleViewportImage Image;
+                try
+                {
+                    if (!SceneParticleView)
+                    {
+                        const Frontier::VulkanDeviceAccess Device = Presentation ? Presentation->QueryDeviceAccess() : Frontier::VulkanDeviceAccess{};
+                        SceneParticleView = std::make_unique<Frontier::ParticleExtension>(ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
+                    }
+                    Frontier::ParticleViewportOutcome Outcome = SceneParticleView->Render(Request);
+                    Image = std::move(Outcome.Image);
+                    if ((SceneParticleViewTexture.QueryChanged(Outcome.View) || !Image.Failure.empty()) && SceneParticleViewJournalEntries < 16)
+                    {
+                        Frontier::DiagnosticJournal::Append("SceneParticleViewport", Outcome.View ? "image on " + Image.Adapter : "no image: " + Image.Failure);
+                        ++SceneParticleViewJournalEntries;
+                    }
+                    Image.Texture = SceneParticleViewTexture.Resolve(Outcome.View);
+                }
+                catch (const std::exception &Failure)
+                {
+                    Image.Failure = std::string("Scene particle viewport failed: ") + Failure.what();
+                    Frontier::DiagnosticJournal::Append("SceneParticleViewportRefused", Failure.what());
                 }
                 return Image;
             };

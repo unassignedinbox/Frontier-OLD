@@ -86,37 +86,22 @@ export class LightingSystem {
         this.RoofFixture = Type;
     }
 
-    Update(VehicleTransform, Poles = [], ClockSeconds = 0.0) {
+    Update(VehicleTransform, Poles = []) {
         this.Lights = [];
-        const FocusPos = VehicleTransform ? [VehicleTransform[12], VehicleTransform[13], VehicleTransform[14]] : null;
-        this.ActiveFocus = FocusPos;
 
-        // 1. Street / Pole Lamps & Construction Site Amber Beacons / Floodlights (distance-culled when > MaxSceneLights - 4)
-        let ActivePoles = Poles;
-        const MaxStaticLights = MaxSceneLights - 4;
-        if (Poles.length > MaxStaticLights && FocusPos) {
-            ActivePoles = Poles.slice().sort((A, B) => {
-                const DA = (A.X - FocusPos[0]) ** 2 + (A.Y - FocusPos[1]) ** 2;
-                const DB = (B.X - FocusPos[0]) ** 2 + (B.Y - FocusPos[1]) ** 2;
-                return DA - DB;
-            });
-        }
-
-        for (const Pole of ActivePoles) {
-            if (this.Lights.length >= MaxStaticLights) break;
-            const Pos = [Pole.X, Pole.Y, Pole.Z ?? 10.8];
-            const BaseIntensity = Pole.Intensity ?? 45.0;
-            const Pulse = Pole.PulseFreq
-                ? (0.68 + 0.32 * Math.sin(ClockSeconds * Pole.PulseFreq + (Pole.Phase || 0.0)))
-                : 1.0;
+        // 1. Street / Pole Lamps from the scene level
+        // Street lamp heads are mounted at height ~10.8m, pointing down (-Z)
+        for (const Pole of Poles) {
+            if (this.Lights.length >= MaxSceneLights - 4) break;
+            const Pos = [Pole.X, Pole.Y, Pole.Z || 10.8];
             this.Lights.push({
-                Type: Pole.Type ?? LightType.StreetLamp,
+                Type: LightType.StreetLamp,
                 Position: Pos,
-                Direction: Pole.Direction || [0.0, 0.0, -1.0],
-                Colour: Pole.Colour || [1.0, 0.88, 0.65],
-                Intensity: BaseIntensity * Pulse,
-                Reach: Pole.Reach ?? 32.0,
-                Params: Pole.Params || [0.70, 0.20, 1.0, 1.0]
+                Direction: [0.0, 0.0, -1.0],
+                Colour: [1.0, 0.88, 0.65], // Warm high-pressure sodium / warm LED 3000K
+                Intensity: 45.0,
+                Reach: 32.0,
+                Params: [0.70, 0.20, 1.0, 1.0]
             });
         }
 
@@ -250,11 +235,8 @@ export class LightingSystem {
         const Grid = ClusterGridBounds;
         const ResX = Grid.ResX, ResY = Grid.ResY, ResZ = Grid.ResZ;
         const Cap = Grid.MaxLightsPerCell;
-        const Extent = this.ScrollingGrid ? [260.0, 160.0, 38.0] : Grid.Extent;
-        const Min = (this.ScrollingGrid && this.ActiveFocus)
-            ? [this.ActiveFocus[0] - 0.5 * Extent[0], this.ActiveFocus[1] - 0.5 * Extent[1], -8.0]
-            : Grid.Minimum;
-        const InvX = 1.0 / Extent[0], InvY = 1.0 / Extent[1], InvZ = 1.0 / Extent[2];
+        const Min = Grid.Minimum;
+        const InvX = 1.0 / Grid.Extent[0], InvY = 1.0 / Grid.Extent[1], InvZ = 1.0 / Grid.Extent[2];
         const Cells = this.ClusterCells, Floats = this.ClusterCellFloats, Indices = this.ClusterIndices;
         Cells[0] = ResX; Cells[1] = ResY; Cells[2] = ResZ; Cells[3] = Cap;
         Floats[4] = Min[0]; Floats[5] = Min[1]; Floats[6] = Min[2]; Floats[7] = 0.0;

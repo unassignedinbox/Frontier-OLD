@@ -4,10 +4,10 @@
 // 🧩 The eos force-field taxonomy (forcefields.js) in C++: categories, sampling, the receiver step and the GPU payloads.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleFieldTaxonomy.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace Frontier
 {
@@ -399,13 +399,13 @@ std::array<double, 3> AdvanceParticleReceiver(const std::array<double, 3>& Veloc
 
 double ResolveParticleFieldBearing(const ParticleField& Field) noexcept
 {
-    const double Degrees = (std::atan2(Field.Direction[0], Field.Direction[2]) * 180.0) / std::numbers::pi;
+    const double Degrees = RadiansToDegrees(std::atan2(Field.Direction[0], Field.Direction[2]));
     return Degrees < 0.0 ? Degrees + 360.0 : Degrees;
 }
 
 std::array<double, 3> ResolveParticleFieldAlong(double BearingDegrees) noexcept
 {
-    const double Turn = (BearingDegrees * std::numbers::pi) / 180.0;
+    const double Turn = DegreesToRadians(BearingDegrees);
     return { std::sin(Turn), 0.0, std::cos(Turn) };
 }
 

@@ -19,7 +19,7 @@ namespace Frontier
 {
 
 // 📝 The parameters are eos PE.baseParams() (Experimental/ParticleEditor/Engine/presets.js) with engine names; the library
-//    is EngineContent/ParticleArchives/ParticleLibrary.toml, written by Automation/ExportParticleLibrary.mjs. Readings stay
+//    is EngineContent/ParticleArchives/ParticleLibrary.particlespace, written by Automation/ExportParticleLibrary.mjs. Readings stay
 //    doubles, as the prototype holds them, and become floats only when packed.
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -301,7 +301,7 @@ struct ParticleWindSettings
 class ParticleEffectLibrary
 {
 public:
-    // 📝 Reads ParticleLibrary.toml; on failure returns false and leaves the reason in Diagnostic.
+    // 📝 Reads ParticleLibrary.particlespace (with .toml fallback); on failure returns false and leaves the reason in Diagnostic.
     bool Decode(const std::filesystem::path& File, std::string& Diagnostic);
 
     [[nodiscard]] const ParticlePreset* ResolvePreset(std::string_view Identifier) const noexcept;

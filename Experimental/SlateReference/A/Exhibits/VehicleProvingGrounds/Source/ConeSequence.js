@@ -12,7 +12,6 @@
 //    again on its mark.
 
 import { ConeConstants, ResolveConeHullPoints } from "./CourseStructure.js";
-import { ConeVariantSpecs } from "./SignageBuilder.js";
 import { ConstructHullPlanes, ConstructContactSamples } from "./RigidBodyWorld.js";
 import { OccupantStride } from "./FacetStructure.js";
 import { ConstructRigidTransform, RotateVector, LengthVector } from "./TransformProjection.js";
@@ -28,34 +27,22 @@ export class ConeSequence
         this.Clock = 0.0;
         const Block = this.Scene.ConeBlock;
         const Lift = ConeConstants.CentreHeight;
-        // 📝 Pre-build hulls for classic slalom cones plus construction drums, slim pylons, and stubby work cones.
-        const VariantHulls = {};
-        for (const [Key, Spec] of Object.entries(ConeVariantSpecs))
-        {
-            const Points = Spec.HullPoints.map(([X, Y, Z]) => [X, Y, Z - Spec.CentreHeight]);
-            const Planes = ConstructHullPlanes(Points);
-            const Samples = ConstructContactSamples(Points, Planes, 1.0e-4, false, false);
-            VariantHulls[Key] = { Points, Planes, Samples, Spec };
-        }
-        this.VariantHulls = VariantHulls;
-        this.Hull = VariantHulls.Cone;
+        // 📝 One hull for every cone, about its centre of mass.
+        const Points = ResolveConeHullPoints().map(([X, Y, Z]) => [X, Y, Z - Lift]);
+        const Planes = ConstructHullPlanes(Points);
+        const Samples = ConstructContactSamples(Points, Planes, 1.0e-4, false, false);
+        this.Hull = { Points, Planes, Samples };
         this.Metrics = { Displaced: 0, Moving: 0, Hits: 0 };
         this.Cones = Block.Placements.map((Placement, Index) =>
         {
-            const ShapeKey = (Placement.Shape && VariantHulls[Placement.Shape]) ? Placement.Shape : "Cone";
-            const Variant = VariantHulls[ShapeKey];
-            const Spec = Variant.Spec;
-            const BaseZ = Placement.Position[2] ?? 0.0;
             const Half = 0.5 * Placement.Yaw;
             const Orientation = [0.0, 0.0, Math.sin(Half), Math.cos(Half)];
-            const Rest = { Position: [Placement.Position[0], Placement.Position[1], BaseZ + Spec.CentreHeight], Orientation };
-            const Cone = { Index, Occupant: Block.First + Index, Group: Placement.Group, Name: Placement.Name,
-                           Shape: ShapeKey, CentreHeight: Spec.CentreHeight, Rest, Body: null,
+            const Rest = { Position: [Placement.Position[0], Placement.Position[1], Lift], Orientation };
+            const Cone = { Index, Occupant: Block.First + Index, Group: Placement.Group, Name: Placement.Name, Rest, Body: null,
                            Displaced: false, Settling: false, HiddenUntil: -1.0 };
             Cone.Body = Host.Bodies.AddBody({
-                Kind: "cone", Owner: Cone, Position: Rest.Position, Orientation, Mass: Spec.Mass, Inertia: Spec.Inertia,
-                Points: Variant.Points, Planes: Variant.Planes, Samples: Variant.Samples,
-                Restitution: 0.35, Friction: 0.75, Sleeping: true
+                Kind: "cone", Owner: Cone, Position: Rest.Position, Orientation, Mass: ConeConstants.Mass, Inertia: [0.09, 0.09, 0.058],
+                Points, Planes, Samples, Restitution: 0.35, Friction: 0.75, Sleeping: true
             });
             return Cone;
         });
@@ -64,8 +51,7 @@ export class ConeSequence
     // 📝 The occupant (base-centred) transform of a cone body (centre-of-mass-centred).
     ResolveTransform(Body)
     {
-        const CentreH = Body.Owner?.CentreHeight ?? ConeConstants.CentreHeight;
-        const Down = RotateVector(Body.Orientation, [0.0, 0.0, -CentreH]);
+        const Down = RotateVector(Body.Orientation, [0.0, 0.0, -ConeConstants.CentreHeight]);
         return ConstructRigidTransform([Body.Position[0] + Down[0], Body.Position[1] + Down[1], Body.Position[2] + Down[2]], Body.Orientation);
     }
 

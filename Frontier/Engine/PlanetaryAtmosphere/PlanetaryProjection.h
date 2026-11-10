@@ -14,6 +14,7 @@
 #include "Engine/DeviceExchange/VulkanComputeExchange.h"
 #include "Engine/PlanetaryAtmosphere/AstronomicalEphemeris.h"
 #include "Engine/PlanetaryAtmosphere/AtmosphereScattering.h"
+#include "Frontier/Engine/Foundation/Math.h"
 
 #include <array>
 #include <cstdint>
@@ -24,13 +25,6 @@ namespace Frontier
 {
 
 class AtmosphereProjection;
-
-struct Vec3
-{
-    float X = 0.0f;
-    float Y = 0.0f;
-    float Z = 0.0f;
-};
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                1. 6-BODY LUNAR ATLAS (2048 x 1024 x 6 sRGB LAYERS)

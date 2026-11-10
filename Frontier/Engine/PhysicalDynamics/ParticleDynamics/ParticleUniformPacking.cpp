@@ -4,10 +4,10 @@
 // 🧩 eos fillSys, fillFibre and samplePath, and the prototype's camera, field and lensing packing, in C++.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleUniformPacking.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 namespace Frontier
 {
@@ -301,18 +301,21 @@ std::vector<float> SampleLightFibrePath(std::string_view Shape, double SizeMetre
 //                                                    CAMERA AND SCENE
 //------------------------------------------------------------------------------------------------------------------------
 
-ParticleCameraReading ResolveParticleCamera(const ParticleOrbitCamera& Camera, double Aspect) noexcept
+ParticleCameraPose ConvertSceneCameraToParticleAxes(const ParticleCameraPose& SceneCamera) noexcept
 {
-    const double Cosine = std::cos(Camera.Pitch);
-    const double Sine   = std::sin(Camera.Pitch);
-    const Triple Eye    = { Camera.Target[0] + Camera.Distance * Cosine * std::sin(Camera.Yaw), Camera.Target[1] + Camera.Distance * Sine,
-                            Camera.Target[2] + Camera.Distance * Cosine * std::cos(Camera.Yaw) };
+    const auto ConvertAxes = [](const Triple& SceneVector) -> Triple { return { SceneVector[0], SceneVector[2], -SceneVector[1] }; };
+    return { ConvertAxes(SceneCamera.Position), ConvertAxes(SceneCamera.Target), ConvertAxes(SceneCamera.Up), SceneCamera.VerticalFieldOfView };
+}
 
-    // 📝 ConstructLookAt and ConstructPerspective return Float32Arrays: their entries are floats before the product.
-    const Triple Up      = { 0.0, 1.0, 0.0 };
+ParticleCameraReading ResolveParticleCamera(const ParticleCameraPose& Camera, double Aspect) noexcept
+{
+    const Triple Eye     = Camera.Position;
+    const Triple Up      = Camera.Up;
     const Triple Forward = Normalize(Subtract(Camera.Target, Eye));
     const Triple Side    = Normalize(Cross(Forward, Up));
     const Triple Upward  = Cross(Side, Forward);
+
+    // 📝 ConstructLookAt and ConstructPerspective return Float32Arrays: their entries are floats before the product.
     const std::array<float, 16> View = {
         static_cast<float>(Side[0]), static_cast<float>(Upward[0]), static_cast<float>(-Forward[0]), 0.0f,
         static_cast<float>(Side[1]), static_cast<float>(Upward[1]), static_cast<float>(-Forward[1]), 0.0f,
@@ -321,7 +324,7 @@ ParticleCameraReading ResolveParticleCamera(const ParticleOrbitCamera& Camera, d
     };
     const double Near   = 0.05;
     const double Far    = 400.0;
-    const double Focal  = 1.0 / std::tan(((45.0 * std::numbers::pi) / 180.0) / 2.0);
+    const double Focal  = 1.0 / std::tan(Camera.VerticalFieldOfView * 0.5);
     const std::array<float, 16> Projection = {
         static_cast<float>(Focal / Aspect), 0.0f, 0.0f, 0.0f,
         0.0f, static_cast<float>(Focal), 0.0f, 0.0f,
@@ -348,6 +351,15 @@ ParticleCameraReading ResolveParticleCamera(const ParticleOrbitCamera& Camera, d
     return Reading;
 }
 
+ParticleCameraReading ResolveParticleCamera(const ParticleOrbitCamera& Camera, double Aspect) noexcept
+{
+    const double Cosine = std::cos(Camera.Pitch);
+    const double Sine   = std::sin(Camera.Pitch);
+    const Triple Eye    = { Camera.Target[0] + Camera.Distance * Cosine * std::sin(Camera.Yaw), Camera.Target[1] + Camera.Distance * Sine,
+                            Camera.Target[2] + Camera.Distance * Cosine * std::cos(Camera.Yaw) };
+    const ParticleCameraPose Pose{ Eye, Camera.Target, { 0.0, 1.0, 0.0 }, DegreesToRadians(45.0) };
+    return ResolveParticleCamera(Pose, Aspect);
+}
 void PackParticleRefreshConstants(ParticleRefreshConstants& Out, const ParticleCameraReading& Camera, const ParticleWindSettings& Wind,
                                   const ParticleRefreshReadings& Readings) noexcept
 {
@@ -374,7 +386,7 @@ void PackParticleWindComponents(ParticleWindComponents& Out, std::span<const Par
         const ParticleLatticeComponent& Component = Lattice[Index];
         const uint32_t                  Offset    = static_cast<uint32_t>(Index) * 8u;
         PutAt(Out, Offset, Component.X, Component.Z, std::max(0.5, Component.Radius), static_cast<double>(Component.Slot));
-        PutAt(Out, Offset + 4, Component.Strength, (Component.BearingDegrees * std::numbers::pi) / 180.0, Component.Rate,
+        PutAt(Out, Offset + 4, Component.Strength, DegreesToRadians(Component.BearingDegrees), Component.Rate,
               Component.Enabled ? 1.0 : 0.0);
     }
 }
@@ -427,12 +439,13 @@ void PackParticleAccelerationFields(ParticleAccelerationBlock& Out, std::span<co
 }
 
 ParticleLensingReading PackParticleLensing(ParticleLensingBlock& Out, std::span<const ParticleEffectPlacement> Effects,
-                                           const ParticleCameraReading& Camera, double Aspect, double TimeSeconds) noexcept
+                                           const ParticleCameraReading& Camera, double Aspect, double TimeSeconds,
+                                           double VerticalFieldOfView) noexcept
 {
     Out.fill(0.0f);
     ParticleLensingReading Reading;
     const std::array<float, 16>& M     = Camera.ViewProjection;
-    const double                 Scale = 0.5 / std::tan(std::numbers::pi / 8.0);
+    const double                 Scale = 0.5 / std::tan(VerticalFieldOfView * 0.5);
     struct ScreenPoint
     {
         double U = 0.0;
@@ -498,6 +511,39 @@ ParticleLensingReading PackParticleLensing(ParticleLensingBlock& Out, std::span<
     Out[10] = 0.35f;
     Out[11] = static_cast<float>(Reading.ShimmerCount);
     return Reading;
+}
+
+std::vector<float> SampleParticleWindLattice(const IFieldSampler& Field, const std::array<double, 3>& FieldOriginMetres,
+                                             bool IncludeCurlSwirl)
+{
+    const size_t CellCount = static_cast<size_t>(ParticleDomainDimensions[0]) * ParticleDomainDimensions[1] * ParticleDomainDimensions[2];
+    std::vector<float> Samples(CellCount * 4u, 0.0f);
+    if (!Field.QueryFieldEnabled()) return Samples;
+
+    const double CellSpan = std::max({ ParticleDomainSize[0] / ParticleDomainDimensions[0],
+                                       ParticleDomainSize[1] / ParticleDomainDimensions[1],
+                                       ParticleDomainSize[2] / ParticleDomainDimensions[2] });
+    for (uint32_t Z = 0; Z < ParticleDomainDimensions[2]; ++Z)
+        for (uint32_t Y = 0; Y < ParticleDomainDimensions[1]; ++Y)
+            for (uint32_t X = 0; X < ParticleDomainDimensions[0]; ++X)
+            {
+                const Vec3d Position{
+                    FieldOriginMetres[0] + ParticleDomainMinimum[0] + (static_cast<double>(X) + 0.5) * ParticleDomainSize[0] / ParticleDomainDimensions[0],
+                    FieldOriginMetres[1] + ParticleDomainMinimum[1] + (static_cast<double>(Y) + 0.5) * ParticleDomainSize[1] / ParticleDomainDimensions[1],
+                    FieldOriginMetres[2] + ParticleDomainMinimum[2] + (static_cast<double>(Z) + 0.5) * ParticleDomainSize[2] / ParticleDomainDimensions[2] };
+                Vec3d Flow = Field.SampleFieldFlow(Position, CellSpan, IncludeCurlSwirl);
+                if (!std::isfinite(Flow.X)) Flow.X = 0.0;
+                if (!std::isfinite(Flow.Y)) Flow.Y = 0.0;
+                if (!std::isfinite(Flow.Z)) Flow.Z = 0.0;
+                const size_t Texel = X + static_cast<size_t>(ParticleDomainDimensions[0]) *
+                                           (Y + static_cast<size_t>(ParticleDomainDimensions[1]) * Z);
+                const size_t Offset = Texel * 4u;
+                Samples[Offset]     = static_cast<float>(Flow.X);
+                Samples[Offset + 1] = static_cast<float>(Flow.Y);
+                Samples[Offset + 2] = static_cast<float>(Flow.Z);
+                Samples[Offset + 3] = static_cast<float>(std::hypot(Flow.X, Flow.Y, Flow.Z));
+            }
+    return Samples;
 }
 
 } // namespace Frontier

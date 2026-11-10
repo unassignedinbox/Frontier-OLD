@@ -16,14 +16,25 @@
 #pragma once
 
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
+#include "Engine/PhysicalDynamics/IFieldSampler.h"
 #include "Engine/PlanetaryAtmosphere/AtmosphereScattering.h"
 #include "Engine/Scene/EngineConfigurations.h"
+#include "Frontier/Engine/Scene/Profiles/ReplicationProfile.h"
+#include "Frontier/Engine/Scene/Profiles/SpatialProfile.h"
 
 #include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
 #include <vector>
+
+namespace toml
+{
+inline namespace v3
+{
+class table;
+}
+} // namespace toml
 
 namespace Frontier
 {
@@ -47,6 +58,8 @@ struct PlanetaryWindProfile
     uint32_t Seed                    = 7331u;
     double   MesoscaleScaleMeters    = 0.0;   // [m] slow speed/direction variation wavelength (0 = none)
     double   MesoscaleStrength       = 0.0;   // [0..1] its share of the speed; 55° of turn at full strength
+    bool     Bounded                 = false; // 📝 Smooth regional fade instead of a global ambient profile.
+    double   RegionRadiusMeters      = 1600.0; // [m] horizontal radius from the field origin.
 };
 
 struct BeaufortWindClassification
@@ -237,16 +250,31 @@ struct AerodynamicParticle
 //                                      5. FORCE FIELD SPACE COORDINATOR
 //------------------------------------------------------------------------------------------------------------------------
 
-class ForceFieldSpace
+class ForceFieldSpace final : public IFieldSampler
 {
   public:
-    void ConfigureEnabled(bool Enabled) noexcept { Enabled_ = Enabled; }
+    void ConfigureEnabled(bool Enabled) noexcept { Enabled_ = Enabled; ++Revision_; }
     [[nodiscard]] bool QueryEnabled() const noexcept { return Enabled_; }
+    [[nodiscard]] bool QueryFieldEnabled() const noexcept override { return Enabled_; }
     void SetWindProfile(const PlanetaryWindProfile& Profile) noexcept;
     [[nodiscard]] const PlanetaryWindProfile& WindProfile() const noexcept { return Wind_; }
 
     void SetGroundPlaneYMeters(double GroundYMeters) noexcept;
     [[nodiscard]] double GroundPlaneYMeters() const noexcept { return GroundPlaneYMeters_; }
+    [[nodiscard]] double QueryGroundPlaneYMeters() const noexcept override { return GroundPlaneYMeters_; }
+
+    [[nodiscard]] SpatialProfile&           AccessSpatialProfile() noexcept { return Spatial_; }
+    [[nodiscard]] const SpatialProfile&     QuerySpatialProfile() const noexcept { return Spatial_; }
+    [[nodiscard]] ReplicationProfile&       AccessReplicationProfile() noexcept { return Replication_; }
+    [[nodiscard]] const ReplicationProfile& QueryReplicationProfile() const noexcept { return Replication_; }
+
+    // 📝 ReplicableDomainConcept contract for DomainReplicator<ForceFieldSpace>.
+    [[nodiscard]] std::string_view QueryDomainIdentifier() const noexcept { return DomainId_; }
+    void                           ConfigureDomainIdentifier(std::string Id) { DomainId_ = std::move(Id); }
+    [[nodiscard]] uint64_t         QueryDomainRevision() const noexcept { return Revision_; }
+    void                           AdvanceRevision() noexcept { ++Revision_; }
+    void                           SerializeDomainState(toml::table& Out) const;
+    void                           DeserializeDomainState(const toml::table& In);
 
     [[nodiscard]] double ElapsedSeconds() const noexcept { return ElapsedSeconds_; }
     void                 SetElapsedSeconds(double Seconds) noexcept;
@@ -319,12 +347,44 @@ class ForceFieldSpace
     // Packs up to kMaxGpuForceSourcesRealm active sources into float4 slots for PlanetaryEnsemble GPU upload.
     uint32_t AppendGpuForceRecords(std::vector<std::array<float, 4>>& OutFloat4Table) const;
 
+    // 📝 IFieldSampler implementation forwarding to the single source evaluators above.
+    [[nodiscard]] Vec3d SampleFieldFlow(const Vec3d& FieldPointMeters,
+                                        double       CellSpanMeters   = 0.0,
+                                        bool         IncludeCurlSwirl = false) const noexcept override;
+    [[nodiscard]] Vec3d SampleFieldContribution(ForceContribution Contribution,
+                                                const Vec3d&      FieldPointMeters,
+                                                double            CellSpanMeters   = 0.0,
+                                                bool              IncludeCurlSwirl = true,
+                                                int32_t           Solo             = kSoloEvery) const noexcept override;
+    [[nodiscard]] FieldPointSample EvaluateFullField(const Vec3d& FieldPointMeters,
+                                                     bool         IncludeCurlSwirl = false,
+                                                     double       CellSpanMeters   = 0.0) const noexcept override;
+
+    // 📝 Templated contribution accumulator over authored force sources of one bucket (Flow, Accelerate, Damp).
+    template <ForceContribution Bucket>
+    void AccumulateContributionBucket(const SpatialVector& WorldPointMeters,
+                                      const ForceWindReading& Wind,
+                                      int32_t                 Solo,
+                                      SpatialVector&          OutAccumulated) const noexcept
+    {
+        for (size_t Index = 0; Index < Authored_.size(); ++Index)
+        {
+            if (Authored_[Index].Contribution != Bucket) continue;
+            if (Solo >= 0 && static_cast<size_t>(Solo) != Index) continue;
+            (void)EvaluatePreparedForceSource(Authored_[Index], Wind, WorldPointMeters, OutAccumulated);
+        }
+    }
+
   private:
     [[nodiscard]] SpatialVector EvaluateWindFlow(SpatialVector WorldPointMeters, bool IncludeCurlSwirl, double CellSpanMeters) const noexcept;
     void PrepareAuthoredSources() noexcept;
 
     bool Enabled_ = true;
     PlanetaryWindProfile                  Wind_{};
+    SpatialProfile                        Spatial_{};
+    ReplicationProfile                    Replication_{};
+    std::string                           DomainId_           = "ForceField:Default";
+    uint64_t                              Revision_           = 1;
     double                                GroundPlaneYMeters_ = 0.0;
     double                                ElapsedSeconds_     = 0.0;
     double                                AuthoredSeconds_    = 0.0;

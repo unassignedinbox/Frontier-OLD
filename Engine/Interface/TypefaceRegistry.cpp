@@ -59,6 +59,10 @@ void *TypefaceRegistry::LoadFace(const std::string &Path) noexcept
     Config.OversampleH = 2; // font antialiasing "on" default; the Fonts tab switch flips RasterizerMultiply/oversample
     Config.OversampleV = 1;
     Config.PixelSnapH  = false;
+    // 📝 Latin + Greek (ω λ) + punctuation (— …) + arrows (↗) + math (∇ ≈): DM Sans lacks the symbols, so GlyphRun
+    //    falls back to JetBrains Mono — but only if this atlas actually rasterized them.
+    static const ImWchar SymbolRanges[] = {0x0020, 0x00FF, 0x0370, 0x03FF, 0x2010, 0x2055, 0x2190, 0x21FF, 0x2200, 0x22FF, 0};
+    Config.GlyphRanges                  = SymbolRanges;
     // Read through filesystem::path, not ImGui's narrow fopen path: Windows content paths may be Unicode.
     std::ifstream Input(DecodeContentPath(Path), std::ios::binary | std::ios::ate);
     if (!Input)
@@ -94,6 +98,11 @@ void *TypefaceRegistry::LoadFace(const std::string &Path) noexcept
 
 uint32_t TypefaceRegistry::Load(const std::filesystem::path &ArchiveRoot) noexcept
 {
+    return Load(ArchiveRoot, nullptr, 0u);
+}
+
+uint32_t TypefaceRegistry::Load(const std::filesystem::path &ArchiveRoot, const char *const *WantedFamilies, uint32_t WantedCount) noexcept
+{
     DiagnosticJournal::Append("Fonts", "Archive=" + DiagnosticJournal::EncodePath(ResolveContentDirectory(ArchiveRoot)));
     if (Loaded)
         return QueryFamilyCount();
@@ -112,6 +121,17 @@ uint32_t TypefaceRegistry::Load(const std::filesystem::path &ArchiveRoot) noexce
     for (const auto &Family : Codec.QueryDiscoveredFamilies())
         if (std::find(Ordered.begin(), Ordered.end(), &Family) == Ordered.end())
             Ordered.push_back(&Family);
+    if (WantedFamilies != nullptr && WantedCount > 0)
+    {
+        Ordered.erase(std::remove_if(Ordered.begin(), Ordered.end(),
+                                     [&](const FontFamilyIndex *Index) {
+                                         for (uint32_t I = 0; I < WantedCount; ++I)
+                                             if (WantedFamilies[I] != nullptr && Squash(Index->FamilyName) == Squash(WantedFamilies[I]))
+                                                 return false;
+                                         return true;
+                                     }),
+                      Ordered.end());
+    }
 
     for (const auto *Index : Ordered)
     {

@@ -1,12 +1,13 @@
 /*==========================================================================================================================================
                                                    SCENEVIEWPORTWORKSPACECAPTURE.CPP
 ==========================================================================================================================================*/
-// 🧩 The Everest workspace with its live Scene Viewport, captured offscreen: the real EverestWorkspace and RenderingExtension
-//    (records → SceneViewport on a device of its own), the presented image read back and CPU-rasterized into the interface.
+// 🧩 The Everest workspace with its live Scene Viewport and transparent particle overlay, captured offscreen: the real workspace,
+//    scene and particle extensions, the two presented images read back and alpha-composited by the interface rasterizer.
 
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Frontier/Extensions/Rendering/RenderingExtension.h"
+#include "Frontier/Extensions/Particle/ParticleExtension.h"
 #include "EverestWorkspace.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -14,6 +15,7 @@
 #include <imgui.h>
 #include <stb_image_write.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -25,9 +27,10 @@
 namespace
 {
 
-constexpr int      CaptureWidth  = 1920;
-constexpr int      CaptureHeight = 1080;
-constexpr uint64_t ViewportTag   = 0x5CE7E5u;   // [-] ImTextureID the capture resolves to the read-back image
+constexpr int      CaptureWidth        = 1920;
+constexpr int      CaptureHeight       = 1080;
+constexpr uint64_t ViewportTag         = 0x5CE7E5u;   // [-] ImTextureID the capture resolves to the read-back scene image
+constexpr uint64_t ParticleViewportTag = 0x5CE7E6u;   // [-] ImTextureID the capture resolves to the read-back particle layer
 
 void Require(bool Condition, const std::string& Message)
 {
@@ -79,15 +82,23 @@ int main(int ArgumentCount, char** Arguments)
         // 📝 The same bridge the editor uses; here it opens its own device and the image comes back to the CPU.
         Everest::EverestWorkspace     Workspace(*Centre, EverestRoot);
         Frontier::RenderingExtension Bridge(EverestRoot, ShaderRoot, nullptr);
+        Frontier::ParticleExtension   ParticleBridge(ShaderRoot, nullptr);
         std::vector<uint8_t>          ViewportPixels;
+        std::vector<uint8_t>          ParticlePixels;
         std::array<uint32_t, 2>       ViewportExtent = {0, 0};
+        std::array<uint32_t, 2>       ParticleExtent = {0, 0};
+        Frontier::SceneViewportRequest LastSceneRequest{};
+        bool                          SawParticleRequest = false;
+        bool                          CompositeValidated = false;
         std::string                   LastStatus;
         Workspace.PresentSceneViewport = [&](const Frontier::SceneViewportRequest& Request) {
+            LastSceneRequest = Request;
             const auto Start = std::chrono::steady_clock::now();
             const Frontier::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QueryWorldSpace(), Workspace.QueryElapsedSeconds());
             Frontier::SceneViewportImage Image;
             Image.Status  = Outcome.Status;
             Image.Readout = Outcome.Readout;
+            Image.Extent  = Outcome.Extent;
             LastStatus    = Outcome.Status;
             if (Outcome.View != VK_NULL_HANDLE && Bridge.AccessViewport()->ReadPresented(ViewportPixels))
             {
@@ -96,6 +107,36 @@ int main(int ArgumentCount, char** Arguments)
             }
             std::printf("  viewport image %u x %u for a %.0f x %.0f panel in %.1f s — %s\n", Outcome.Extent[0], Outcome.Extent[1], Request.PanelWidth,
                         Request.PanelHeight, std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count(), Outcome.Status.c_str());
+            return Image;
+        };
+        Workspace.PresentParticleViewport = [&](const Frontier::ParticleViewportRequest& Request) {
+            Require(Request.Plan != nullptr, "the scene particle presenter received no refresh plan");
+            Require(Request.Plan->ViewWidth == ViewportExtent[0] && Request.Plan->ViewHeight == ViewportExtent[1],
+                    "particle render extent differs from the live scene viewport extent");
+            const Frontier::ParticleCameraPose ScenePose{LastSceneRequest.CameraPosition, LastSceneRequest.CameraTarget,
+                                                          LastSceneRequest.CameraUp, LastSceneRequest.VerticalFieldOfView};
+            const Frontier::ParticleCameraPose ParticlePose = Frontier::ConvertSceneCameraToParticleAxes(ScenePose);
+            const Frontier::ParticleCameraReading ExpectedCamera = Frontier::ResolveParticleCamera(
+                ParticlePose, static_cast<double>(ViewportExtent[0]) / std::max(1u, ViewportExtent[1]));
+            Require(Request.Plan->Camera.Eye == ParticlePose.Position && Request.Plan->Camera.ViewProjection == ExpectedCamera.ViewProjection,
+                    "particle render does not use the live scene camera pose and projection");
+            SawParticleRequest = true;
+            Frontier::ParticleViewportImage Image;
+            Frontier::ParticleViewportOutcome Outcome = ParticleBridge.Render(Request);
+            Image = std::move(Outcome.Image);
+            if (Outcome.View != VK_NULL_HANDLE && ParticleBridge.AccessSequence() != nullptr)
+            {
+                std::string Diagnostic;
+                if (ParticleBridge.AccessSequence()->ReadPresentedImage(ParticlePixels, &Diagnostic))
+                {
+                    ParticleExtent = Image.Extent;
+                    Image.Texture  = ParticleViewportTag;
+                }
+                else
+                {
+                    Image.Failure = Diagnostic;
+                }
+            }
             return Image;
         };
 
@@ -127,17 +168,58 @@ int main(int ArgumentCount, char** Arguments)
             FrontierExhibit::AcknowledgeTextures();
         }
         Require(!ViewportPixels.empty(), "no scene viewport image was presented: " + LastStatus);
+        Require(SawParticleRequest, "the Particles record did not request a main-viewport particle layer");
+        Require(ParticleExtent == ViewportExtent, "the particle image was not rendered at the actual scene viewport extent");
+        Require(ParticleExtent[0] > 0 && ParticleExtent[1] > 0 &&
+                    ParticlePixels.size() == static_cast<size_t>(ParticleExtent[0]) * ParticleExtent[1] * 4u,
+                "no main-viewport particle layer was read back");
+        size_t AlphaCoverage = 0;
+        size_t PartialAlphaCoverage = 0;
+        for (size_t Byte = 3; Byte < ParticlePixels.size(); Byte += 4)
+        {
+            const uint8_t Alpha = ParticlePixels[Byte];
+            AlphaCoverage += Alpha > 8 ? 1u : 0u;
+            PartialAlphaCoverage += Alpha > 8 && Alpha < 248 ? 1u : 0u;
+        }
+        Require(AlphaCoverage > 0, "the main-viewport particle layer has no visible alpha coverage");
+        Require(PartialAlphaCoverage > 0, "the main-viewport particle layer lost its partial-alpha particles");
+        Require(ParticlePixels[3] == 0 && ParticlePixels[ParticlePixels.size() - 1] == 0,
+                "the transparent particle layer covers its image corners");
+        std::printf("  particle layer %u x %u, %zu alpha-covered pixels\n", ParticleExtent[0], ParticleExtent[1], AlphaCoverage);
 
         const auto WriteCapture = [&](const std::filesystem::path& Target) {
             const ImDrawData* DrawData = ImGui::GetDrawData();
-            std::vector<unsigned char> Pixels(static_cast<size_t>(CaptureWidth) * CaptureHeight * 3u, 14u);
-            const std::function<FrontierExhibit::Image(ImTextureID)> Resolve = [&](ImTextureID Texture) {
-                return Texture == ViewportTag ? FrontierExhibit::Image{ViewportPixels.data(), static_cast<int>(ViewportExtent[0]), static_cast<int>(ViewportExtent[1]), 4}
-                                              : FrontierExhibit::Image{};
+            const std::array<unsigned char, 4> TransparentPixel{};
+            const auto RasterizeDisplay = [&](bool IncludeParticles) {
+                std::vector<unsigned char> Pixels(static_cast<size_t>(CaptureWidth) * CaptureHeight * 3u, 14u);
+                const std::function<FrontierExhibit::Image(ImTextureID)> Resolve = [&](ImTextureID Texture) {
+                    if (Texture == ViewportTag)
+                        return FrontierExhibit::Image{ViewportPixels.data(), static_cast<int>(ViewportExtent[0]), static_cast<int>(ViewportExtent[1]), 4};
+                    if (Texture == ParticleViewportTag)
+                        return IncludeParticles
+                            ? FrontierExhibit::Image{ParticlePixels.data(), static_cast<int>(ParticleExtent[0]), static_cast<int>(ParticleExtent[1]), 4}
+                            : FrontierExhibit::Image{TransparentPixel.data(), 1, 1, 4};
+                    return FrontierExhibit::Image{};
+                };
+                for (const ImDrawList* List : DrawData->CmdLists)
+                    FrontierExhibit::RasterizeCommands(List, Pixels.data(), CaptureWidth, CaptureHeight, DrawData->DisplayPos,
+                                                       DrawData->FramebufferScale, nullptr, &Resolve);
+                return Pixels;
             };
-            for (const ImDrawList* List : DrawData->CmdLists)
-                FrontierExhibit::RasterizeCommands(List, Pixels.data(), CaptureWidth, CaptureHeight, DrawData->DisplayPos, DrawData->FramebufferScale, nullptr,
-                                                   &Resolve);
+            std::vector<unsigned char> Pixels = RasterizeDisplay(true);
+            if (!CompositeValidated)
+            {
+                const std::vector<unsigned char> SceneOnlyPixels = RasterizeDisplay(false);
+                size_t CompositeChangedPixels = 0;
+                for (size_t Byte = 0; Byte < Pixels.size(); Byte += 3)
+                {
+                    if (Pixels[Byte] != SceneOnlyPixels[Byte] || Pixels[Byte + 1] != SceneOnlyPixels[Byte + 1] ||
+                        Pixels[Byte + 2] != SceneOnlyPixels[Byte + 2]) ++CompositeChangedPixels;
+                }
+                Require(CompositeChangedPixels > 0, "alpha-composited particles did not change the live scene viewport image");
+                std::printf("  alpha compositing changed %zu screen pixels over the scene-only capture\n", CompositeChangedPixels);
+                CompositeValidated = true;
+            }
             Require(stbi_write_png(Target.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
             std::printf("[SceneViewportWorkspaceCapture] %s (viewport %u x %u)\n", Target.string().c_str(), ViewportExtent[0], ViewportExtent[1]);
         };
@@ -162,7 +244,7 @@ int main(int ArgumentCount, char** Arguments)
 
             // 📝 Debug view 15: the analytic illumination instead of the global illumination (Render settings › Debug views).
             Pipeline->AccessConfiguration().InspectionModeIndex  = 0;
-            Pipeline->AccessConfiguration().AnalyticIllumination = true;
+            Pipeline->AccessConfiguration().DirectShading        = true;
             Pipeline->AccessConfiguration().AdvanceRevision();
             for (int Tick = 0; Tick < 2; ++Tick)
             {
@@ -174,10 +256,10 @@ int main(int ArgumentCount, char** Arguments)
                 ImGui::Render();
                 FrontierExhibit::AcknowledgeTextures();
             }
-            std::filesystem::path Analytic = OutputPath;
-            Analytic.replace_filename(OutputPath.stem().string() + "-Analytic" + OutputPath.extension().string());
-            WriteCapture(Analytic);
-            Pipeline->AccessConfiguration().AnalyticIllumination = false;
+            std::filesystem::path Direct = OutputPath;
+            Direct.replace_filename(OutputPath.stem().string() + "-Direct" + OutputPath.extension().string());
+            WriteCapture(Direct);
+            Pipeline->AccessConfiguration().DirectShading = false;
             Pipeline->AccessConfiguration().AdvanceRevision();
         }
 
@@ -233,6 +315,7 @@ int main(int ArgumentCount, char** Arguments)
         }
 
         Workspace.PresentSceneViewport = nullptr;
+        Workspace.PresentParticleViewport = nullptr;
         Ownership.reset();
         FrontierExhibit::AcknowledgeTextures();
         ImGui::GetIO().BackendFlags = 0;

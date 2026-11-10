@@ -4,6 +4,7 @@
 // 🧩 Light direction and sun transmittance at the observer, moonlight below the horizon, and the sky-view LUT refresh.
 
 #include "AtmosphereIntegrator.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <cmath>
 #include <cstdio>
@@ -22,7 +23,7 @@ constexpr double   RayleighScatter[3] = {5.802e-6, 13.558e-6, 33.1e-6};
 constexpr double   MieExtinction    = 4.40e-6;
 constexpr double   OzoneAbsorption[3] = {0.650e-6, 1.881e-6, 0.085e-6};
 constexpr double   ObserverAltitude = 100.0;   // [m]
-constexpr double   Pi               = 3.141592653589793;
+constexpr double   Pi               = MathConstantsD::Pi;
 
 // 📝 The cache keys only need to change exactly when the demo's JSON keys change; %.17g round-trips every double.
 std::string KeyOf(std::initializer_list<double> Values)

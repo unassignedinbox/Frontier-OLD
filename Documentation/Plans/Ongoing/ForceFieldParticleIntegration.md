@@ -96,7 +96,7 @@ behaviour unchanged; the UI follows the approved prototype (outliner, inspector,
 | E4 | The editor: outliner, viewport, library sheet, inspector pages, field overlay | Workspace captures and checks |
 | E5 | Evidence, Tracker, Windows binary | — |
 
-- E1: `EngineContent/ParticleArchives/ParticleLibrary.toml` is exported from `presets.js` (52 presets, 14 groups, the
+- E1: `EngineContent/ParticleArchives/ParticleLibrary.particlespace` is exported from `presets.js` (52 presets, 14 groups, the
   default wind and scene). The packing covers `fillSys`, the refresh constants and the wind components.
 - E2: simulation, wind lattice, rendering, light fibres and lensing, compiled by the pinned slangc and stored like
   the other shader sets.

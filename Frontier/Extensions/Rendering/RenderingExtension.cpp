@@ -103,42 +103,11 @@ bool AdvanceSolarDay(Frontier::SolarConfiguration& Sun, double DeltaSeconds)
     return true;
 }
 
-const Frontier::CameraRecord* ResolveActiveCameraRecord(const Frontier::WorldSpace& World)
-{
-    const Frontier::CameraRecord* Fallback = nullptr;
-    for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("Camera"))
-    {
-        const auto* Camera = dynamic_cast<const Frontier::CameraRecord*>(Entry);
-        if (!Camera || !Camera->QueryConfiguration().Enabled) continue;
-        if (Camera->QueryConfiguration().Active) return Camera;
-        if (!Fallback) Fallback = Camera;
-    }
-    return Fallback;
-}
-
 Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::WorldSpace& World, double ElapsedSeconds)
 {
     Frontier::GlobalIllumination::SceneEnvironment Environment;
     ReadConfiguration<Frontier::SolarRecord>(World, "Solar", Environment.Solar);
-    bool BoundCameraFlare = false;
-    if (const Frontier::CameraRecord* ActiveCamera = ResolveActiveCameraRecord(World))
-    {
-        for (const Frontier::SceneRecordBase* Entry : World.FindAllByType("OpticalFlare"))
-        {
-            const auto* Flare = dynamic_cast<const Frontier::OpticalFlareRecord*>(Entry);
-            if (!Flare) continue;
-            if (Flare->QueryParentToken() == ActiveCamera->QueryToken())
-            {
-                Environment.Flare = Flare->QueryConfiguration();
-                BoundCameraFlare  = true;
-                break;
-            }
-        }
-    }
-    if (!BoundCameraFlare)
-    {
-        ReadConfiguration<Frontier::OpticalFlareRecord>(World, "OpticalFlare", Environment.Flare);
-    }
+    ReadConfiguration<Frontier::OpticalFlareRecord>(World, "OpticalFlare", Environment.Flare);
     ReadConfiguration<Frontier::AtmosphereRecord>(World, "Atmosphere", Environment.Atmosphere);
     ReadGlobalConfiguration<Frontier::CloudRecord>(World, "Clouds", Environment.Clouds);
     ReadConfiguration<Frontier::StarRecord>(World, "Stars", Environment.Stars);
@@ -269,15 +238,15 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     {
         Pick_        = {};
         Pick_.Serial = Request.PickSerial;
-        Frontier::GlobalIllumination::OccupantPick Seen;
+        Frontier::GlobalIllumination::SubjectPick Seen;
         std::string                                Diagnostic;
         if (Viewport_->QueryScene() != GeometryScene_)
         {
             Pick_.Failure = "the scene was rebuilt since the image was made";
         }
-        else if (Viewport_->PickOccupants(Request.PickPoint, Seen, &Diagnostic))
+        else if (Viewport_->PickSubjects(Request.PickPoint, Seen, &Diagnostic))
         {
-            Pick_.Occupant     = Seen.QueryOccupant(0, 0);
+            Pick_.Occupant     = Seen.QuerySubject(0, 0);
             Pick_.Record       = Geometry_.ResolvePickedRecord(Seen);
             Pick_.Milliseconds = Seen.Milliseconds;
         }
@@ -302,7 +271,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
         // 📝 The objects' own surfaces first: the placements capture their cards again from them.
         for (const auto& [Block, Records] : Geometry_.ConsumeMaterialBlocks())
             if (auto* Host = Viewport_->AccessHost()) (void)Host->WriteMaterialBlock(Block, Records);
-        (void)Viewport_->RelocateOccupants(Placements);
+        (void)Viewport_->RelocateSubjects(Placements);
     }
 
     // ③ one refresh through the level's records; with live refresh off the last image stays (Render settings › Refresh timing)
@@ -328,14 +297,7 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Rendering.Inspection           = static_cast<uint32_t>(std::clamp(Pipeline.InspectionModeIndex, 0, 14));
     Rendering.VirtualizedGeometry  = Pipeline.VirtualizedGeometry;
     Rendering.VirtualizedStreamSlots = static_cast<uint32_t>(std::max(0, Pipeline.VirtualizedStreamSlots));
-    Rendering.AnalyticIllumination   = Pipeline.AnalyticIllumination;
-    if (const Frontier::CameraRecord* ActiveCamera = ResolveActiveCameraRecord(World))
-    {
-        if (ActiveCamera->QueryConfiguration().Enabled)
-        {
-            Rendering.CameraMotionBlur = ActiveCamera->QueryConfiguration().MotionBlur;
-        }
-    }
+    Rendering.DirectShading          = Pipeline.DirectShading;
     namespace Bit = Frontier::GlobalIllumination::RefinementBit;
     Rendering.Refinements = (Pipeline.SolarDisc ? Bit::SolarDisc : 0u) | (Pipeline.StratifiedSun ? Bit::StratifiedSun : 0u) |
                             (Pipeline.PenumbraFilter ? Bit::PenumbraFilter : 0u) | (Pipeline.MirrorFilter ? Bit::MirrorFilter : 0u) |
@@ -402,8 +364,8 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     Outcome.View   = Viewport_->QueryPresentedView();
     Outcome.Extent = Viewport_->QueryScreenExtent();
     char Status[160];
-    if (Pipeline.AnalyticIllumination)
-        std::snprintf(Status, sizeof(Status), "LIVE: Analytic illumination (fast preview)  |  %u x %u  |  %.1f ms", Outcome.Extent[0], Outcome.Extent[1],
+    if (Pipeline.DirectShading)
+        std::snprintf(Status, sizeof(Status), "LIVE: Direct shading (fast preview)  |  %u x %u  |  %.1f ms", Outcome.Extent[0], Outcome.Extent[1],
                       RefreshMilliseconds_);
     else
         std::snprintf(Status, sizeof(Status), "LIVE: ReSTIR GI %s + PlanetaryAtmosphere  |  %u x %u  |  %.1f ms", RayTracing ? "RTX" : "GTX", Outcome.Extent[0],
@@ -413,9 +375,9 @@ SceneViewportRefresh RenderingExtension::Render(const SceneViewportRequest& Requ
     // 📝 The demo's readout figures (IlluminationHost.js PresentMeasurements): renderer tag and the TLAS line.
     const Frontier::GlobalIllumination::ViewportStatistics Statistics = Viewport_->QueryStatistics();
     char Tag[96];
-    if (Pipeline.AnalyticIllumination)
+    if (Pipeline.DirectShading)
     {
-        std::snprintf(Tag, sizeof(Tag), "Analytic illumination (no rays)");
+        std::snprintf(Tag, sizeof(Tag), "Direct shading (no rays)");
     }
     else if (Statistics.RayTracing)
     {

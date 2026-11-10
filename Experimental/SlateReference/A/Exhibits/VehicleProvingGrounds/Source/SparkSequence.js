@@ -170,8 +170,8 @@ export class SparkSequence
         }
     }
 
-    // 📝 Ballistic with linear drag, radiative cooling toward ambient, skips off the course and 3D stunt ramps.
-    Advance(Seconds, Boxes = [], Bodies = [], Surfaces = null)
+    // 📝 Ballistic with linear drag, radiative cooling toward ambient, skips off the course.
+    Advance(Seconds, Boxes = [], Bodies = [])
     {
         if (!(Seconds > 0.0))
             return;
@@ -186,8 +186,6 @@ export class SparkSequence
             }
             Boxes = Boxes.filter(Box => Minimum.every((Low, Axis) => Maximum[Axis] >= Box.Minimum[Axis] && Low <= Box.Maximum[Axis]));
             Bodies = Bodies.filter(Body => Minimum.every((Low, Axis) => Maximum[Axis] >= Body.Position[Axis] - Body.Radius && Low <= Body.Position[Axis] + Body.Radius));
-            if (Surfaces && Surfaces.length > 0)
-                Surfaces = Surfaces.filter(Surface => Minimum.every((Low, Axis) => Maximum[Axis] >= Surface.WorldMinimum[Axis] && Low <= Surface.WorldMaximum[Axis]));
         }
         const Survivors = [];
         for (const Spark of this.Particles)
@@ -202,7 +200,7 @@ export class SparkSequence
                 Spark.Velocity = Spark.Velocity.map((Value, Axis) => Value * Damping - (Axis === 2 ? Gravity * Dt : 0));
                 const From = Spark.Position;
                 const To = From.map((Value, Axis) => Value + Spark.Velocity[Axis] * Dt);
-                const Hit = SweepSpark(From, To, Boxes, Bodies, Surfaces);
+                const Hit = SweepSpark(From, To, Boxes, Bodies);
                 if (Hit) {
                     Spark.Position = From.map((Value, Axis) => Value + (To[Axis] - Value) * Hit.Time + Hit.Normal[Axis] * Hit.Push);
                     Spark.Velocity = BounceSpark(Spark.Velocity, Hit.Normal).map(V=>V*(Spark.BounceScale ?? 1));

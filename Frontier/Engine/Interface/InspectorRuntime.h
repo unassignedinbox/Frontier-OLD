@@ -27,6 +27,8 @@
 namespace Frontier
 {
 
+class IFieldSampler;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    INSPECTOR SWITCH ENTRY
 //------------------------------------------------------------------------------------------------------------------------
@@ -165,6 +167,16 @@ class InspectorRuntime
     void                                  RegisterLevelFlowSampler(LevelFlowSampler Sampler) { FlowSampler = std::move(Sampler); }
     [[nodiscard]] const LevelFlowSampler& QueryLevelFlowSampler() const noexcept { return FlowSampler; }
 
+    // 📝 Shared native level ForceField snapshot provider. Particle samples the full wind volume; Fluid can pass the same
+    //    IFieldSampler to FluidSimulationSequence, then route its bursts back through ParticleTriggerRouter.
+    using LevelFieldSamplerProvider = std::function<std::shared_ptr<const IFieldSampler>()>;
+    void RegisterLevelFieldSamplerProvider(LevelFieldSamplerProvider Provider) { FieldSamplerProvider = std::move(Provider); }
+    [[nodiscard]] std::shared_ptr<const IFieldSampler> AcquireLevelFieldSampler() const
+    {
+        return FieldSamplerProvider ? FieldSamplerProvider() : nullptr;
+    }
+    [[nodiscard]] const LevelFieldSamplerProvider& QueryLevelFieldSamplerProvider() const noexcept { return FieldSamplerProvider; }
+
   private:
     friend class RecordEntry;
 
@@ -193,8 +205,9 @@ class InspectorRuntime
     float                InterfaceScale = 1.0f;
     EnvironmentEditAccess EnvironmentAccess{};
     float                SolarElevation = 38.0f;   // [°]
-    std::filesystem::path LevelFile{};
-    LevelFlowSampler      FlowSampler;
+    std::filesystem::path        LevelFile{};
+    LevelFlowSampler             FlowSampler;
+    LevelFieldSamplerProvider    FieldSamplerProvider;
 };
 
 } // namespace Frontier

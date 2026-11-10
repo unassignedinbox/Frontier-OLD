@@ -31,7 +31,7 @@ namespace
 struct ViewSpecification
 {
     const char*        Name;
-    Vector3            Position, Target;
+    GlobalIllumination::Vector3 Position, Target;
     std::array<int, 4> Region;   // [px] x0 y0 x1 y1 of the measured region at 480×270, scaled to the extent
 };
 // 📝 The proving ground's glossy surfaces: the glass and tempered panes (roughness 0.04 / 0.06), the cones (0.22), the control

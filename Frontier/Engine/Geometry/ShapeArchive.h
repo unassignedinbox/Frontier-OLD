@@ -41,7 +41,7 @@ struct ShapeFacet
 };
 
 // 📝 A signed distance volume in the shape's local frame: texel (i, j, k) is centred at Minimum + (i + ½, j + ½, k + ½) ·
-//    VoxelExtent, x fastest; negative inside. The layout is the one OccupantDistanceSpace chooses for a facet set (voxel, margin,
+//    VoxelExtent, x fastest; negative inside. The layout is the one SubjectDistanceSpace chooses for a facet set (voxel, margin,
 //    8–128 texels).
 struct ShapeDistanceVolume
 {
@@ -101,7 +101,7 @@ struct ShapeArchive
 //                                                    DISTANCE VOLUME
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 The volume layout of OccupantDistanceSpace::ConstructVolumes for these bounds: voxel, a margin of max(4 voxels, 0.12 m) on every
+// 📝 The volume layout of SubjectDistanceSpace::ConstructVolumes for these bounds: voxel, a margin of max(4 voxels, 0.12 m) on every
 //    side, 8–128 texels per axis (a longer shape takes a coarser voxel).
 [[nodiscard]] ShapeDistanceVolume ResolveShapeVolumeLayout(const ShapeArchive& Archive);
 

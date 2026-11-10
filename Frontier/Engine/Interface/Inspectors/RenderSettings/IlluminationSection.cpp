@@ -21,7 +21,7 @@ bool IlluminationSection::Construct(ControlColumn& Page, RenderPipelineConfigura
     using namespace SectionRows;
     char Status[48];
     if (Reading.RayTraced) std::snprintf(Status, sizeof(Status), "%dB \xC2\xB7 M%d", P.MaxBounces, P.InitialCandidates);
-    else std::snprintf(Status, sizeof(Status), "%s", Reading.Analytic ? "Analytic" : "Distance field");
+    else std::snprintf(Status, sizeof(Status), "%s", Reading.DirectShading ? "Direct shading" : "Distance field");
     BeginSection(Page, "Global illumination", "Sparkles", Status,
                  Reading.RayTraced ? "ReSTIR GI: paths traced through the BVH from every trace pixel, reused across refreshes and neighbours."
                                    : "The distance-field gather: cone steps through the scene field, light read from the surface cards.");

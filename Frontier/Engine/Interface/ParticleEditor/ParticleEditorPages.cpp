@@ -208,19 +208,26 @@ void ParticleEditorPages::ConstructFieldPage(ControlColumn& Page, ParticleEditor
 void ParticleEditorPages::ConstructWindPage(ControlColumn& Page, ParticleEditorContext& Context)
 {
     ParticleWindSettings& Wind = Context.Space.Wind;
+    const bool SharedField = Context.Plan && Context.Plan->SharedFieldActive;
+    const char* Description = SharedField
+                                 ? "The native level ForceField is sampled over every cell of the 24 × 12 × 24 lattice; Particle-local flow sources are bypassed."
+                                 : "Particle-local flow sources build the 24 × 12 × 24 lattice, sampled by every wind-driven particle.";
     if (PageHeading::Construct(Page, "ParticleWindArrows", "GUEST OF THE FORCE FIELD", "Wind", Wind.ShowArrows ? "\xE2\x97\x8F Arrows" : "\xE2\x97\x8B Arrows",
-                               "The wind lattice: every flow field summed on 24 \xC3\x97 12 \xC3\x97 24 cells each refresh, with turbulence and "
-                               "divergence-free swirl, sampled by every wind-driven particle.",
-                               "Raster one arrow per lattice cell"))
+                               Description, "Raster one arrow per lattice cell"))
     {
         Wind.ShowArrows = !Wind.ShowArrows;
     }
     char Speed[32], Components[16];
     FormatFigure(Context.Image.ProbeValid ? Context.Image.Probe[3] : 0.0, Speed, sizeof(Speed));
     std::snprintf(Components, sizeof(Components), "%u", Context.Plan ? static_cast<uint32_t>(Context.Plan->Constants[39]) : 0u);
-    const MetricTile Tiles[3] = { { "Probe", Speed, "m/s" }, { "Flow components", Components, "of 16" }, { "Cells", "6,912", "rgba16f" } };
+    const MetricTile Tiles[3] = { { "Probe", Speed, "m/s" },
+                                  { SharedField ? "Shared field" : "Flow components", SharedField ? "ForceField" : Components,
+                                    SharedField ? "native" : "of 16" },
+                                  { "Cells", "6,912", "rgba16f" } };
     MetricTiles::Construct(Page, Tiles, 3, MetricTiles::NoLead);
-    SectionRows::BeginSection(Page, "Lattice", "Wind", nullptr, "Scale, turbulence and swirl of the whole lattice.");
+    SectionRows::BeginSection(Page, "Lattice", "Wind", nullptr,
+                              SharedField ? "The native field owns all 6,912 cells; local Particle flow sources are bypassed."
+                                          : "Scale, turbulence and swirl of the Particle-local flow lattice.");
     SectionRows::Measure(Page, "ParticleWindScale", "Wind scale", Wind.WindScale, 0.0, 4.0, 0.05, "\xC3\x97");
     SectionRows::Measure(Page, "ParticleTurbulence", "Turbulence", Wind.Turbulence, 0.0, 3.0, 0.01, "m/s");
     SectionRows::Measure(Page, "ParticleSwirl", "Swirl", Wind.Swirl, 0.0, 5.0, 0.05, "m/s");
@@ -234,12 +241,12 @@ void ParticleEditorPages::ConstructWindPage(ControlColumn& Page, ParticleEditorC
     SectionRows::Switch(Page, "ParticleDomain", "Domain box", Wind.ShowDomain);
     SectionRows::EndSection(Page);
 
-    // 📝 The level's Force Field (100 m – 100 km) where the domain stands in the level, as one more prevailing flow.
+    // 📝 The level's ForceField is sampled throughout the domain, translated from particle-local to level coordinates at this anchor.
     ParticleLevelWind& Level = Context.Space.LevelWind;
     char               Flow[64] = "off";
     if (Level.Follow && Level.FlowMps)
     {
-        const double Speed   = std::hypot((*Level.FlowMps)[0], (*Level.FlowMps)[2]);
+        const double Speed   = std::hypot((*Level.FlowMps)[0], (*Level.FlowMps)[1], (*Level.FlowMps)[2]);
         const double Bearing = std::fmod(std::atan2((*Level.FlowMps)[0], -(*Level.FlowMps)[2]) * 57.29577951308232 + 360.0, 360.0);
         std::snprintf(Flow, sizeof(Flow), "%.1f m/s \xC2\xB7 %.0f\xC2\xB0", Speed, Bearing);
     }
@@ -248,9 +255,9 @@ void ParticleEditorPages::ConstructWindPage(ControlColumn& Page, ParticleEditorC
         std::snprintf(Flow, sizeof(Flow), "no Force Field");
     }
     SectionRows::BeginSection(Page, "Level", "Globe", Flow,
-                              "The level's Force Field at the anchor joins the lattice as one prevailing flow (its horizontal part).");
+                              "The same native ForceField is sampled at every lattice cell. Its shared sources are not copied into ParticleSpace.");
     SectionRows::Switch(Page, "ParticleLevelFollow", "Follow the level's Force Field", Level.Follow,
-                        Context.LevelFlowAvailable ? nullptr : "No level is open");
+                        Context.LevelFieldAvailable ? nullptr : "No level field is available");
     SectionRows::Distance(Page, "ParticleLevelAnchorX", "Anchor X", Level.AnchorMetres[0], -100000.0, 100000.0, 1.0);
     SectionRows::Distance(Page, "ParticleLevelAnchorY", "Anchor Y", Level.AnchorMetres[1], -100000.0, 100000.0, 1.0);
     SectionRows::Distance(Page, "ParticleLevelAnchorZ", "Anchor height", Level.AnchorMetres[2], 0.0, 100000.0, 1.0);
@@ -275,8 +282,10 @@ void ParticleEditorPages::ConstructForcePage(ControlColumn& Page, ParticleEditor
     {
         Field.Enabled = !Field.Enabled;
     }
-    char Path[96];
-    if (Descriptor.LatticeSlot >= 0) std::snprintf(Path, sizeof(Path), "Summed into the wind lattice (component type %d).", Descriptor.LatticeSlot);
+    char Path[128];
+    if (Descriptor.Contribution == ForceContribution::Flow && Context.Plan && Context.Plan->SharedFieldActive)
+        std::snprintf(Path, sizeof(Path), "Particle-local flow is bypassed while the shared level ForceField is active.");
+    else if (Descriptor.LatticeSlot >= 0) std::snprintf(Path, sizeof(Path), "Summed into the standalone wind lattice (component type %d).", Descriptor.LatticeSlot);
     else if (Descriptor.ForceSlot >= 0) std::snprintf(Path, sizeof(Path), "Packed for fieldAccel (type %d), evaluated per particle.", Descriptor.ForceSlot);
     else std::snprintf(Path, sizeof(Path), "Authored only: no GPU path yet, so particles do not feel it.");
     CaptionText::Construct(Page, Path);

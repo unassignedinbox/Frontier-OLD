@@ -58,7 +58,9 @@ public:
     bool Construct(const VulkanDeviceAccess* HostDevice, const std::filesystem::path& ShaderFolder, std::string* Diagnostic);
 
     // 📝 One refresh: writes, dispatches, raster and lensing, submitted and awaited; then the census and probe readbacks.
-    bool Refresh(const ParticleRefreshPlan& Plan, std::span<const ParticleEffectInstance> Effects, std::string* Diagnostic);
+    //    When Plan.SharedFieldActive, the same native IFieldSampler is sampled over the complete particle wind lattice.
+    bool Refresh(const ParticleRefreshPlan& Plan, std::span<const ParticleEffectInstance> Effects, std::string* Diagnostic,
+                 const IFieldSampler* SharedFieldSampler = nullptr);
 
     [[nodiscard]] VkImageView             QueryPresentedView() const noexcept;
     [[nodiscard]] std::array<uint32_t, 2> QueryExtent() const noexcept { return Extent_; }

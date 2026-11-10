@@ -45,6 +45,16 @@ ControlColumn::ControlColumn(const ControlTheme& InTheme, const EditorTypefaces&
     Lowest             = Cursor;
 }
 
+ControlColumn::ControlColumn(const ControlTheme& InTheme, const EditorTypefaces& InFaces, float InScale, ImVec2 Min, float InWidth)
+    : Theme(InTheme), Faces(InFaces), DrawList(ImGui::GetWindowDrawList()), Scale(std::max(0.5f, InScale))
+{
+    Left      = Min.x;
+    Width     = std::max(120.0f * Scale, InWidth);
+    PageWidth = Width;
+    Cursor    = Min.y;
+    Lowest    = Cursor;
+}
+
 ImVec2 ControlColumn::Space(float CssHeight, float MarginTop, float MarginBottom)
 {
     Cursor += std::max(PendingMargin, MarginTop) * Scale;

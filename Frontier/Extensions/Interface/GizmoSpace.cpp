@@ -8,11 +8,11 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Frontier/Extensions/Interface/GizmoSpace.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <numbers>
 
 namespace Frontier
 {
@@ -46,7 +46,7 @@ constexpr double PlaneHalf   = 0.08;                                            
 constexpr double PlaneCentre = Tip - PlaneHalf;                                              // [L]   - Quad centre along u and v
 constexpr double ArcRadius   = 0.62 * Tip;                                                   // [L]   - Rotate arc centre line
 constexpr double ArcBand     = 0.038;                                                        // [L]   - Arc half width
-constexpr double ArcSweep    = 31.0 * std::numbers::pi / 180.0;                              // [rad] - Arc span
+constexpr double ArcSweep    = DegreesToRadians(31.0);                                     // [rad] - Arc span
 constexpr double RingRadius  = 0.16;                                                         // [L]   - Centre ring radius
 constexpr double RingTube    = 0.008;                                                        // [L]   - Ring tube radius
 constexpr double StrokePixels = 1.6;                                                         // [px]  - Quad edge stroke width
@@ -75,8 +75,8 @@ constexpr uint8_t QuadHoverAlpha = 140;                                         
 // Unit vector perpendicular to Direction (any).
 [[nodiscard]] Vector3 Perpendicular(Vector3 Direction)
 {
-    const Vector3 Helper = std::abs(Direction.X) < 0.9 ? Vector3{ 1.0, 0.0, 0.0 } : Vector3{ 0.0, 1.0, 0.0 };
-    return Normalize(Cross(Direction, Helper));
+    const Vector3 ReferenceAxis = std::abs(Direction.X) < 0.9 ? Vector3{ 1.0, 0.0, 0.0 } : Vector3{ 0.0, 1.0, 0.0 };
+    return Normalize(Cross(Direction, ReferenceAxis));
 }
 
 class GizmoBuilder

@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "Frontier/Extensions/Rendering/SceneGeometryOccupancy.h"
+#include "Frontier/Extensions/Rendering/SceneSubjectPlacement.h"
 #include "Frontier/Engine/Interface/SceneViewportPresentation.h"
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
@@ -50,7 +50,7 @@ class RenderingExtension
     SceneViewportRefresh Render(const SceneViewportRequest& Request, const Frontier::WorldSpace& World, double ElapsedSeconds);
 
     [[nodiscard]] Frontier::GlobalIllumination::SceneViewport* AccessViewport() noexcept { return Viewport_.get(); }
-    [[nodiscard]] const SceneGeometryOccupancy&                QueryGeometry() const noexcept { return Geometry_; }
+    [[nodiscard]] const SceneSubjectPlacement&                QueryGeometry() const noexcept { return Geometry_; }
 
   private:
     std::filesystem::path                                        ProjectRoot_;
@@ -65,7 +65,7 @@ class RenderingExtension
     std::array<uint32_t, 2>                                      RequestedExtent_     = {0, 0};
     uint32_t                                                     StableExtentCount_   = 0;   // [-] interface ticks at RequestedExtent_
     SceneViewportRefresh                                         Held_{};                     // [-] the last outcome, shown while live refresh is off
-    SceneGeometryOccupancy                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
+    SceneSubjectPlacement                                       Geometry_{};                 // [-] the level's geometry records on the scene's occupants
     const Frontier::GlobalIllumination::SceneStructure*          GeometryScene_ = nullptr;    // [-] the scene Geometry_ was reset with
     SceneViewportPick                                            Pick_{};                     // [-] the answer to the last pick serial
 };

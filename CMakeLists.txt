@@ -126,6 +126,8 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
+    Frontier/Engine/Scene/EnvironmentSpaceCodecs.cpp
+    Frontier/Engine/Scene/DynamicsSpaceCodecs.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
@@ -153,6 +155,26 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Controls/GlyphSymbol.cpp
     Frontier/Engine/Interface/Controls/DiagramPen.cpp
     Frontier/Engine/Interface/Controls/DiagramCanvas.cpp
+    Frontier/Engine/Interface/Controls/CurvePlot.cpp
+    Frontier/Engine/Interface/Controls/SectionCard.cpp
+    Frontier/Engine/Interface/Controls/SegmentedRow.cpp
+    Frontier/Engine/Interface/Controls/VectorRow.cpp
+    Frontier/Engine/Interface/Controls/TextRow.cpp
+    Frontier/Engine/Interface/Controls/SliderPill.cpp
+    Frontier/Engine/Interface/Controls/SwitchPill.cpp
+    Frontier/Engine/Interface/Controls/Toast.cpp
+    Frontier/Engine/Interface/Controls/PillTabs.cpp
+    Frontier/Engine/Interface/Controls/ToggleTile.cpp
+    Frontier/Engine/Interface/Controls/ChipToggles.cpp
+    Frontier/Engine/Interface/Controls/StatGrid.cpp
+    Frontier/Engine/Interface/Controls/ActionRow.cpp
+    Frontier/Engine/Interface/Controls/PolarDial.cpp
+    Frontier/Engine/Interface/Controls/TimeSeries.cpp
+    Frontier/Engine/Interface/Controls/HeroCard.cpp
+    Frontier/Engine/Interface/Controls/MetricTrio.cpp
+    Frontier/Engine/Interface/Controls/ColourRow.cpp
+    Frontier/Engine/Interface/Controls/SelectPill.cpp
+    Frontier/Engine/Interface/Controls/EmitterInstrument.cpp
     Frontier/Engine/Interface/Controls/PageHeading.cpp
     Frontier/Engine/Interface/Controls/RasterPlate.cpp
         Frontier/Engine/Interface/Controls/ActionRow.cpp
@@ -204,7 +226,6 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/RenderSettings/GeometrySection.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/ViewSection.cpp
     Frontier/Engine/Interface/Inspectors/RenderSettings/TimingSection.cpp
-    Frontier/Engine/Interface/Inspectors/CameraInspector.cpp
     Frontier/Engine/Interface/Inspectors/SolarInspector.cpp
     Frontier/Engine/Interface/Inspectors/OpticalReference.cpp
     Frontier/Engine/Interface/Inspectors/OpticalFlareInspector.cpp
@@ -248,26 +269,54 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/Geometry/MaterialSection.cpp
     Frontier/Engine/Interface/Inspectors/Geometry/FractureSection.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
-    Frontier/Engine/Interface/ViewportChromeControls.cpp)
+    Frontier/Engine/Interface/ViewportChromeControls.cpp
+    Frontier/Engine/Interface/Workspaces/ForceFieldWorkspace.cpp
+    Frontier/Engine/Interface/Workspaces/ForceFieldWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/ForceFieldWorkspaceRuntime.cpp
+    Frontier/Engine/Interface/Workspaces/ForceFieldWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/ParticleWorkspace.cpp
+    Frontier/Engine/Interface/Workspaces/ParticleWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/ParticleWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/FluidWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/FluidWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/FluidWorkspace.cpp
+    Frontier/Engine/Interface/Workspaces/FractureWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/FractureWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/FractureWorkspace.cpp
+    Frontier/Engine/Photometry/PhotometricIes.cpp
+    Frontier/Engine/Interface/Workspaces/PhotometricIesFileDialog.cpp
+    Frontier/Engine/Interface/Workspaces/PhotometricWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/PhotometricWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/PhotometricWorkspace.cpp
+    Frontier/Engine/Interface/Workspaces/UvWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/UvWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/UvWorkspace.cpp
+    Frontier/Engine/Interface/Workspaces/AssetBrowserWorkspaceCatalogue.cpp
+    Frontier/Engine/Interface/Workspaces/AssetBrowserWorkspaceInspector.cpp
+    Frontier/Engine/Interface/Workspaces/AssetBrowserWorkspace.cpp)
 target_include_directories(FrontierSceneEditorUI PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier")
 target_compile_definitions(FrontierSceneEditorUI PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
 target_include_directories(FrontierSceneEditorUI PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
 target_link_libraries(FrontierSceneEditorUI PUBLIC FrontierEditorUI FrontierInterfaceExtension Threads::Threads PRIVATE FrontierSurfaceRasterization FrontierEnvironmentRendering)
+if(WIN32)
+    target_link_libraries(FrontierSceneEditorUI PRIVATE comdlg32)
+endif()
 
 include(Automation/StageProjectContent.cmake)
 
 # Extensions (Frontier/Extensions/<Name>/): the bridges between engine systems and the applications or runtime that use them.
 add_library(FrontierRenderingExtension STATIC
     Frontier/Extensions/Rendering/RenderingExtension.cpp
-    Frontier/Extensions/Rendering/SceneGeometryOccupancy.cpp)
+    Frontier/Extensions/Rendering/SceneSubjectPlacement.cpp)
 target_link_libraries(FrontierRenderingExtension PUBLIC FrontierSceneEditorUI FrontierSceneViewport)
 add_library(FrontierParticleExtension STATIC
     Frontier/Extensions/Particle/ParticleExtension.cpp)
 target_link_libraries(FrontierParticleExtension PUBLIC FrontierSceneEditorUI FrontierParticleSimulation)
 add_library(FrontierNetworkingExtension STATIC
     Frontier/Extensions/Networking/NetworkingSpace.cpp
+    Frontier/Extensions/Networking/NetworkingTransport.cpp
     Frontier/Extensions/Networking/NetworkingExtension.cpp)
 target_link_libraries(FrontierNetworkingExtension PUBLIC FrontierSceneEditorUI)
 # 📝 Physics: JoltPhysics (pinned, Automation/JoltPhysics.cmake) behind PhysicsSpace; only the extension sees Jolt's headers.
@@ -275,6 +324,7 @@ include(Automation/JoltPhysics.cmake)
 frontier_add_jolt()
 add_library(FrontierPhysicsExtension STATIC
     Frontier/Extensions/Physics/JoltExtension.cpp
+    Frontier/Extensions/Physics/JoltSubstrate.cpp
     Frontier/Extensions/Physics/PhysicsSpace.cpp
     Frontier/Extensions/Physics/PhysicsExtension.cpp)
 target_link_libraries(FrontierPhysicsExtension PUBLIC FrontierSceneEditorUI PRIVATE Jolt)
@@ -300,9 +350,10 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
+    Frontier/Engine/Scene/EnvironmentSpaceCodecs.cpp
+    Frontier/Engine/Scene/DynamicsSpaceCodecs.cpp
     Frontier/Engine/Scene/WorldSpace.cpp
     Frontier/Engine/PhysicalDynamics/ForceSourceCatalogue.cpp
-    Frontier/Engine/Rendering/SceneViewport/CameraEffects.cpp
     Frontier/Engine/Scene/GeometryLayout.cpp
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogRingStore.cpp
@@ -323,6 +374,10 @@ frontier_stage_project_content(EverestProjectRuntime
     "${CMAKE_SOURCE_DIR}/EngineContent"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Content")
 
+# 📝 Host-verification sandboxes often lack X11/Wayland development headers, and every headless
+# validation executable links only Frontier* static libraries. Skip the GLFW window backend and the
+# TextureStudio windowed target there; Windows and full Linux deliveries still build both.
+if(WIN32 OR NOT FRONTIER_HOST_VERIFICATION)
 # GLFW owns windows/input on every platform; DX11 is only the legacy Windows-only exhibit's display
 # adapter, not the primary renderer, and never needs GLFW built differently per platform.
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -359,6 +414,7 @@ add_custom_command(TARGET TextureStudio POST_BUILD
 add_custom_command(TARGET TextureStudio POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_directory
     "${CMAKE_SOURCE_DIR}/EngineContent" "$<TARGET_FILE_DIR:TextureStudio>/EngineContent")
 install(TARGETS TextureStudio RUNTIME DESTINATION .)
+endif()
 install(DIRECTORY ExternalPackages/vulkan-headers/LICENSES DESTINATION Notices/Vulkan-Headers)
 install(DIRECTORY EngineContent DESTINATION .)
 install(FILES "${IMGUI_ROOT}/LICENSE.txt" DESTINATION Notices RENAME ImGui-LICENSE.txt)
@@ -778,6 +834,7 @@ if(BUILD_TESTING)
     add_test(NAME ParticleSpaceValidation COMMAND ParticleSpaceValidation "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/ParticleSpaceScratch")
     set_tests_properties(ParticleSpaceValidation PROPERTIES TIMEOUT 60)
 
+
     add_executable(EverestInterfaceValidation
         Exhibits/EverestInterface/Code/EverestInterfaceValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)
@@ -848,17 +905,22 @@ if(BUILD_TESTING)
     target_link_libraries(EverestShippingValidation PRIVATE EverestProjectRuntime)
     add_test(NAME EverestShippingValidation COMMAND EverestShippingValidation
         "${CMAKE_SOURCE_DIR}/Projects/Everest")
-
-    add_executable(CameraEffectsValidation
-        Exhibits/SceneViewport/Code/CameraEffectsValidation.cpp)
-    target_link_libraries(CameraEffectsValidation PRIVATE EverestProjectEditor)
-    add_test(NAME CameraEffectsValidation COMMAND CameraEffectsValidation
-        "${CMAKE_SOURCE_DIR}/Projects/Everest")
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
+include(Automation/FluidSimulation.cmake)
+include(Automation/CurveEngine.cmake)
+include(Automation/VisualEffects.cmake)
+include(Automation/StudioControls.cmake)
+include(Automation/ForceFieldWorkspace.cmake)
+include(Automation/ParticleWorkspace.cmake)
+include(Automation/FluidWorkspace.cmake)
+include(Automation/FractureWorkspace.cmake)
+include(Automation/PhotometricWorkspace.cmake)
+include(Automation/UvWorkspace.cmake)
+include(Automation/AssetBrowserWorkspace.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
-include(Automation/AnalyticIlluminationRendering.cmake)
+include(Automation/DirectShadingRendering.cmake)
 include(Automation/ParticleSimulationRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)
 

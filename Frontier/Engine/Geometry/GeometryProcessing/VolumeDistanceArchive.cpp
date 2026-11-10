@@ -4,6 +4,7 @@
 // 🧩 Headless .facet -> .sdfspace baker, IEEE-754 Float16 serializer, standalone content resolver, & world SDF union composer.
 
 #include "Engine/Geometry/GeometryProcessing/VolumeDistanceArchive.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <bit>
@@ -582,7 +583,7 @@ bool ComposeControlVehicleDistanceVolume(VolumeDistanceField&           OutWorld
     constexpr double kFrontAxleZM      = 1.665;
     constexpr double kRearAxleZM       = -1.705;
     constexpr double kTrackHalfXM      = 1.045;
-    constexpr double π                 = 3.14159265358979323846;
+    constexpr double π                 = MathConstantsD::Pi;
 
     const double cosψ = std::cos(Placement.HeadingYawRadians);
     const double sinψ = std::sin(Placement.HeadingYawRadians);

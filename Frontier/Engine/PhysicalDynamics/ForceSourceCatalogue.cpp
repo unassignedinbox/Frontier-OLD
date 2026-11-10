@@ -4,6 +4,7 @@
 // 🧩 The sixteen force types of the approved Force Field editor, evaluated as its catalogue does, number for number.
 
 #include "Engine/PhysicalDynamics/ForceSourceCatalogue.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,8 +16,8 @@ namespace Frontier
 namespace
 {
 
-constexpr double π        = 3.14159265358979323846;
-constexpr double Radian   = π / 180.0;
+constexpr double π        = MathConstantsD::Pi;
+constexpr double Radian   = MathConstantsD::DegreesToRadians;
 constexpr double Infinity = std::numeric_limits<double>::infinity();
 
 double Smooth01(double Share) noexcept
@@ -248,7 +249,7 @@ BoxExtents ResolveBoxExtents(const ForceSourceConfiguration& Source) noexcept
 void EvaluateFlowSource(const ForceSourceConfiguration& Source,
                         const ForceWindReading&        Wind,
                         double X, double Y, double Z,
-                        double Age, double Envelope,
+                        double Age, double TimeSeconds, double Envelope,
                         SpatialVector Centre,
                         double Out[3]) noexcept
 {
@@ -410,8 +411,26 @@ void EvaluateFlowSource(const ForceSourceConfiguration& Source,
     case C::Current:
     {
         const double Turn = Source.BearingDegrees * Radian;
-        Out[0] += std::sin(Turn) * Source.Strength * Envelope;
-        Out[2] += -std::cos(Turn) * Source.Strength * Envelope;
+        const double DirectionX = std::sin(Turn), DirectionZ = -std::cos(Turn);
+        double       Gust = 1.0;
+        if (Source.LocalizedWindGenerator)
+        {
+            const double Along = X * DirectionX + Z * DirectionZ;
+            const double Phase = 2.0 * π * std::clamp(Source.GeneratorGustFrequencyHz, 0.0, 2.0) * TimeSeconds - 0.011 * Along;
+            Gust = std::max(0.0, 1.0 + std::clamp(Source.GeneratorGustStrength, 0.0, 1.5) * std::sin(Phase));
+        }
+        const double Speed = Source.Strength * Envelope * Gust;
+        Out[0] += DirectionX * Speed;
+        Out[2] += DirectionZ * Speed;
+        if (Source.LocalizedWindGenerator)
+        {
+            const double Scale = std::max(1.0, Source.GeneratorTurbulenceScaleMetres);
+            const double CurlAmplitude = Speed * std::clamp(Source.GeneratorTurbulence, 0.0, 1.5) * 0.12;
+            const double CurlPhaseX = X / Scale + TimeSeconds * 0.7;
+            const double CurlPhaseZ = Z / Scale - TimeSeconds * 0.9;
+            Out[0] += CurlAmplitude * std::cos(CurlPhaseZ);
+            Out[2] -= CurlAmplitude * std::cos(CurlPhaseX);
+        }
         return;
     }
     default:
@@ -795,6 +814,7 @@ PreparedForceSource PrepareForceSource(const ForceSourceConfiguration& Source, c
     Prepared.Source       = Source;
     Prepared.Contribution = ResolveForceSourceDescriptor(Source.Category).Contribution;
     Prepared.Activation   = ResolveForceActivation(Source, Time);
+    Prepared.TimeSeconds  = Time;
     Prepared.CentreMetres = ResolveForceSourceCentre(Source, Wind, Time, Prepared.Activation.AgeSeconds);
     double BoundX = Prepared.CentreMetres.X, BoundZ = Prepared.CentreMetres.Z, Bound = Infinity;
     if (Source.Category == C::GustFront)
@@ -842,11 +862,11 @@ bool EvaluatePreparedForceSource(const PreparedForceSource& Prepared, const Forc
                                  : ResolveForceReachMask(Source, Prepared.CentreMetres, Point, Wind.GroundHeightMetres);
         if (Share <= 0.0) return false;
         if (Share >= 0.999)
-            EvaluateFlowSource(Source, Wind, Point.X, Point.Y, Point.Z, Age, Envelope, Prepared.CentreMetres, Out);
+            EvaluateFlowSource(Source, Wind, Point.X, Point.Y, Point.Z, Age, Prepared.TimeSeconds, Envelope, Prepared.CentreMetres, Out);
         else
         {
             double Scratch[3] = {0.0, 0.0, 0.0};
-            EvaluateFlowSource(Source, Wind, Point.X, Point.Y, Point.Z, Age, Envelope, Prepared.CentreMetres, Scratch);
+            EvaluateFlowSource(Source, Wind, Point.X, Point.Y, Point.Z, Age, Prepared.TimeSeconds, Envelope, Prepared.CentreMetres, Scratch);
             Out[0] += Scratch[0] * Share;
             Out[1] += Scratch[1] * Share;
             Out[2] += Scratch[2] * Share;

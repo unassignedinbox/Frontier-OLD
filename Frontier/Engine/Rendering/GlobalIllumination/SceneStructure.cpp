@@ -400,7 +400,7 @@ void SceneStructure::RetainOccupantTransform(uint32_t Index)
 //                                                   OCCUPANT ENCODING
 //------------------------------------------------------------------------------------------------------------------------
 
-std::vector<uint8_t> SceneStructure::EncodeOccupantRange(const std::vector<OccupantVolume>* Volumes, uint32_t First, uint32_t Count) const
+std::vector<uint8_t> SceneStructure::EncodeOccupantRange(const std::vector<SubjectVolume>* Volumes, uint32_t First, uint32_t Count) const
 {
     std::vector<uint8_t> Bytes(static_cast<size_t>(std::max(1u, Count)) * OccupantStride, 0u);
     for (uint32_t Local = 0; Local < Count && First + Local < Occupants.size(); ++Local)
@@ -428,7 +428,7 @@ std::vector<uint8_t> SceneStructure::EncodeOccupantRange(const std::vector<Occup
         StoreUnsigned(Bytes, Offset + 67, Occupant.Participation);
         // 📝 −1 keeps the per-facet families; a material block's override carries MaterialBlockBit (negative as int32) and is stored as is.
         StoreUnsigned(Bytes, Offset + 71, Occupant.MaterialOverride != -1 ? static_cast<uint32_t>(Occupant.MaterialOverride) : 0xFFFFFFFFu);
-        const OccupantVolume* Volume = Occupant.Volume ? &*Occupant.Volume
+        const SubjectVolume* Volume = Occupant.Volume ? &*Occupant.Volume
                                      : ((Volumes != nullptr && Set.VolumeIndex >= 0) ? &(*Volumes)[static_cast<size_t>(Set.VolumeIndex)] : nullptr);
         if (Volume != nullptr)
         {

@@ -2,6 +2,83 @@
 
 Single progress and violation tracker. Detailed evidence belongs in Exhibits, not competing progress reports.
 
+## Native Fluid GPU sequence (2026-11-09)
+
+- Replaced the C++ CPU `FluidSimulationSequence` with a Vulkan/Slang GPU solver. `FluidSpace` now holds initial/readback
+  snapshots and a bounded radial-source queue; force/source application, advection, scalar diffusion, divergence, Jacobi
+  pressure solve, velocity projection, and volume preview execute through `.slang` compute pipelines.
+- The native level `IFieldSampler` is sampled at Fluid cell centres into a GPU-readable 3D field input. Fluid bursts are still
+  extracted from explicit readback and routed by `ParticleTriggerRouter::DispatchFluidBurst` into `ParticleSpace`.
+- Added compiled Fluid shader archives, `FluidSimulationGpuValidation`, and CTest SwiftShader runtime configuration. On
+  SwiftShader Device (Subzero), the GPU test passed source transport, field coupling, pressure projection, explicit readback,
+  preview, disabled-sampler fallback and burst routing; divergence RMS was `0.424441 -> 0.357503`.
+- `FluidSpaceValidation` covers schema, queued inputs, a direct world-space ForceField sample used by Particle coupling, and burst routing; the GPU validation checks the Fluid field-texture upload. The browser prototype and native C++ solver
+  remain separate; the Fluid editor shell is not wired to live simulation. Hardware GPU, Windows/MSVC, replication/boundary
+  profiles, richer thermal transport and editor/browser bridging remain open.
+- Evidence and reproduction: `Exhibits/FluidEditor/README.md`.
+
+## Remastered UI conversion — U0 shared Studio kit (2026-11-09)
+
+- **Plan:** `Documentation/Plans/Ongoing/RemasteredUiConversionPlan.md` (Phase U, UI shells first, explicit NOOPs).
+- Ported the shared `StudioControls.js` kit to C++ 1:1 with the Remastered charcoal visuals: `SectionCard`,
+  `SegmentedRow`, `VectorRow`, `TextRow`, `SliderPill`, `SwitchPill`, `Toast`, `ControlTheme::ResolveRemastered()`,
+  and 118 `Studio*`/`StudioField*` glyph outlines via `Automation/GenerateStudioGlyphs.py`.
+- **Validation:** `StudioControlsValidation` CTest passes (scripted card toggle, segment select, track drag, figure
+  scrub, switch flip; idle rows stay quiet). Evidence: `Exhibits/StudioControls/Images/VerifiedKit.png`.
+- Host-verification configures skip the GLFW/TextureStudio window backend so headless checks build without
+  X11/Wayland headers; Windows and full Linux deliveries are unaffected.
+
+## Fluid Editor source restoration and Remastered Particle location (2026-11-09)
+
+- **Plan:** `Documentation/Plans/Completed/RemasteredEditorSourceRestoration.md`.
+- Found the latest complete non-node gas Fluid Editor in `SultanAladin/Frontier-`, branch `arena/b5d061d9-frontier`, tip
+  `7ff19ee57e11d649aff94d8f0195a4333cfe1a88` (2026-10-14). Copied `Experimental/Fluid/`, including the plume, blast,
+  wildfire/dust tornado presets and eight TOML sample scenes. Kept its original source provenance.
+- Moved the Remastered Particle Studio into `Experimental Remastered/ParticleEditor/`; updated suite links and launcher paths.
+  The older `Experimental/ParticleEditor/` reference copy remains because validation/export tools consume it.
+- **Validation:** Vite 7.3.6 build passed; Node scene/codec tests 22/22; Chromium/SwiftShader browser checks 18/18 and interaction
+  checks 9/9; static app routes 7/7 returned HTTP 200. Evidence: `Exhibits/FluidEditor/README.md` and
+  `Exhibits/FluidEditor/Images/Verification-2026-11-09/VerifiedWorkspace.png`.
+- **Limits at source-restoration checkpoint:** headless browser used software WebGL; optional WebGPU fell back to WebGL2. That
+  restoration step did not itself add C++ Fluid integration. The later native Slang/Vulkan GPU sequence and its limits are
+  recorded in the current Fluid status above. Replication/release-state transport, boundary profiles, richer thermal transport,
+  editor/browser integration, and Phase 3 Rendering/Gizmo cleanup remain open. Shared UI foundation/parity work also remains
+  ongoing; Vehicle Lab and AssetInspector stay out of scope.
+
+## Modular foundation — Phase 3 checkpoint (2026-11-09)
+
+- **Fluid checkpoint note:** these bullets record the initial CPU-only baseline and have been superseded by the native GPU
+  sequence at the top of this tracker. The C++ grid was never the browser editor; the restored browser UI remains separate.
+- Added the initial `.fluidspace` profile/configuration schema, bounded grid allocation, rotated/scaled cell coordinates, radial
+  source projection, CPU transport/projection and burst extraction. This was subsequently replaced as the simulation execution
+  path by the Slang/Vulkan compute sequence; host `FluidSpace` cells are now initial/readback snapshots only.
+- The earlier `FluidSpaceValidation` covered schema and CPU stepping; the current target instead validates queued GPU inputs and
+  routing, while `FluidSimulationGpuValidation` exercises the compute path. Latest results are recorded above.
+- Fluid replication/release-state transport, extension/editor integration, boundary profiles, richer thermal transport and
+  broader convergence analysis remain open. Phase 3 Rendering/Gizmo cleanup is also outstanding.
+
+## Modular foundation — Phase 3.6 / Phase 4 kickoff (2026-11-09)
+
+- **Fluid status:** the restored non-node browser editor at `Experimental/Fluid/` remains a separate prototype, not the native
+  C++ UI. The native compute backend is now implemented in `.slang` and passed pinned SwiftShader Vulkan validation; it also
+  preserves Fluid-to-Particle burst routing. Remaining work is the native/browser boundary, boundary/thermal/replication depth,
+  and future workspace wiring—not another editor. Details are in `Documentation/Plans/Ongoing/ModularFoundationPlan.md`.
+- Renamed `SceneGeometryOccupancy.{h,cpp}` to `SceneSubjectPlacement.{h,cpp}`; renamed distance-space/relocation files and
+  classes to `SubjectDistanceSpace` / `SubjectRelocation`, result types to `SubjectPlacement` / `SubjectPick`, and viewport
+  picking to `PickSubjects`. Added the `SpatialEditable` concept and `PlacementGizmo` adapters with compile-time API checks.
+  Updated build inputs, callers, and exhibit docs. Broader `Occupant*`/`Frame` cleanup, live workspace wiring of the generic gizmo,
+  facetspace resolution, and collision export remain open.
+- Started Phase 4 with `Frontier/Engine/Foundation/Curves/CurveSpace.h`: scalar linear, clamped Hermite, monotonic PCHIP,
+  validated `.curvespace` serialization, and fixed-size baked LUTs. `CurveSpaceValidation` passes 26 checks with GCC 12.2.
+- Added the declarative `VisualEffectProfile`/`EffectSpace` `.effectspace` schema with spatial and replication profiles;
+  `EffectSpaceValidation` passes 19 checks. This is not a GPU render sequence.
+- Started the shared UI-first slice with `Frontier/Engine/Interface/Controls/CurvePlot.{h,cpp}`. It previews live evaluations,
+  selects interpolation, and transactionally edits knots. Headless ImGui validation passed interactive drag and invalid-PCHIP
+  rejection; CPU-raster evidence is `Exhibits/Curves/Images/CurvePlot-CPU.png`. Domain-inspector integration and full editor parity
+  remain open.
+- **Still open:** CurveSpace consumers; the EffectSpace evaluation/render-target/GPU pipeline; the remaining 3.6 naming, gizmo, and
+  placement work; and a native/browser Fluid boundary. No domain curve UI or engine/editor Fluid integration is claimed.
+
 ## EngineUpdate status
 
 | ID  | Finding or task                        | Status      | Next action                            |
@@ -1534,7 +1611,7 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Requested:** the second half of bringing the approved prototypes into the C++ editor before vehicles: the
   Particle editor, phase E of `Documentation/Plans/Ongoing/ForceFieldParticleIntegration.md`.
 - **Engine (E1–E3):** the eos engine (`549c477`) in C++, Vulkan and Slang, its behaviour unchanged.
-  - `EngineContent/ParticleArchives/ParticleLibrary.toml` holds the same 52 presets in 14 groups, exported from
+  - `EngineContent/ParticleArchives/ParticleLibrary.particlespace` holds the same 52 presets in 14 groups, exported from
     `presets.js`.
   - `PhysicalDynamics/ParticleDynamics/` holds the scene, the library decoder, the 12-type force taxonomy, the uniform
     packing and the lightning.

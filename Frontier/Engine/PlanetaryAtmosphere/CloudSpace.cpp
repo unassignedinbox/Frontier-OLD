@@ -6,6 +6,8 @@
 
 #include "Engine/PlanetaryAtmosphere/CloudSpace.h"
 
+#include "Frontier/Engine/Foundation/Constants.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -18,7 +20,7 @@ namespace Frontier
 namespace
 {
 
-constexpr double π = 3.14159265358979323846;
+constexpr double π = MathConstantsD::Pi;
 
 SpatialVector Add(SpatialVector A, SpatialVector B) noexcept { return {A.X + B.X, A.Y + B.Y, A.Z + B.Z}; }
 SpatialVector Mul(SpatialVector A, double Scalar) noexcept { return {A.X * Scalar, A.Y * Scalar, A.Z * Scalar}; }

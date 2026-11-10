@@ -5,6 +5,7 @@
 //    low-precision orbital solver for planets and sidereal time (CelestialSolver.js), ported 1:1 from the VehicleHMI demo.
 
 #include "EnvironmentEncoding.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <cmath>
 #include <cstdio>
@@ -16,8 +17,8 @@ namespace Frontier::GlobalIllumination
 namespace
 {
 
-constexpr double Pi = 3.141592653589793;
-constexpr double R  = Pi / 180.0;   // [rad/°] CelestialSolver.js R
+constexpr double Pi = MathConstantsD::Pi;
+constexpr double R  = MathConstantsD::DegreesToRadians;   // [rad/°] CelestialSolver.js R
 
 // 📝 JS mod: ((A % B) + B) % B, % being fmod with the dividend's sign.
 double Modulo(double A, double B = 360.0) noexcept

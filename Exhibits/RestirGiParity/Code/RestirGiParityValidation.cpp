@@ -8,7 +8,7 @@
 #include "Frontier/Engine/Rendering/GlobalIllumination/BoundingStructure.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/IlluminationConstants.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.h"
-#include "Frontier/Engine/Rendering/GlobalIllumination/OccupantDistanceSpace.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/SubjectDistanceSpace.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/RayTracingSpace.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneDistanceSpace.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.h"

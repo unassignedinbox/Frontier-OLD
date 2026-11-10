@@ -69,8 +69,10 @@ public:
 
     ParticleViewportPresenter Presenter;
     ParticleFieldOverlay      Overlay;
-    // 📝 The level's Force Field at a level point (the host's): the space follows it when LevelWind.Follow is on.
-    std::function<std::optional<std::array<double, 3>>(const std::array<double, 3>&)> LevelFlow;
+    // 📝 The active level's native ForceFieldSpace snapshot, shared with this Particle refresh when LevelWind.Follow is on.
+    //    The callback queries InspectorRuntime at use time, so it never retains a destroyed level workspace.
+    std::function<std::shared_ptr<const IFieldSampler>()> LevelFieldSampler;
+    bool LevelFieldAvailable = false;
 
 private:
     void ConstructOutliner(ImDrawList* Ink, ImVec2 Minimum, ImVec2 Maximum, float Scale);

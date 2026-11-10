@@ -6,6 +6,10 @@
 
 add_library(FrontierParticleSimulation STATIC
     Frontier/Engine/Rendering/ParticleSimulation/ParticleSimulationSequence.cpp)
+# 📝 The sequence header (via ParticleSpace.h / SpaceCodec.h) names repo-rooted "Frontier/..." paths and
+#    toml::table, so downstream consumers need both the source root and toml++.
+target_include_directories(FrontierParticleSimulation PUBLIC "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierParticleSimulation PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering)
 
 # 📝 The units include the illumination port's intrinsics (IntrinsicParity.slang), so they compile with the same pinned compiler;

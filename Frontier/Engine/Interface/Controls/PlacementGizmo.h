@@ -9,6 +9,7 @@
 #pragma once
 
 #include "Engine/Scene/EngineConfigurations.h"
+#include "Frontier/Engine/Scene/Profiles/ProfileConcepts.h"
 
 #include <imgui.h>
 
@@ -71,17 +72,57 @@ class PlacementGizmo
     [[nodiscard]] int Probe(const PlacementView& View, PlacementGizmoMode Mode, const SpatialConfiguration& Spatial, ImVec2 Pointer,
                             float Scale) const;
 
+    template <SpatialEditable EntryT>
+    [[nodiscard]] int Probe(const PlacementView& View, PlacementGizmoMode Mode, const EntryT& Editable, ImVec2 Pointer, float Scale) const
+    {
+        const SpatialConfiguration Configuration = BridgeSpatial(Editable.Spatial);
+        return Probe(View, Mode, Configuration, Pointer, Scale);
+    }
+
     // 📝 Draws the handles and drags them: a left press on a handle (PressAllowed: the press began on the stage) holds it until
     //    the release. Snap (Ctrl) rounds to 0.25 m, 15° and 0.1.
     PlacementGizmoOutcome Construct(ImDrawList* DrawList, const PlacementView& View, PlacementGizmoMode Mode, SpatialConfiguration& Spatial,
                                     bool Snap, bool PressAllowed, float Scale);
+
+    template <SpatialEditable EntryT>
+    PlacementGizmoOutcome Construct(ImDrawList* DrawList, const PlacementView& View, PlacementGizmoMode Mode, EntryT& Editable,
+                                    bool Snap, bool PressAllowed, float Scale)
+    {
+        SpatialConfiguration Configuration = BridgeSpatial(Editable.Spatial);
+        const PlacementGizmoOutcome Outcome = Construct(DrawList, View, Mode, Configuration, Snap, PressAllowed, Scale);
+        if (Outcome.Changed) ApplySpatial(Editable.Spatial, Configuration);
+        return Outcome;
+    }
 
     [[nodiscard]] bool QueryEngaged() const noexcept { return Handle_ >= 0; }
 
     // 📝 Ends a drag and puts the transform back where it began (Escape).
     void Cancel(SpatialConfiguration& Spatial) noexcept;
 
+    template <SpatialEditable EntryT>
+    void Cancel(EntryT& Editable) noexcept
+    {
+        if (!QueryEngaged()) return;
+        SpatialConfiguration Configuration = BridgeSpatial(Editable.Spatial);
+        Cancel(Configuration);
+        ApplySpatial(Editable.Spatial, Configuration);
+    }
+
   private:
+    [[nodiscard]] static SpatialConfiguration BridgeSpatial(const SpatialProfile& Profile) noexcept
+    {
+        SpatialConfiguration Configuration;
+        Configuration.ApplySpatialProfile(Profile);
+        return Configuration;
+    }
+
+    static void ApplySpatial(SpatialProfile& Profile, const SpatialConfiguration& Configuration) noexcept
+    {
+        const uint64_t Revision = Profile.Revision;
+        Profile = Configuration.ToSpatialProfile();
+        Profile.Revision = Revision + 1u;
+    }
+
     int                  Handle_ = -1;
     PlacementGizmoMode   Mode_   = PlacementGizmoMode::Move;
     SpatialConfiguration Start_{};

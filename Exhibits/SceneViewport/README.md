@@ -69,6 +69,35 @@ the bar's select sets it, shows the port's normals inspection:
 
 ![The Normals inspection view](Images/EverestLiveSceneViewport-Normals.png)
 
+## Transparent main-viewport particle layer
+
+The live Everest viewport now presents the level's particle effects as a separate, transparent GPU image over the actual
+scene image. The default level contains an enabled **Particles** record and ships
+`Content/Levels/Default.Particle_Effects.particlespace` beside `Default.levelspace`; the sidecar is generated from the particle
+library's opening presets (Sparks, Leaves, Atoms and Chemicals) and validated against the library. The workspace reads that
+file, watches it for edits, and uses the library's defaults if the sidecar is not present.
+
+Every frame, the workspace uses the current `SceneViewportRequest` position, target, up vector and vertical field of view.
+The scene is Z-up and the particle engine is Y-up, so the camera pose is rotated by `(x, y, z) → (x, z, −y)` before it is
+packed. The particle plan uses the renderer's actual `SceneViewportImage.Extent`, not the surrounding panel's estimate. The
+host renders the transparent particle target on the editor's Vulkan device, and ImGui alpha-composites it over the scene.
+The Particle editor keeps its existing opaque background. The particle, fibre, lightning and lensing fragment paths preserve
+alpha; the layer's clear is fully transparent, so uncovered pixels reveal the scene underneath.
+
+![Everest Scene Viewport with the transparent particle layer](Images/EverestParticleOverlay.png)
+
+The GPU capture is the real `EverestWorkspace` at 1920 × 1080 on SwiftShader. The scene and particle images both resolve to
+1028 × 403. The capture asserts that the particle camera projection matches the live scene request, the extents match, the
+layer contains visible and partial alpha, its corners remain transparent, and CPU rasterization of the interface changes
+122 screen pixels when compositing the layer over the scene-only frame. The main image, Normals inspection and Direct shading
+captures are `Images/EverestParticleOverlay.png`, `Images/EverestParticleOverlay-Normals.png` and
+`Images/EverestParticleOverlay-Direct.png`; the capture log is `Results/ParticleOverlayWorkspaceCapture.txt`.
+
+Validation: `ParticleSpaceValidation` passes 154 assertions (default sidecar, live-camera projection, FOV-dependent lensing
+and fibre scale, sidecar round trip); `SceneViewportWorkspaceCapture` passes the actual extent, camera, alpha and compositing
+checks; `StoreShaderArchives.py --verify --build build --compiler <pinned slangc> --sets ParticleSimulation` verifies all 30
+SPIR-V archives from seven Slang sources.
+
 ## Layout
 
 ```text
@@ -76,18 +105,21 @@ Frontier/Engine/
 ├── DeviceExchange/VulkanDeviceAccess.h       the editor's Vulkan device as the exchanges attach to it
 ├── Rendering/
 │   ├── GlobalIllumination/                   the 1:1 port (namespace Frontier::GlobalIllumination)
-│   │     IlluminationHost, SceneStructure, BoundingStructure, OccupantDistanceSpace, SceneDistanceSpace,
+│   │     IlluminationHost, SceneStructure, BoundingStructure, SubjectDistanceSpace, SceneDistanceSpace,
 │   │     SurfaceCardDepot, RayTracingSpace, AtmosphereIntegrator, ShadowProjection, SurfaceProjection,
 │   │     ResamplingSequence, DisplayProjection, RefreshEncoding, EnvironmentEncoding, LuminaireRegister,
 │   │     PickProjection (GPU picking, beyond the demo), …
-│   └── SceneViewport/                        SceneViewport (bring-up + refresh) and EnvironmentOverlay
-└── Shaders/GlobalIllumination/*.slang        58 Slang units, 39 SPIR-V entries (EnvironmentVisibility and
-                                              EnvironmentLighting bridge to the environment, PickRaster picks;
-                                              the rest is the port)
+│   ├── SceneViewport/                        SceneViewport (bring-up + refresh) and EnvironmentOverlay
+│   └── ParticleSimulation/                   transparent particle raster, lensing and presentation targets
+└── Shaders/
+    ├── GlobalIllumination/*.slang             58 Slang units, 39 SPIR-V entries (environment bridge and GPU picking)
+    └── ParticleSimulation/*.slang             particle, fibre and lensing raster units
 EngineContent/ShaderArchives/
 ├── GlobalIllumination/                       stored SPIR-V of the port (39) + ShaderCompilation.json
-└── Environment/                              stored SPIR-V of PlanetaryAtmosphere (15) + ShaderCompilation.json
+├── Environment/                              stored SPIR-V of PlanetaryAtmosphere (15) + ShaderCompilation.json
+└── ParticleSimulation/                       30 stored SPIR-V entry points + ShaderCompilation.json
 Projects/Everest/Source/EverestSceneViewport  level records → SceneViewport
+Projects/Everest/Source/EverestWorkspace     Particles record → ParticleSpace → transparent viewport layer
 ```
 
 ## How it is wired
@@ -476,7 +508,7 @@ never an overestimate otherwise, so a march never steps through a stretched copy
 
 **How edits reach the renderer.** `Projects/Everest/Source/EverestSceneGeometry` binds each record to its occupants (or
 to an engine shape) and evaluates its transform and modifier stack (`Scene/GeometryLayout`) into occupant placements.
-`Rendering/GlobalIllumination/OccupantRelocation` (beyond the demo) applies them between refreshes:
+`Rendering/GlobalIllumination/SubjectRelocation` (beyond the demo) applies them between refreshes:
 
 - the occupant profiles are rewritten, and a moved occupant carries its motion for one refresh (motion vectors);
 - a reserve occupant takes its template's shape, cards and profile first;
@@ -588,7 +620,7 @@ now asks the GPU which object is drawn under the pointer.
   space is stretched about the clicked pixel, so each texel is one screen pixel around it and keeps the nearest
   occupant. The pick reads the image's own vertex stream and occupant profiles, so it works with the cluster,
   virtualized-geometry and analytic paths alike: one submission and a 324-byte readback per click.
-- **The record:** `SceneGeometryOccupancy::QueryOwner` maps the occupant to the Geometry record that shows it (every
+- **The record:** `SceneSubjectPlacement::QueryOwner` maps the occupant to the Geometry record that shows it (every
   part and copy, the reserve's included; the ground is the Proving ground's). The clicked pixel's record wins. Where
   the pixel shows the sky or nothing a record owns, the nearest record within 4 pixels is taken, so thin poles stay
   easy to hit.
@@ -629,7 +661,7 @@ in double precision:
   - `Images/GizmoSpaceFrontier.jpg` shows the Control tower selected, with `Images/GizmoSpaceFrontierDetail.jpg` at 3×.
 - **Bridge:** the bridge from the level to this renderer is `Frontier/Extensions/Rendering/RenderingExtension`
   (formerly `EverestSceneViewport`).
-  - `SceneGeometryOccupancy` was formerly `EverestSceneGeometry`.
+  - `SceneSubjectPlacement` was formerly `EverestSceneGeometry`.
   - The viewport contract is `Frontier/Engine/Interface/SceneViewportPresentation.h`.
 - **Simulate:** the viewport bar's Play button (Alt+S) runs the level's PhysicsSpace; see `Exhibits/Physics/README.md`.
 - **Capture:** `SceneViewportWorkspaceCapture … 3 "Geometry:Control tower"` selects a record by name.
@@ -722,8 +754,8 @@ python3 Exhibits/SceneViewport/Code/ExportProvingGround.py <capture> EngineConte
 # Offscreen images (SwiftShader: FRONTIER_VULKAN_DRIVER / VK_ICD_FILENAMES as in the parity README)
 build/SceneViewportValidation EngineContent/ShaderArchives/GlobalIllumination EngineContent/ShaderArchives/Environment \
     EngineContent/EnvironmentArchives/ProvingGround EngineContent/EnvironmentArchives/CelestialMaps out low 480 270 12
-# Everest workspace with the live viewport
-build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/EverestLiveSceneViewport.png 12
+# Everest workspace with the live scene and transparent particle overlay
+build/SceneViewportWorkspaceCapture EngineContent Projects/Everest EngineContent/ShaderArchives out/EverestParticleOverlay.png 12
 # The fifteen inspection views (then 1 10 14 at the end for the virtualized cluster views; view 6 on the GTX path:
 # … 0 6 6 1 0; reflections with indirect GI off: … high 640 360 6 0 5 5 0 1, then 0 0 0 0 1 for the final image)
 build/InspectionViewCapture EngineContent/ShaderArchives/GlobalIllumination EngineContent/ShaderArchives/Environment \

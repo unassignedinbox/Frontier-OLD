@@ -9,12 +9,14 @@
 // 📝 The same CPU scene (ParticleSpace) and GPU sequence (ParticleSimulationSequence) the editor runs. Each capture starts a fresh
 //    scene, advances it by fixed 1/60 s ticks and writes <capture>.png plus a line of figures to Captures.tsv.
 
+#include "Engine/PhysicalDynamics/ForceField.h"
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.h"
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
 #include "Frontier/Engine/Rendering/ParticleSimulation/ParticleSimulationSequence.h"
 
 #include <stb_image_write.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -34,6 +36,7 @@ struct CaptureScene
     std::vector<std::string>                     Presets;   // empty = the library's default scene
     double                                       Seconds;
     std::function<void(ParticleSpace&)>          Arrange;
+    bool                                         SharedForceField = false;
 };
 
 } // namespace
@@ -53,7 +56,7 @@ int main(int ArgumentCount, char** Arguments)
 
     ParticleEffectLibrary Library;
     std::string           Diagnostic;
-    if (!Library.Decode(Root / "EngineContent/ParticleArchives/ParticleLibrary.toml", Diagnostic))
+    if (!Library.Decode(Root / "EngineContent/ParticleArchives/ParticleLibrary.particlespace", Diagnostic))
     {
         std::fprintf(stderr, "🔴 library: %s\n", Diagnostic.c_str());
         return 1;
@@ -71,9 +74,22 @@ int main(int ArgumentCount, char** Arguments)
     {
         return [=](ParticleSpace& Space) { Space.Camera = { Yaw, Pitch, Distance, Target }; Space.Lightning.Automatic = false; };
     };
+    ForceFieldSpace NativeField;
+    PlanetaryWindProfile NativeWind;
+    NativeWind.BearingRadians = 0.4;
+    NativeWind.SpeedMetersPerSecond = 5.0;
+    NativeWind.GustAmplitude = 0.0;
+    NativeWind.ShearPerKilometer = 0.0;
+    NativeWind.VeerRadiansPerKilometer = 0.0;
+    NativeWind.SwirlStrength = 0.0;
+    NativeWind.MesoscaleStrength = 0.0;
+    NativeField.SetWindProfile(NativeWind);
+    NativeField.SetElapsedSeconds(0.0);
+
     const std::vector<CaptureScene> Scenes = {
         { "DefaultScene", {}, 2.5, Overview },
         { "WindArrows", {}, 1.5, [](ParticleSpace& Space) { Space.Wind.ShowArrows = true; Space.Camera = { 0.6, 0.55, 15.0, { 0.0, 1.0, 0.0 } }; } },
+        { "SharedForceField", { "leaves" }, 1.2, Close(0.6, 0.2, 12.0, { 0.0, 2.0, 0.0 }), true },
         { "TornadoDebris", { "tornado" }, 4.0, Close(0.4, 0.22, 11.0, { 0.0, 2.0, -2.0 }) },
         { "Fireworks", { "fireworks" }, 3.0, Close(0.6, 0.12, 14.0, { 0.0, 3.5, 0.0 }) },
         { "FireAndSmoke", { "fire", "smoke" }, 3.0, Close(0.5, 0.18, 7.0, { 0.0, 1.4, 0.0 }) },
@@ -100,15 +116,17 @@ int main(int ArgumentCount, char** Arguments)
         ParticleSpace Space;
         Space.ConstructDefault(Library, Capture.Presets.empty() ? nullptr : &Capture.Presets);
         if (Capture.Arrange) Capture.Arrange(Space);
+        const IFieldSampler* SharedFieldSampler = Capture.SharedForceField ? &NativeField : nullptr;
+        if (Capture.SharedForceField) Space.LevelWind.Follow = true;
         const uint32_t Refreshes = static_cast<uint32_t>(Capture.Seconds * 60.0 + 0.5);
         double         Total     = 0.0;
         bool           Healthy   = true;
         for (uint32_t Refresh = 0; Refresh < Refreshes && Healthy; ++Refresh)
         {
             // 📝 The first tick of a scene carries no time, as the prototype's first frame.
-            const ParticleRefreshPlan Plan  = Space.Advance(Refresh == 0 ? 0.0 : 1.0 / 60.0, Width, Height);
+            const ParticleRefreshPlan Plan  = Space.Advance(Refresh == 0 ? 0.0 : 1.0 / 60.0, Width, Height, nullptr, SharedFieldSampler);
             const auto                Begun = std::chrono::steady_clock::now();
-            Healthy = Sequence.Refresh(Plan, Space.Effects, &Diagnostic);
+            Healthy = Sequence.Refresh(Plan, Space.Effects, &Diagnostic, SharedFieldSampler);
             Total += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Begun).count();
         }
         if (!Healthy)
@@ -118,14 +136,28 @@ int main(int ArgumentCount, char** Arguments)
             continue;
         }
         // 📝 A last refresh that reads every census, so the figures belong to the captured image.
-        ParticleRefreshPlan Final = Space.Advance(1.0 / 60.0, Width, Height);
+        ParticleRefreshPlan Final = Space.Advance(1.0 / 60.0, Width, Height, nullptr, SharedFieldSampler);
         for (ParticleRefreshJob& Job : Final.Jobs) Job.ReadCensus = Job.Simulate;
         Final.ProbeCell = Space.ResolveProbeCell();
-        if (!Sequence.Refresh(Final, Space.Effects, &Diagnostic))
+        if (!Sequence.Refresh(Final, Space.Effects, &Diagnostic, SharedFieldSampler))
         {
             std::printf("  🔴 %s: %s\n", Capture.Name, Diagnostic.c_str());
             ++Failures;
             continue;
+        }
+        if (Capture.SharedForceField)
+        {
+            std::vector<float> Lattice;
+            const bool Read = Sequence.ReadWindLattice(Lattice, &Diagnostic);
+            const bool HasFlow = Read && std::any_of(Lattice.begin(), Lattice.end(), [](float Value) { return std::fabs(Value) > 0.01f; });
+            const bool NoDuplicateLocalFlow = std::all_of(Final.Components.begin(), Final.Components.end(), [](float Value) { return Value == 0.0f; });
+            if (!Final.SharedFieldActive || !HasFlow || !NoDuplicateLocalFlow)
+            {
+                std::printf("  🔴 %s: native field lattice integration failed (%s)\n", Capture.Name,
+                            Read ? "missing field flow or duplicate local flow" : Diagnostic.c_str());
+                ++Failures;
+                continue;
+            }
         }
         std::vector<uint8_t> Rgba;
         if (!Sequence.ReadPresentedImage(Rgba, &Diagnostic) || Rgba.size() < static_cast<size_t>(Width) * Height * 4u)

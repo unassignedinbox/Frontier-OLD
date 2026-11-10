@@ -187,7 +187,10 @@ if(SOLIDARC_WINDOWED_HOST AND TARGET glfw)
     target_link_libraries(SolidArc PRIVATE FrontierSolidArcUI glfw)
     if(WIN32)
         set_target_properties(SolidArc PROPERTIES WIN32_EXECUTABLE ON)
-        target_link_options(SolidArc PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/ENTRY:mainCRTStartup>)
+        # ClangCL uses the MSVC frontend but reports CXX_COMPILER_ID=Clang; both need the GUI-subsystem main entry point.
+        if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            target_link_options(SolidArc PRIVATE /ENTRY:mainCRTStartup)
+        endif()
         # 📝 Version details (Package/SolidArcWorkspace.rc); no icon and no custom manifest. MSVC only, like the
         #    Frontier and TextureWorkspace version resources: the Zig cross-toolchain has no resource compiler.
         if(MSVC)
@@ -195,7 +198,7 @@ if(SOLIDARC_WINDOWED_HOST AND TARGET glfw)
             target_sources(SolidArc PRIVATE "${SOLIDARC_NATIVE}/Package/SolidArcWorkspace.rc")
         endif()
         # 📝 MinGW-style toolchains (the Zig cross-build) keep a console window unless the subsystem is named explicitly.
-        if(NOT MSVC)
+        if(NOT MSVC AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             target_link_options(SolidArc PRIVATE "-Wl,--subsystem,windows")
         endif()
     endif()
@@ -686,6 +689,19 @@ set_tests_properties(SolidArcShortcutWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(SolidArcVariableBlendWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(SolidArcWorkspaceWalkthrough PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_SETUP SolidArcAutosave)
 set_tests_properties(SolidArcRecoveryWalkthrough PROPERTIES SKIP_RETURN_CODE 77 FIXTURES_REQUIRED SolidArcAutosave)
+# 📝 GPU-gated walkthroughs: SolidArcCapture exits 77 without a Vulkan device, which ctest reports as
+#    Skipped rather than Failed (same convention as the walkthroughs above).
+set_tests_properties(SolidArcFillWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcFilletDragWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcOrientWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcExtrudeManifoldWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcExtrudeAxisWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcEdgePathWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcWrapWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcImprintWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcResponsivenessWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcEdgeStrokeWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(SolidArcRevolveSweepWalkthrough PROPERTIES SKIP_RETURN_CODE 77)
 
 include("${SOLIDARC_EXHIBIT}/Integration/Validation.cmake")
 

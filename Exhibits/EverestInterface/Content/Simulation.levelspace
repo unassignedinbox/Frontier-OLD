@@ -11,7 +11,7 @@ name = "Render settings"
 enabled = true
 hardware_ray_query = true          # RTX ReSTIR path tracer; false: GTX distance-field GI
 quality_tier = 2                   # 0 low, 1 medium, 2 high
-analytic_illumination = false      # the fast closed-form preview instead of the global illumination (a debug view)
+direct_shading = false             # the fast direct-lighting preview instead of global illumination (a debug view)
 # Resolution & sampling
 render_scale = 1.0                 # viewport scale, under the grade's pixel ceiling
 trace_scale = 2                    # GI and reflections: 1 full, 2 half, 4 quarter

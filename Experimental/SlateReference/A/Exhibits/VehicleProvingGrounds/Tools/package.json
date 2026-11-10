@@ -10,10 +10,7 @@
     "validate:effects": "HOOKS=VehicleEffectsHooks.mjs node HeadlessHarness.mjs .. 36 \"?capture=1\"",
     "validate:slate": "HOOKS=SlateIntegrationHooks.mjs node HeadlessHarness.mjs .. 48 \"?capture=1\"",
     "validate:orbit": "HOOKS=VehicleOrbitHooks.mjs node HeadlessHarness.mjs .. 30 \"?capture=1\"",
-    "validate:garden": "HOOKS=GardenIorHooks.mjs node HeadlessHarness.mjs .. 12 \"?level=inversion&capture=1&screentraces&triangles\"",
-    "validate:inversion": "HOOKS=InversionArenaHooks.mjs node HeadlessHarness.mjs .. 3920 \"?level=inversion&capture=1\"",
-    "validate:city": "HOOKS=CityPursuitHooks.mjs node HeadlessHarness.mjs .. 36 \"?level=city&capture=1\"",
-    "validate:dday": "HOOKS=DDayAssaultHooks.mjs node HeadlessHarness.mjs .. 56 \"?level=dday&capture=1\""
+    "validate:garden": "HOOKS=GardenIorHooks.mjs node HeadlessHarness.mjs .. 12 \"?capture=1&screentraces&triangles\""
   },
   "devDependencies": {
     "webgpu": "0.6.2"

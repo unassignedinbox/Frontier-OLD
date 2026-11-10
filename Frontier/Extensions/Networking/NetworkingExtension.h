@@ -1,13 +1,14 @@
 /*==========================================================================================================================================
                                                            NETWORKINGEXTENSION.H
 ==========================================================================================================================================*/
-// 🧩 The bridge between a level and its peers: the host replicates its WorldSpace records into the NetworkingSpace, a transport
-//    carries the messages, and a client absorbs them into its own WorldSpace. The transport is an interface: the loopback here
-//    (one process, both ends) now; an EOSExtension / EpicAdapter (Epic Online Services) implements it later.
+// 🧩 The bridge between a level and its peers: the host replicates WorldSpace records and ReplicationProfile-enabled domains
+//    through an INetworkTransport (LoopbackTransport, EosRelayAdapter, or PhotonRelayAdapter), and clients absorb them.
 
 #pragma once
 
+#include "Frontier/Extensions/Networking/NetworkTransport.h"
 #include "Frontier/Extensions/Networking/NetworkingSpace.h"
+#include "Frontier/Extensions/Networking/ReplicationExchange.h"
 
 #include "Frontier/Engine/Scene/RecordToken.h"
 
@@ -22,40 +23,13 @@ namespace Frontier
 
 class WorldSpace;
 
-// 📝 The wire form of a message: a 24-byte little-endian header (sender, receiver, topic, sequence, payload length) and the
-//    payload. Every transport sends messages in this form.
-[[nodiscard]] std::string EncodeNetworkMessage(const NetworkMessage& Message);
-bool                      DecodeNetworkMessage(std::string_view Bytes, NetworkMessage& Message);
-
-class NetworkTransport
-{
-  public:
-    virtual ~NetworkTransport() = default;
-
-    virtual bool                                      Send(const NetworkMessage& Message) = 0;
-    [[nodiscard]] virtual std::vector<NetworkMessage> Receive()                           = 0;
-    [[nodiscard]] virtual const char*                 QueryName() const noexcept          = 0;
-};
-
-// 📝 Two ends in one program: what one sends, the other receives, in the wire form a socket would carry.
-class LoopbackTransport final : public NetworkTransport
-{
-  public:
-    static void Connect(LoopbackTransport& First, LoopbackTransport& Second) noexcept;
-
-    bool                                      Send(const NetworkMessage& Message) override;
-    [[nodiscard]] std::vector<NetworkMessage> Receive() override;
-    [[nodiscard]] const char*                 QueryName() const noexcept override { return "Loopback"; }
-
-  private:
-    LoopbackTransport*       Partner = nullptr;
-    std::vector<std::string> Packets;
-};
-
 class NetworkingExtension
 {
   public:
-    NetworkingExtension(NetworkingSpace& Space, NetworkTransport& Transport) noexcept : Space(Space), Transport(Transport) {}
+    NetworkingExtension(NetworkingSpace& Space, INetworkTransport& Transport) noexcept
+        : Space(Space), Transport(Transport)
+    {
+    }
 
     // 📝 Introduces the local peer to the others (name and role).
     void Greet();
@@ -63,6 +37,10 @@ class NetworkingExtension
     // 📝 Host: every record whose level TOML changed since the last call leaves as one RecordConfiguration message; records gone from
     //    the level leave as RecordRemoval. Returns the messages posted.
     size_t Replicate(const WorldSpace& World);
+
+    // 📝 Selective ReplicationProfile-driven replication pass (only records carrying an active replication subtable, throttled
+    //    to SnapshotIntervalSec via ReplicationProfile frequency checks or fallback cadence).
+    size_t ReplicateFiltered(const WorldSpace& World, double DeltaSeconds);
 
     // 📝 Moves posted messages to the transport and received ones into the space.
     void Exchange();
@@ -75,9 +53,10 @@ class NetworkingExtension
 
   private:
     NetworkingSpace&                          Space;
-    NetworkTransport&                         Transport;
-    std::unordered_map<uint64_t, std::string> Sent;      // host record token → the payload last sent
-    std::unordered_map<uint64_t, RecordToken> Matched;   // host record token → local record
+    INetworkTransport&                        Transport;
+    std::unordered_map<uint64_t, std::string> Sent;       // host record token -> last payload sent
+    std::unordered_map<uint64_t, RecordToken> Matched;    // host record token -> local record
+    double                                    FilterTimerSec_ = 0.0;
 };
 
 } // namespace Frontier

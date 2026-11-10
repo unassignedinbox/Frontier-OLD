@@ -56,53 +56,17 @@ export const SpawnPoint = Object.freeze({ Position: [-40.0, 0.0], Yaw: 0.0 });
 //                                                   TERRAIN QUERIES
 //------------------------------------------------------------------------------------------------------------------------
 
-let CourseReliefEnabled = true;
-
-let ExcavationCutouts = [];
-
-export function AssignCourseReliefEnabled(Enabled)
-{
-    CourseReliefEnabled = Boolean(Enabled);
-}
-
-export function QueryCourseReliefEnabled()
-{
-    return CourseReliefEnabled;
-}
-
-export function AssignExcavationCutouts(Cutouts = [])
-{
-    ExcavationCutouts = Array.isArray(Cutouts) ? Cutouts.map((Box) => Box.slice()) : [];
-}
-
-export function QueryExcavationCutouts()
-{
-    return ExcavationCutouts;
-}
-
 export function WithinKerb(PositionX, PositionY)
 {
-    if (!CourseReliefEnabled)
-        return false;
     for (const [X0, X1, Y0, Y1] of KerbConstants.Strips)
         if (PositionX >= X0 && PositionX <= X1 && PositionY >= Y0 && PositionY <= Y1)
             return true;
     return false;
 }
 
-// 📝 CourseHeight(): kerbs, then the ramp wedge (dropping to zero past the crest so the car launches); flat elsewhere,
-//    or excavated below grade inside subterranean tunnel portals (ExcavationCutouts: [MinX, MinY, MaxX, MaxY, FloorZ, MaxZ]).
-export function ResolveCourseHeight(PositionX, PositionY, PositionZ = Infinity)
+// 📝 CourseHeight(): kerbs, then the ramp wedge (dropping to zero past the crest so the car launches); flat elsewhere.
+export function ResolveCourseHeight(PositionX, PositionY)
 {
-    for (let Index = 0; Index < ExcavationCutouts.length; ++Index)
-    {
-        const Cutout = ExcavationCutouts[Index];
-        const CeilingLimit = Cutout.length > 5 ? Cutout[5] : Infinity;
-        if (PositionX >= Cutout[0] && PositionX <= Cutout[2] && PositionY >= Cutout[1] && PositionY <= Cutout[3] && PositionZ <= CeilingLimit)
-            return Cutout[4];
-    }
-    if (!CourseReliefEnabled)
-        return 0.0;
     const C = CourseConstants;
     if (WithinKerb(PositionX, PositionY))
         return KerbConstants.Height;
@@ -114,8 +78,6 @@ export function ResolveCourseHeight(PositionX, PositionY, PositionZ = Infinity)
 // 📝 CourseNormal(): central differences over ±0.15 m.
 export function ResolveCourseNormal(PositionX, PositionY)
 {
-    if (!CourseReliefEnabled)
-        return [0.0, 0.0, 1.0];
     const Step = 0.15;
     const SlopeX = (ResolveCourseHeight(PositionX + Step, PositionY) - ResolveCourseHeight(PositionX - Step, PositionY)) / (2.0 * Step);
     const SlopeY = (ResolveCourseHeight(PositionX, PositionY + Step) - ResolveCourseHeight(PositionX, PositionY - Step)) / (2.0 * Step);

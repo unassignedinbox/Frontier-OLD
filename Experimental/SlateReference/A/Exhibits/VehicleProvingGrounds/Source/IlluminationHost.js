@@ -17,7 +17,7 @@ import { TyreMarkDepot, TyreMarkLayout } from "./TyreMarkDepot.js";
 import { OccupantDistanceSpace } from "./OccupantDistanceSpace.js";
 import { SceneDistanceSpace, ResolveMovedBounds } from "./SceneDistanceSpace.js";
 import { RayTracingSpace } from "./RayTracingSpace.js";
-import { LevelCatalog, ResolveLevelDescriptor } from "./LevelStructure.js";
+import { ResolveLevelPlacements } from "./LevelStructure.js";
 import { SurfaceCardDepot } from "./SurfaceCardDepot.js";
 import { AtmosphereIntegrator } from "./AtmosphereIntegrator.js";
 import { ShadowProjection } from "./ShadowProjection.js";
@@ -28,7 +28,6 @@ import { VarianceIntegrator } from "./VarianceIntegrator.js";
 import { DisplayProjection } from "./DisplayProjection.js";
 import { HardwareMetrics } from "./HardwareMetrics.js";
 import { ComposeTimingLog as ComposeTimingLogSnapshot } from "./TimingLog.js";
-import { CameraMotionBlur } from "./CameraMotionBlur.js";
 import { EditorShell } from "./EditorShell.js";
 import { LightingPresets } from "./InspectorPages.js";
 import { OverlayDock, OverlayKeys } from "./OverlayDock.js";
@@ -39,8 +38,7 @@ import { ConeSequence } from "./ConeSequence.js";
 import { EffectSequence } from "./EffectSequence.js";
 import { RecoveryDirector, RecoveryReasons } from "./RecoveryDirector.js";
 import { TrainingSequence } from "./TrainingSequence.js";
-import { SpawnPoint, ResolveCourseHeight, AssignCourseReliefEnabled, AssignExcavationCutouts } from "./CourseStructure.js";
-import { BollardSequence } from "./BollardSequence.js";
+import { SpawnPoint, ResolveCourseHeight } from "./CourseStructure.js";
 import { TyreThermalSolver, IgnitionModes } from "./TyreThermalSolver.js";
 import { SmokeSequence, ConstructGasParameters } from "./SmokeSequence.js";
 import { VehicleSolver } from "./VehicleSolver.js";
@@ -48,15 +46,12 @@ import { DriverInputIntegrator } from "./DriverInputIntegrator.js";
 import { ChaseCameraSolver, FreeCameraSolver } from "./ChaseCameraSolver.js";
 import { ConstructViewTransform, ConstructPerspectiveTransform, MultiplyTransform, InvertTransform, NormalizeVector,
          SubtractVector, MultiplyAddVector, ProjectRadicalInverse, TransformPoint, TransformDirection, CrossVector, AddVector,
-         ScaleVector, LengthVector, RotateVector } from "./TransformProjection.js";
+         ScaleVector, LengthVector } from "./TransformProjection.js";
 import { VehicleVisualState, VehicleRecordBytes } from "./VehicleVisualState.js";
 import { ConstructHullPoints, HullPointRadius } from "./HullStructure.js";
 import { SparkSequence } from "./SparkSequence.js";
 import { CabinSequence } from "./CabinSequence.js?overlay=13";
 import { CabinLayout, CameraRigs, ResolveCockpitFrame, PlaceSeatedEye, ResolveTabletScale, ResolveHmiCamera } from "./CabinStructure.js";
-import { DrivingHudSequence } from "./DrivingHudSequence.js";
-import { PolicePursuitSequence } from "./PolicePursuitSequence.js";
-import { DDayAssaultSequence } from "./DDayAssaultSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
 
 
@@ -106,28 +101,17 @@ class IlluminationHost
     constructor()
     {
         const Query = new URLSearchParams(location.search);
-        const RequestedLevel = Query.get("level");
-        this.LevelKey = LevelCatalog.some((Entry) => Entry.Key === RequestedLevel) ? RequestedLevel : "dday";
-        this.LevelDescriptor = ResolveLevelDescriptor(this.LevelKey);
-        this.Spawn = this.LevelDescriptor.Spawn;
-        this.LevelZones = this.LevelDescriptor.Zones;
-        AssignCourseReliefEnabled(this.LevelDescriptor.Relief);
-        AssignExcavationCutouts(this.LevelDescriptor.PhysicsCutouts || []);
         this.GradeName = QualityGrades[Query.get("quality")] ? Query.get("quality") : "high";
         this.Grade = { ...QualityGrades[this.GradeName] };
         if (Query.has("scale"))
             this.Grade.RenderScale = Math.max(0.25, Math.min(2.0, Number(Query.get("scale"))));
         this.Settings = {
-            Level: this.LevelKey,
-            AeroGripScale: this.LevelDescriptor.AeroGrip,
             Inspection: Number(Query.get("inspection") || 0), DistanceInspection: 1, InsetEnabled: false, SliceHeight: 0.6,
             HudVisible: false, PanelVisible: true,
             SmokeEnabled: true, SmokeResolution: 2, IgnitionMode: 0, ThermalGrip: false, LineLock: true,
             TyreMarks: true, TyreMarkStrength: 1.0,
             Gas: ConstructGasParameters(),
-            SunElevation: this.LevelKey === "dday" ? 21.0 : 38.0,
-            SunAzimuth: this.LevelKey === "dday" ? 118.0 : 145.0,
-            SolarIlluminance: 12.0, SkyScale: 1.0, EmissionScale: 1.0,
+            SunElevation: 38.0, SunAzimuth: 145.0, SolarIlluminance: 12.0, SkyScale: 1.0, EmissionScale: 1.0,
             ExposureCompensation: 0.0, AutoExposure: true, DirectShadow: true,
             Indirect: true, ScreenTraversal: Query.has("screentraces"), TemporalReuse: true, SpatialReuse: true, VisibilityReuse: true,
             RadianceRefresh: true,
@@ -156,12 +140,6 @@ class IlluminationHost
         this.FrameDurationCursor = 0;
         this.Keys = new Set();
         this.FrameIndex = 0;
-        this.ActiveCamera = { Name: "Vehicle Proving Grounds camera", MotionBlur: new CameraMotionBlur() };
-        this.PerformanceCapture = { Enabled: Query.get("perfLog") === "1" };
-        this.PerformanceWindowSeconds = 0.0;
-        this.PerformanceWindowSamples = this.ConstructPerformanceSamples();
-        this.PerformanceLastWindowSamples = null;
-        this.OptimizationRestorePoint = null;
         this.FreeCamera = false;
         this.Ready = false;
         this.ScriptedInput = null;
@@ -206,11 +184,8 @@ class IlluminationHost
         this.Shaders = new ShaderInterchange(this.Exchange, "Shader");
         await this.Shaders.RetrieveSources(ShaderSources);
         this.Scene = new SceneStructure();
-        await this.Scene.ConstructScene("Archive", this.StressCapacity, this.LevelKey);
+        await this.Scene.ConstructScene("Archive", this.StressCapacity);
         this.Vehicle = new VehicleSolver(this.Scene.QueryObstacleBounds());
-        this.Vehicle.Surfaces = this.LevelDescriptor.Surfaces;
-        this.Vehicle.AeroGripScale = this.Settings.AeroGripScale;
-        this.Vehicle.Respawn([this.Spawn.Position[0], this.Spawn.Position[1], VehicleGeometry.CoMHeight + 0.02], this.Spawn.Yaw);
         // 📝 The body's own hull: ~700 points ray-cast from its facets (HullStructure.js) meet the course and the boxes.
         this.Vehicle.AssignHullPoints(ConstructHullPoints(this.Scene.FacetSets[this.Scene.VehicleBodySet].Facets), HullPointRadius);
         this.PositionVehicle();
@@ -231,7 +206,6 @@ class IlluminationHost
         this.OccupantRecords = this.Exchange.ConstructRecords(this.Scene.Occupants.length * OccupantStride,
                                                               GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Occupant records");
         this.Lighting        = new LightingSystem();
-        this.Lighting.ScrollingGrid = this.LevelKey === "inversion" || this.LevelKey === "dday" || this.LevelKey === "city";
 
         // ② per-occupant distance volumes (the analogue of mesh distance fields), transferred on the device
         this.Volumes = new OccupantDistanceSpace(this.Exchange, this.Shaders);
@@ -253,61 +227,9 @@ class IlluminationHost
         this.RayTracing = new RayTracingSpace(this.Exchange);
         this.RayTracing.ConstructResources(this.Scene);
 
-        this.StreetLampPoles = [];
-        for (let Index = 0; Index < this.LevelDescriptor.Placements().length; ++Index)
-        {
-            const P = this.LevelDescriptor.Placements()[Index];
-            if (P.Shape === "PoleHead")
-            {
-                this.StreetLampPoles.push({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] });
-            }
-            else if (P.Shape === "WorkLightTower")
-            {
-                this.StreetLampPoles.push({
-                    X: P.Position[0],
-                    Y: P.Position[1],
-                    Z: P.Position[2] + 4.45,
-                    Colour: [1.0, 0.66, 0.16],
-                    Intensity: 82.0,
-                    Reach: 38.0
-                });
-            }
-            else if (P.Shape === "AmberBeaconPost")
-            {
-                this.StreetLampPoles.push({
-                    X: P.Position[0],
-                    Y: P.Position[1],
-                    Z: P.Position[2] + 1.25,
-                    Colour: [1.0, 0.52, 0.05],
-                    Intensity: 34.0,
-                    Reach: 18.0,
-                    PulseFreq: 5.2,
-                    Phase: Index * 0.7
-                });
-            }
-            else if (P.Shape === "StationCanopyLamp")
-            {
-                this.StreetLampPoles.push({
-                    X: P.Position[0],
-                    Y: P.Position[1],
-                    Z: P.Position[2] - 0.12,
-                    Colour: P.Name.includes("EV") ? [0.76, 0.94, 1.0] : [1.0, 0.92, 0.80],
-                    Intensity: 68.0,
-                    Reach: 28.0
-                });
-            }
-            else if (P.Shape === "FactoryHighBayLamp")
-            {
-                this.StreetLampPoles.push({
-                    X: P.Position[0],
-                    Y: P.Position[1],
-                    Z: P.Position[2] - 0.16,
-                    Colour: [0.95, 0.96, 1.0],
-                    Intensity: 74.0,
-                    Reach: 34.0
-                });
-            }
-        }
+        this.StreetLampPoles = ResolveLevelPlacements()
+            .filter((P) => P.Shape === "PoleHead")
+            .map((P) => ({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] }));
         this.Constants = {
             MaximumTraversalSteps: { Type: "u32", Value: this.Grade.Steps },
             ScreenTraversalSteps:  { Type: "u32", Value: this.Grade.ScreenSteps },
@@ -354,43 +276,17 @@ class IlluminationHost
         this.ReportProgress("Building the scene distance field cascades", 0.70);
         this.Distance = new SceneDistanceSpace(this.Exchange, this.Shaders, { ClipCount: 4, Resolution: this.Grade.ClipResolution,
                                                                              FinestVoxel: this.Grade.FinestVoxel, BandVoxels: 6, HitFraction: 0.2 });
-        this.Distance.Cutouts = this.LevelDescriptor.DistanceCutouts || [];
         await this.Distance.ConstructResources(this.Volumes.TextureView, this.OccupantRecords);
         this.Distance.UploadDistanceList(this.Scene.DistanceList);
         await this.Volumes.ConstructFragmentProgram();
         this.Stress = new StressSequence(this);
         // 📝 The rigid-body world every loose thing shares: debris and cones; the car's wheels can ride heavy pieces.
-        this.Bodies = await JoltWorld.Create({
-            CourseRelief: this.LevelDescriptor.Relief,
-            TerrainHulls: this.LevelDescriptor.TerrainHulls
-        });
+        this.Bodies = await JoltWorld.Create();
         this.Bodies.AssignObstacles(this.Scene.QueryObstacleBounds());
         this.Vehicle.Support = this.Bodies;
         this.Cones = new ConeSequence(this);
-        this.Bollards = new BollardSequence(this);
-        this.Collapse = this.Scene.Collapse;
-        this.Trams = this.Scene.Trams;
-        if (this.Trams)
-            this.Trams.RegisterDynamicObstacles(this.Vehicle.Obstacles);
-        this.ServiceStations = this.Scene.ServiceStations;
-        if (this.ServiceStations)
-            this.ServiceStations.OnAnnounce = (Message) => this.Shell?.Announce(Message);
-        this.TrafficLights = this.Scene.TrafficLights;
-        if (this.TrafficLights)
-        {
-            this.TrafficLights.Advance(0.0);
-            this.UploadTrafficLightOccupants();
-        }
-        this.RoadEditor = this.Scene.RoadEditor;
-        if (this.RoadEditor)
-            this.RoadEditor.AttachHost(this);
         this.ReportProgress("Baking fracture patterns", 0.72);
         this.Fracture = new FractureSequence(this);
-        this.DrivingHud = new DrivingHudSequence(this);
-        this.Police = new PolicePursuitSequence(this);
-        this.UploadPoliceOccupants();
-        this.DDay = new DDayAssaultSequence(this);
-        this.UploadDDayOccupants();
 
         // ⑤ every remaining stage
         this.ReportProgress("Compiling lighting programs", 0.76);
@@ -451,7 +347,6 @@ class IlluminationHost
         this.Cards.CaptureCards(this.Scene, this.VertexRecords);
         this.Driver = new DriverInputIntegrator();
         this.Chase = new ChaseCameraSolver();
-        this.Chase.Surfaces = this.Vehicle?.Surfaces || this.LevelDescriptor.Surfaces || [];
         this.Orbit = new VehicleOrbitCamera();
         this.Flight = new FreeCameraSolver();
         this.Training = new TrainingSequence(this);
@@ -539,17 +434,6 @@ class IlluminationHost
             this.Cabin.Settings.SeeThroughGlass = !!this.Settings.SeeThroughGlass;
         else if (Key === "ClearSmoke")
             this.Smoke.Clear();
-        else if (Key === "Level")
-        {
-            const Query = new URLSearchParams(location.search);
-            Query.set("level", this.Settings.Level);
-            location.search = Query.toString();
-        }
-        else if (Key === "AeroGripScale")
-        {
-            if (this.Vehicle)
-                this.Vehicle.AeroGripScale = this.Settings.AeroGripScale;
-        }
         else if (Key === "Quality")
         {
             const Query = new URLSearchParams(location.search);
@@ -574,15 +458,6 @@ class IlluminationHost
     //    once (Instant — scripts and the harness).
     TeleportVehicle(Zone, Instant = false, Done = null)
     {
-        if (!Done && this.Training?.Active && this.Training.Active.Phase !== "armed")
-            this.Training.Cancel();
-        if (Zone?.Id === "trackI" && this.RoadEditor && this.RoadEditor.Project?.name !== "Spline & Highway Bridge Demo")
-        {
-            this.RoadEditor.DriveOnSelectedRoad();
-            if (Done)
-                Done();
-            return;
-        }
         const Destination = { Position: Zone.Position.slice(0, 2), Yaw: Zone.Yaw * Math.PI / 180.0 };
         if (this.FreeCamera)
             this.AssignCamera(false);
@@ -608,115 +483,6 @@ class IlluminationHost
         this.Scene.RetainOccupantTransform(this.Scene.VehicleOccupants.Body);
         for (const Wheel of this.Scene.VehicleOccupants.Wheels)
             this.Scene.RetainOccupantTransform(Wheel);
-        if (this.Collapse)
-            this.ResetCollapseDecks();
-        if (this.ServiceStations)
-            this.ResetServiceStations(false);
-    }
-
-    ResetServiceStations(ResetLevels = false)
-    {
-        if (!this.ServiceStations)
-            return;
-        this.ServiceStations.Reset(ResetLevels);
-        if (this.Scene.ServiceBlock && this.Scene.ServiceBlock.Count > 0 && this.OccupantRecords && this.Volumes)
-        {
-            const Block = this.Scene.ServiceBlock;
-            const Scalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
-            this.Exchange.Device.queue.writeBuffer(this.OccupantRecords, Block.First * OccupantStride, Scalars);
-        }
-    }
-
-    UploadTrafficLightOccupants()
-    {
-        if (!this.TrafficLights || !this.Scene.TrafficBlock || !this.OccupantRecords || !this.Volumes)
-            return;
-        const Device = this.Exchange.Device;
-        const Block = this.Scene.TrafficBlock;
-        if (Block.TotalCount > 0)
-        {
-            const HousingScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.HousingFirst, Block.TotalCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.HousingFirst * OccupantStride, HousingScalars);
-            const LensCount = Block.TotalCount * 4;
-            const LensScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.LensFirst, LensCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.LensFirst * OccupantStride, LensScalars);
-        }
-    }
-
-    UploadPoliceOccupants()
-    {
-        if (!this.Police || !this.Scene.PoliceBlock || !this.OccupantRecords || !this.Volumes)
-            return;
-        const Device = this.Exchange.Device;
-        const Block  = this.Scene.PoliceBlock;
-        if (Block.CruiserCount > 0)
-        {
-            const CruiserScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.CruiserFirst, Block.CruiserCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.CruiserFirst * OccupantStride, CruiserScalars);
-        }
-        if (Block.AerialFirst >= 0 && Block.AerialCount > 0)
-        {
-            const AerialScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.AerialFirst, Block.AerialCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.AerialFirst * OccupantStride, AerialScalars);
-        }
-    }
-
-    UploadDDayOccupants()
-    {
-        if (!this.DDay || !this.Scene.DDayBlock || !this.OccupantRecords || !this.Volumes)
-            return;
-        const Device = this.Exchange.Device;
-        const Block  = this.Scene.DDayBlock;
-        if (Block.TankHullFirst >= 0 && Block.TankHullCount > 0)
-        {
-            const HullScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.TankHullFirst, Block.TankHullCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.TankHullFirst * OccupantStride, HullScalars);
-        }
-        if (Block.DynamicFirst >= 0 && Block.DynamicCount > 0)
-        {
-            const DynScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.DynamicFirst, Block.DynamicCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.DynamicFirst * OccupantStride, DynScalars);
-        }
-    }
-
-    UploadCollapseOccupants()
-    {
-        if (!this.Collapse || !this.Scene.CollapseBlock || !this.OccupantRecords || !this.Volumes)
-            return;
-        const Device = this.Exchange.Device;
-        const Block = this.Scene.CollapseBlock;
-        if (Block.ProxyCount > 0)
-        {
-            const ProxyScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.ProxyFirst, Block.ProxyCount);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.ProxyFirst * OccupantStride, ProxyScalars);
-        }
-        if (Block.Count > 0)
-        {
-            const PieceScalars = this.Scene.EncodeOccupantRange(this.Volumes, Block.First, Block.Count);
-            Device.queue.writeBuffer(this.OccupantRecords, Block.First * OccupantStride, PieceScalars);
-        }
-    }
-
-    ResetCollapseDecks()
-    {
-        if (!this.Collapse)
-            return;
-        this.Collapse.ResetAllPoses();
-        this.UploadCollapseOccupants();
-    }
-
-    RebakeCollapseDecks(NewSeed = null)
-    {
-        if (!this.Collapse)
-            return 0;
-        const Seed = (NewSeed !== null && NewSeed !== undefined)
-            ? (NewSeed >>> 0)
-            : (((Math.random() * 0xFFFFFFFF) >>> 0) || 0xC011A95E);
-        this.Collapse.BakeAllSpans(Seed, this.Exchange.Device, this.VertexRecords);
-        this.UploadCollapseOccupants();
-        if (this.Shell)
-            this.Shell.Announce(`Collapse cracks rebaked · seed 0x${this.Collapse.SessionSeed.toString(16).toUpperCase()}`);
-        return this.Collapse.SessionSeed;
     }
 
     // 📝 While derezzed the car leaves the raster, the distance field and the card lists — and the debris ignores it.
@@ -855,18 +621,8 @@ class IlluminationHost
         if (this.Canvas.style) this.Canvas.style.touchAction = "none";
         window.addEventListener("keydown", (Event) =>
         {
-            this.ServiceStations?.Audio?.Unlock();
-            if (Event.target instanceof HTMLInputElement ||
-                Event.target instanceof HTMLSelectElement ||
-                Event.target instanceof HTMLTextAreaElement)
+            if (Event.target instanceof HTMLInputElement || Event.target instanceof HTMLSelectElement)
                 return;
-            if (this.RoadEditor?.ActiveWorkspace === "roadstudio")
-            {
-                if (this.RoadEditor.HandleStudioKeyDown(Event))
-                    return;
-                this.Keys.add(Event.code);
-                return;
-            }
             if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F8"].includes(Event.code))
                 Event.preventDefault();
             if (Event.code === "F8" || (Event.code === "KeyF" && !Event.repeat))
@@ -879,12 +635,6 @@ class IlluminationHost
                 this.ResetArena();
             if (Event.code === "KeyC" && !Event.repeat && !Event.ctrlKey && !Event.metaKey)
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
-            if (Event.code === "KeyU" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
-                this.DrivingHud?.CycleDisplayStyle();
-            if (Event.code === "KeyB" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
-                this.Police?.ToggleManualPursuit();
-            if (Event.code === "KeyG" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
-                this.Police?.ToggleSelfPlayMode();
             if (Event.code === "KeyI" && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
             {
                 if (this.Lighting)
@@ -906,12 +656,6 @@ class IlluminationHost
                     this.Cards?.InvalidateLighting();
                     this.PriorValid = false;
                 }
-            }
-            if (Event.code.startsWith("Digit") && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
-            {
-                const ZoneSlot = Number(Event.code.slice(5)) - 1;
-                if (ZoneSlot >= 0 && this.LevelZones && ZoneSlot < this.LevelZones.length)
-                    this.TeleportVehicle(this.LevelZones[ZoneSlot]);
             }
             for (const [Name, Code] of Object.entries(OverlayKeys))
                 if (Event.code === Code && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
@@ -936,7 +680,6 @@ class IlluminationHost
         };
         this.Canvas.addEventListener("pointerdown", (Event) =>
         {
-            this.ServiceStations?.Audio?.Unlock();
             Dragging = true;
             LastX = Event.clientX;
             LastY = Event.clientY;
@@ -1066,9 +809,8 @@ class IlluminationHost
     RespawnVehicle(Instant = false)
     {
         const Drill = this.Training ? this.Training.QueryActiveDrill() : null;
-        const BaseSpawn = this.Spawn || SpawnPoint;
         const Destination = Drill ? { Position: Drill.Teleport.Position.slice(), Yaw: Drill.Teleport.Yaw * Math.PI / 180.0 }
-                                  : { Position: BaseSpawn.Position.slice(0, 2), Yaw: BaseSpawn.Yaw };
+                                  : { Position: SpawnPoint.Position.slice(0, 2), Yaw: SpawnPoint.Yaw };
         // 📝 The rez puts fresh tyres on (RecoveryDirector → RestoreTyres); an instant respawn does it here.
         if (!Instant && this.Recovery && this.Recovery.Begin(RecoveryReasons.Respawn, Destination, () => { if (this.Training) this.Training.OnRespawn(); }))
             return;
@@ -1091,15 +833,6 @@ class IlluminationHost
                 this.Fracture.ReassembleProp(Prop);
                 Props++;
             }
-        if (this.Collapse)
-            this.ResetCollapseDecks();
-        if (this.ServiceStations)
-            this.ResetServiceStations(true);
-        if (this.DDay?.Enabled)
-        {
-            this.DDay.ResetMission(true);
-            this.UploadDDayOccupants();
-        }
         this.Shell.Announce(`Arena reset — ${Cones} cones, ${Props} props`);
     }
 
@@ -1194,14 +927,8 @@ class IlluminationHost
 
     ResolveCamera(Δτ)
     {
-        const SpecPose = !this.FreeCamera && this.Police ? this.Police.QuerySpectatorPose() : null;
         const Telemetry = this.Vehicle.QueryTelemetry();
-        const VehicleUp = RotateVector(this.Vehicle.Orientation, [0.0, 0.0, 1.0]);
-        const SurfaceContact = this.Vehicle.Wheels.some((Wheel) => Wheel.Contact);
-        if (SpecPose?.Position)
-            this.Chase.AdvanceChase(SpecPose.Position, SpecPose.Forward, SpecPose.Speed, Δτ, [0.0, 0.0, 1.0], true);
-        else
-            this.Chase.AdvanceChase(this.Vehicle.Position, this.Vehicle.QueryForward(), Telemetry.Speed, Δτ, VehicleUp, SurfaceContact);
+        this.Chase.AdvanceChase(this.Vehicle.Position, this.Vehicle.QueryForward(), Telemetry.Speed, Δτ);
         let Eye, Target, FieldOfView, Up = [0.0, 0.0, 1.0], Near = 0.05;
         const Rig = CameraRigs[this.Settings.CameraMode];
         if (this.FreeCamera)
@@ -1210,20 +937,6 @@ class IlluminationHost
             Eye = this.Flight.Eye;
             Target = MultiplyAddVector(Eye, this.Flight.ResolveForward(), 10.0);
             FieldOfView = this.Flight.FieldOfView;
-        }
-        else if (SpecPose?.Eye)
-        {
-            Eye = SpecPose.Eye;
-            Target = SpecPose.Target;
-            Up = SpecPose.Up;
-            FieldOfView = SpecPose.Fov;
-        }
-        else if (SpecPose?.Position)
-        {
-            Eye = this.Chase.Eye;
-            Target = this.Chase.Target;
-            Up = this.Chase.Up || [0.0, 0.0, 1.0];
-            FieldOfView = 62;
         }
         else if (Rig?.OrbitVehicle) {
             const View = this.Orbit.Resolve(this.Vehicle.Position, ResolveCourseHeight);
@@ -1258,7 +971,6 @@ class IlluminationHost
         {
             Eye = this.Chase.Eye;
             Target = this.Chase.Target;
-            Up = this.Chase.Up || [0.0, 0.0, 1.0];
             FieldOfView = 60; // speed widening is smoothed once below for all driving cameras
         }
         this.CameraMotion ||= new DrivingCameraMotion();
@@ -1318,9 +1030,6 @@ class IlluminationHost
             Features |= TemporalRestartBit;
         }
         if (this.Smoke.Resident && this.Settings.SmokeEnabled && !this.Omitted.has("Smoke")) Features |= 4096;
-        // 📝 The camera component's 8-bit strength occupies reserved feature bits 16–23; the rest of the frame record stays ABI-stable.
-        if (this.Settings.Inspection === 0)
-            Features |= Math.round(this.ActiveCamera.MotionBlur.ResolveStrength() * 255.0) << 16;
         Integers[103] = Features;
         Integers[104] = this.Settings.Inspection;
         Scalars[105] = this.Settings.TemporalTallyLimit;
@@ -1355,19 +1064,16 @@ class IlluminationHost
             requestAnimationFrame((Next) => this.AdvanceFrame(Next));
             return;
         }
-        const CpuFrameStart = performance.now();
-        const FrameDeltaMs = Math.max(0.0, Now - (this.PriorFrameTime || Now));
         const Δτ = Math.min(0.1, Math.max(0.0, (Now - this.LastTime) * 0.001));
         this.LastTime = Now;
         const Hud = document.getElementById("hud");
         if (Hud?.style) Object.assign(Hud.style, ResolveHudStyle(this.Settings));
         this.FrameSeconds = (this.FrameSeconds || Δτ) * 0.9 + Δτ * 0.1;
-        this.FrameDurations[this.FrameDurationCursor] = FrameDeltaMs;
+        this.FrameDurations[this.FrameDurationCursor] = (Now - (this.PriorFrameTime || Now)) || 0.0;
         this.FrameDurationCursor = (this.FrameDurationCursor + 1) % this.FrameDurations.length;
         this.PriorFrameTime = Now;
         const Device = this.Exchange.Device;
         const Parity = this.FrameIndex & 1;
-        const CpuUpdateStart = performance.now();
 
         // ① drive: keyboard (or a scripted command) through the input ramps into the vehicle solver
         const Keys = this.FreeCamera ? new Set(["Space"]) : this.Keys;
@@ -1378,35 +1084,15 @@ class IlluminationHost
             Command = { Throttle: 0.0, Brake: 0.0, Steer: 0.0, Handbrake: false };
         const Step = this.FixedStep ? this.FixedStep : Δτ;
         this.Vehicle.AssignAssists({ LineLock: this.Settings.LineLock });
-        if (this.Police?.ControlMode !== "selfplay" && this.DDay?.ControlMode !== "autopilot")
-        {
-            this.Recovery.Advance(Step);
-            this.Fracture.ResolveImpacts(this.Vehicle, Step);
-            this.Vehicle.Advance(Command, Step);
-            this.Vehicle.AdvanceTyreWear(Step);
-        }
-        const PoliceMoved = this.Police ? this.Police.Advance(Step) : false;
-        const DDayMoved   = this.DDay ? this.DDay.Advance(Step) : false;
+        this.Recovery.Advance(Step);
+        this.Fracture.ResolveImpacts(this.Vehicle, Step);
+        this.Vehicle.Advance(Command, Step);
+        this.Vehicle.AdvanceTyreWear(Step);
         const VehicleEvents = this.Vehicle.ResolveEvents();
         this.PositionVehicle();
         this.Bodies.Advance(Step, this.Vehicle);
         this.Fracture.Advance(Step, this.Vehicle);
         this.Cones.Advance(Step);
-        if (this.Bollards)
-            this.Bollards.Advance(Step);
-        const CollapseMoved = this.Collapse
-            ? this.Collapse.Advance(this.Vehicle.Position, this.Vehicle.LinearVelocity, Step, this.Sparks)
-            : false;
-        const TramsMoved = this.Trams
-            ? this.Trams.Advance(this.Vehicle, Step)
-            : false;
-        const ServiceMoved = this.ServiceStations
-            ? this.ServiceStations.Advance(this.Vehicle, Step, this.Sparks)
-            : false;
-        this.DrivingHud?.Advance(Step);
-        const TrafficLightsMoved = this.TrafficLights
-            ? this.TrafficLights.Advance(Step)
-            : false;
         this.Stress.Advance(Step);
         this.Effects.Advance(Step);
         this.Training.Advance(Step);
@@ -1428,7 +1114,7 @@ class IlluminationHost
             this.OnTyreShred(Wheel);
         this.Sparks.Settings.Enabled = this.Settings.Sparks;
         this.Sparks.Emit(VehicleEvents.Sparks, Step);
-        this.Sparks.Advance(Step, this.Vehicle.Obstacles, this.Bodies.Bodies, this.Vehicle.Surfaces);
+        this.Sparks.Advance(Step, this.Vehicle.Obstacles, this.Bodies.Bodies);
         Device.queue.writeBuffer(this.VehicleRecords, 0, this.VehicleVisual.EncodeRecord(this.QueryCabinHeader(), this.Vehicle.Wheels, this.Vehicle.Orientation));
         const Pumped = this.Cabin.Advance(Δτ, this.QueryTyreLive());
         if (Pumped !== null)
@@ -1438,10 +1124,6 @@ class IlluminationHost
         }
         const Emissions = this.Thermal.ResolveEmissions(Readings, Readings[0].Seconds);
         Emissions.push(...this.ResolveBurstPuffs(Step));
-        if (this.Collapse)
-            Emissions.push(...this.Collapse.QuerySmokeEmissions());
-        if (this.DDay)
-            Emissions.push(...this.DDay.QuerySmokeEmissions());
         if (this.Settings.TestPlume > 0)
             Emissions.push(this.ResolveTestPlume(this.Settings.TestPlume === 2));
         this.Marks.Advance(Readings, { Enabled: this.Settings.TyreMarks, Strength: this.Settings.TyreMarkStrength });
@@ -1468,36 +1150,10 @@ class IlluminationHost
             Gas: this.Settings.Gas, Readings, Thermal: this.Thermal });
         this.EncodeFrameRecord(Camera, Light);
         Device.queue.writeBuffer(this.OccupantRecords, 0, this.Scene.EncodeOccupantRecords(this.Volumes, this.Scene.DynamicCount));
-        if (CollapseMoved)
-            this.UploadCollapseOccupants();
-        if (TramsMoved && this.Scene.TramBlock && this.Scene.TramBlock.Count > 0)
-        {
-            const TramBlock = this.Scene.TramBlock;
-            const TramScalars = this.Scene.EncodeOccupantRange(this.Volumes, TramBlock.First, TramBlock.Count);
-            Device.queue.writeBuffer(this.OccupantRecords, TramBlock.First * OccupantStride, TramScalars);
-        }
-        if (ServiceMoved && this.Scene.ServiceBlock && this.Scene.ServiceBlock.Count > 0)
-        {
-            const ServiceBlock = this.Scene.ServiceBlock;
-            const ServiceScalars = this.Scene.EncodeOccupantRange(this.Volumes, ServiceBlock.First, ServiceBlock.Count);
-            Device.queue.writeBuffer(this.OccupantRecords, ServiceBlock.First * OccupantStride, ServiceScalars);
-        }
-        if (TrafficLightsMoved)
-            this.UploadTrafficLightOccupants();
-        if (PoliceMoved)
-            this.UploadPoliceOccupants();
-        if (DDayMoved)
-            this.UploadDDayOccupants();
 
         if (this.Lighting && this.LightRecords)
         {
-            const ActivePoles = [
-                ...this.StreetLampPoles,
-                ...(this.TrafficLights ? this.TrafficLights.QueryLightPoles() : []),
-                ...(this.Police ? this.Police.QueryDynamicLightRecords() : []),
-                ...(this.DDay ? this.DDay.QueryDynamicLightRecords() : [])
-            ];
-            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), ActivePoles, this.Clock);
+            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), this.StreetLampPoles);
             Device.queue.writeBuffer(this.LightRecords, 0, LightData);
             Device.queue.writeBuffer(this.ClusterRecords.Cells, 0, this.Lighting.ClusterCells);
             Device.queue.writeBuffer(this.ClusterRecords.Indices, 0, this.Lighting.ClusterIndices);
@@ -1515,10 +1171,8 @@ class IlluminationHost
         this.Distance.ScheduleInvalidation(this.Focus, ResolveMovedBounds(this.Scene, this.Distance.Frozen));
         this.Cards.ScheduleTiles(this.Settings.CardTileBudget);
         this.Shadow.ResolveCascades(Camera, Light.Direction);
-        const CpuSceneUpdateMs = performance.now() - CpuUpdateStart;
 
         // ④ record
-        const CpuCommandStart = performance.now();
         const Encoder = Device.createCommandEncoder({ label: `Frame ${this.FrameIndex}` });
         const Included = (Name) => !this.Omitted.has(Name);
         this.Atmosphere.RecordSkyView(Encoder, this.Settings.SolarIlluminance);
@@ -1584,11 +1238,7 @@ class IlluminationHost
             }
         }
         const Timed = this.Metrics.RecordResolve(Encoder);
-        const CommandBuffer = Encoder.finish();
-        const CpuCommandEncodeMs = performance.now() - CpuCommandStart;
-        const CpuSubmitStart = performance.now();
-        Device.queue.submit([CommandBuffer]);
-        const CpuQueueSubmitMs = performance.now() - CpuSubmitStart;
+        Device.queue.submit([Encoder.finish()]);
         this.FramesInFlight = (this.FramesInFlight || 0) + 1;
         Device.queue.onSubmittedWorkDone().then(() => { this.FramesInFlight--; });
         if (Timed)
@@ -1598,10 +1248,6 @@ class IlluminationHost
         this.PriorValid = true;
 
         this.PresentMeasurements(Now, Light);
-        this.DrivingHud?.Render(this.CameraState);
-        this.RoadEditor?.RenderViewportGizmos?.(this.CameraState);
-        const CpuCallbackMs = performance.now() - CpuFrameStart;
-        this.RecordPerformanceSample(FrameDeltaMs, FrameDeltaMs * 0.001, CpuCallbackMs, CpuSceneUpdateMs, CpuCommandEncodeMs, CpuQueueSubmitMs);
         this.FrameIndex++;
         requestAnimationFrame((Next) => this.AdvanceFrame(Next));
     }
@@ -1647,14 +1293,6 @@ class IlluminationHost
                 + (Telemetry.Burnout ? ` · BURNOUT ${(Math.abs(Telemetry.RearSpin) * 3.6).toFixed(0)} km/h wheelspin` : ""),
             `GDF bricks rewritten  ${Rewritten}${this.Distance.Frozen ? "  (frozen)" : ""} · card tiles ${this.Cards.ScheduledTiles}`
         ];
-        if (this.TrafficLights)
-        {
-            const NearSig = this.TrafficLights.QueryNearestSignal(this.Vehicle.Position);
-            if (NearSig && NearSig.Distance < 95.0)
-            {
-                Lines.push(`Intersection signal  ${NearSig.Name} (${NearSig.Distance.toFixed(0)} m) · ${NearSig.Aspect} ${NearSig.RemainingSeconds.toFixed(1)}s`);
-            }
-        }
         if (this.Stress.QueryActive() > 0)
             Lines.push(`Stress objects  ${this.Stress.QueryActive()} (${this.Stress.Moving.length} moving) · ${this.Scene.DrawRuns.length} draw runs`);
         if (this.Fracture.Metrics.ActiveFragments > 0)
@@ -1679,7 +1317,7 @@ class IlluminationHost
         if (Pressures.some((Line) => /burst|rim|leak/.test(Line)) || this.Sparks.Live > 0)
             Lines.push(`Tyres  ${Pressures.join("  ")}${this.Sparks.Live > 0 ? `  · ${this.Sparks.Live} sparks` : ""}`);
         Lines.push("W/S throttle·brake  W+S burnout  A/D steer  Space handbrake  R respawn  T reset arena  F8 free camera  C camera rigs");
-        Lines.push("H readout  U AR-HUD  J distance slice  P editor  V clean view");
+        Lines.push("H readout  I distance slice  P editor  V clean view");
         this.Shell.Present(Now, Lines);
     }
 
@@ -1700,156 +1338,34 @@ class IlluminationHost
                 `tiles: ${this.Cards.DynamicTiles.length} moving (every frame) + ${this.Cards.StaticTiles.length} static`];
     }
 
-    ConstructPerformanceSamples()
+    // 📝 The timing log (TimingLog.js formats it): the host hands a snapshot of everything cost-relevant.
+    ComposeTimingLog()
     {
-        return { frame_delta_ms: [], callback_cpu_ms: [], scene_update_cpu_ms: [], command_encode_cpu_ms: [], queue_submit_cpu_ms: [] };
-    }
-
-    RecordPerformanceSample(FrameDeltaMs, DeltaSeconds, CallbackCpuMs, SceneUpdateCpuMs, CommandEncodeCpuMs, QueueSubmitCpuMs)
-    {
-        const Samples = this.PerformanceWindowSamples;
-        Samples.frame_delta_ms.push(FrameDeltaMs);
-        Samples.callback_cpu_ms.push(CallbackCpuMs);
-        Samples.scene_update_cpu_ms.push(SceneUpdateCpuMs);
-        Samples.command_encode_cpu_ms.push(CommandEncodeCpuMs);
-        Samples.queue_submit_cpu_ms.push(QueueSubmitCpuMs);
-        // 📝 Keep manual captures bounded when automatic logging is off; normal one-second windows reset below.
-        for (const Values of Object.values(Samples))
-            if (Values.length > 512) Values.shift();
-        this.PerformanceWindowSeconds += DeltaSeconds;
-        if (!this.PerformanceCapture.Enabled || this.PerformanceWindowSeconds < 1.0)
-            return;
-        const WindowSeconds = this.PerformanceWindowSeconds;
-        const Log = this.ComposeTimingLog(Samples, WindowSeconds);
-        console.info(`vehiclehmi_perf_v1 ${JSON.stringify(JSON.parse(Log))}`);
-        this.PerformanceLastWindowSamples = Samples;
-        this.PerformanceWindowSamples = this.ConstructPerformanceSamples();
-        this.PerformanceWindowSeconds = 0.0;
-    }
-
-    SetPerformanceLogging(Enabled)
-    {
-        this.PerformanceCapture.Enabled = !!Enabled;
-        this.PerformanceWindowSeconds = 0.0;
-        this.PerformanceWindowSamples = this.ConstructPerformanceSamples();
-        this.Shell?.Announce(Enabled
-            ? "Performance logging on — vehiclehmi_perf_v1 records will appear in the console once per second."
-            : "Performance logging paused; copy or download the latest capture whenever you like.");
-    }
-
-    ApplyFastPerformanceProfile()
-    {
-        if (!this.OptimizationRestorePoint)
-        {
-            const Keys = ["Quality", "RenderScale", "TraceScale", "ScreenTraversal", "Reflection", "TriangleReflection", "CardRadiosity",
-                          "DirectShadow", "SmokeEnabled", "SpatialCount", "SpatialRadius", "CardTileBudget", "VarianceKernel", "Antialias"];
-            this.OptimizationRestorePoint = {
-                GradeName: this.GradeName,
-                Grade: { ...this.Grade },
-                Settings: Object.fromEntries(Keys.map((Key) => [Key, this.Settings[Key]]))
-            };
-        }
-        this.GradeName = "low";
-        this.Grade = { ...QualityGrades.low };
-        Object.assign(this.Settings, {
-            Quality: 0, RenderScale: QualityGrades.low.RenderScale, TraceScale: 4,
-            ScreenTraversal: true, Reflection: false, TriangleReflection: false, CardRadiosity: false,
-            DirectShadow: false, SmokeEnabled: false, SpatialCount: 2, SpatialRadius: 8,
-            CardTileBudget: QualityGrades.low.TileBudget
-        });
-        this.PriorValid = false;
-        this.ReconstructScreenTargets(true);
-        this.Shell?.Controls.Synchronise();
-        this.Shell?.Announce("Fast profile applied: low resolution, quarter-resolution tracing, reflections and smoke off. Previous settings are saved.");
-    }
-
-    RestorePerformanceProfile()
-    {
-        if (!this.OptimizationRestorePoint)
-        {
-            this.Shell?.Announce("No saved settings yet — apply the fast profile first.");
-            return;
-        }
-        this.GradeName = this.OptimizationRestorePoint.GradeName;
-        this.Grade = { ...this.OptimizationRestorePoint.Grade };
-        Object.assign(this.Settings, this.OptimizationRestorePoint.Settings);
-        this.OptimizationRestorePoint = null;
-        this.PriorValid = false;
-        this.ReconstructScreenTargets(true);
-        this.Shell?.Controls.Synchronise();
-        this.Shell?.Announce("Saved render settings restored.");
-    }
-
-    // 📝 The shareable v1 record keeps main-thread wall time separate from asynchronously resolved GPU pass timestamps.
-    ComposeTimingLog(CpuSamples = this.PerformanceLastWindowSamples || this.PerformanceWindowSamples,
-                     WindowSeconds = this.PerformanceWindowSeconds)
-    {
-        const Settings = {
-            quality_grade: this.GradeName,
-            render_scale: this.Grade.RenderScale,
-            trace_scale: this.Settings.TraceScale,
-            screen_traversal: this.Settings.ScreenTraversal,
-            indirect_lighting: this.Settings.Indirect,
-            temporal_reuse: this.Settings.TemporalReuse,
-            spatial_reuse: this.Settings.SpatialReuse,
-            visibility_reuse: this.Settings.VisibilityReuse,
-            reflections: this.Settings.Reflection,
-            triangle_reflections: this.Settings.TriangleReflection,
-            card_radiosity: this.Settings.CardRadiosity,
-            direct_shadows: this.Settings.DirectShadow,
-            smoke: this.Settings.SmokeEnabled,
-            denoiser: this.Settings.VarianceKernel,
-            antialiasing: this.Settings.Antialias,
-            camera_motion_blur: this.ActiveCamera.MotionBlur.Enabled,
-            camera_motion_blur_strength: this.ActiveCamera.MotionBlur.Strength,
-            stress_motion: this.Settings.StressMotion
-        };
         return ComposeTimingLogSnapshot({
             GradeName: this.GradeName, ScreenExtent: this.ScreenExtent, TraceScaleUsed: this.TraceScaleUsed,
-            TraceExtent: this.TraceExtent, FrameIndex: this.FrameIndex, Settings, FrameSeconds: this.FrameSeconds,
-            LowRate: this.LowRate, MetricsEnabled: this.Metrics?.Enabled, PassNames: this.Metrics?.PassNames,
-            Durations: this.Metrics?.Durations, LastDurations: this.Metrics?.LastDurations, PassSamples: this.Metrics?.PassSamples,
-            CpuSamples, WindowSeconds, LightCount: this.Lighting ? this.Lighting.Lights.length : 0,
-            ClusterOverflow: this.Lighting ? this.Lighting.ClusterOverflow : 0,
-            ActiveStressObjects: this.Stress ? this.Stress.QueryActive() : 0,
-            MovingStressObjects: this.Stress?.Moving?.length || 0,
-            DrawRuns: this.Scene?.DrawRuns?.length || 0,
-            DistanceBricks: this.Distance?.FrameBricks?.length ? this.Distance.FrameBricks.length / 4 : 0,
-            CardTiles: this.Cards?.ScheduledTiles || 0,
-            AdapterInfo: this.Exchange?.QueryAdapterDescription() || null,
-            UserAgent: navigator.userAgent,
-            CaptureEnabled: this.Capture
+            TraceExtent: this.TraceExtent, FrameIndex: this.FrameIndex, Settings: this.Settings, FrameSeconds: this.FrameSeconds,
+            LowRate: this.LowRate, MetricsEnabled: this.Metrics.Enabled, PassNames: this.Metrics.PassNames,
+            Durations: this.Metrics.Durations, LightCount: this.Lighting ? this.Lighting.Lights.length : 0,
+            ClusterOverflow: this.Lighting ? this.Lighting.ClusterOverflow : 0
         });
     }
 
-    // 📝 Clipboard and JSON download provide simple shareable captures; console output remains a fallback.
+    // 📝 Copies the timing log to the clipboard; the console always gets it too, for when the clipboard is blocked.
     async CopyTimingLog()
     {
         const Log = this.ComposeTimingLog();
-        console.info(`vehiclehmi_perf_v1 ${Log}`);
+        console.log(Log);
         try
         {
             if (!navigator.clipboard || !navigator.clipboard.writeText)
                 throw new Error("no clipboard");
             await navigator.clipboard.writeText(Log);
-            this.Shell.Announce("JSON performance capture copied — share it here for analysis.");
+            this.Shell.Announce("Timing log copied — paste it into the chat.");
         }
         catch (Failure)
         {
-            this.Shell.Announce("Clipboard blocked — copy vehiclehmi_perf_v1 from the developer console (F12).");
+            this.Shell.Announce("Clipboard blocked — the timing log is in the console (F12).");
         }
-    }
-
-    DownloadTimingLog()
-    {
-        const Blob_ = new Blob([this.ComposeTimingLog()], { type: "application/json" });
-        const Address = URL.createObjectURL(Blob_);
-        const Link = document.createElement("a");
-        Link.href = Address;
-        Link.download = `vehiclehmi-perf-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-        Link.click();
-        setTimeout(() => URL.revokeObjectURL(Address), 1000);
-        this.Shell.Announce("Performance JSON downloaded — attach it here for analysis.");
     }
 
     ReportFailure(Message, Fatal)

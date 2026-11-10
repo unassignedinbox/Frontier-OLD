@@ -47,6 +47,9 @@ class TypefaceRegistry
     // Scan + load. Must run after the display backend context exists and before the first frame. Returns the number
     //    of families accepted into the strip. Safe to call once; later calls are ignored.
     uint32_t           Load(const std::filesystem::path &ArchiveRoot = "EngineContent/FontArchives") noexcept;
+    // 📝 Headless/test overload: load only the named families (squash-matched, e.g. "DM Sans", "JetBrains Mono") so the
+    //    atlas stays small. WantedCount == 0 behaves exactly like Load(ArchiveRoot).
+    uint32_t           Load(const std::filesystem::path &ArchiveRoot, const char *const *WantedFamilies, uint32_t WantedCount) noexcept;
     [[nodiscard]] bool QueryLoaded() const noexcept { return Loaded; }
 
     [[nodiscard]] uint32_t QueryRejectedFaceCount() const noexcept { return RejectedFaces; }

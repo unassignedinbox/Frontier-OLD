@@ -27,7 +27,7 @@ const RenderInspectionView RenderInspectionModes::Views[RenderInspectionModes::V
     {"Clusters", "12", "Hi-Z pyramid", "", false},
     {"Clusters", "13", "Glass layers (front / back)", "", false},
     {"Clusters", "14", "LOD levels (near to far)", "", false},
-    {"Fast preview", "AI", "Analytic illumination", "One shadowed sun, Lambert + Blinn-Phong, hemisphere fill: no rays", false},
+    {"Fast preview", "DS", "Direct shading", "One shadowed sun, Lambert + Blinn-Phong, hemisphere fill: no rays", false},
 };
 
 // 📝 DistanceInspection (the demo's InspectionMarch): 1 field normals by cascade, 2 traversal steps, 3 card or next-event radiance.

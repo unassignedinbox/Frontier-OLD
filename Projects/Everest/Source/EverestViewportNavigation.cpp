@@ -4,6 +4,7 @@
 // 🧩 Selected-target orbit/chase, fixed-axis perspective views and wide-range space flight over the existing free-camera integrator.
 
 #include "EverestWorkspace.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 #include <algorithm>
 #include <cmath>
 
@@ -11,7 +12,7 @@ namespace Everest
 {
 namespace
 {
-constexpr double      Pi = 3.14159265358979323846;
+constexpr double      Pi = Frontier::MathConstantsD::Pi;
 std::array<double, 3> Subtract(const std::array<double, 3> &First, const std::array<double, 3> &Last)
 {
     return {First[0] - Last[0], First[1] - Last[1], First[2] - Last[2]};

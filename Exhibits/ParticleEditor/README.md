@@ -24,7 +24,7 @@ repulsor, a drag volume and a current) are added from the Force Field page and d
 |---|---|---|
 | Library, packing, lightning, taxonomy against the prototype | `ParticleLibraryValidation` (ctest) | 🟢 343 of 343 |
 | Slang port by the pinned slangc; stored archives | `StoreShaderArchives.py --verify` | 🟢 30 archives, 0 failures |
-| The engine on Vulkan: 15 scenes | `ParticleSimulationCapture` | 🟢 15 of 15, 213 s |
+| The engine on Vulkan: 15 original scenes | `ParticleSimulationCapture` | 🟢 15 of 15 in the existing baseline; targeted `SharedForceField` GPU case also passed on SwiftShader (73 refreshes) |
 | The editor in the workspace: 8 captures, open and close | `ParticleEditorCapture` | 🟢 8 of 8, 107 s |
 
 `ParticleLibraryValidation` compares with `Results/PackingReference.toml`, written from the prototype's own modules by
@@ -69,6 +69,17 @@ repulsor, a drag volume and a current) are added from the Force Field page and d
 ![Attractor in Accelerate](Images/EditorAttractorPage.jpg)
 
 ![Preset library](Images/EditorPresetLibrary.jpg)
+
+## Everest main Scene Viewport overlay
+
+These captures are also kept in this folder so the particle evidence view includes the C++ main-viewport integration. The
+level's default Particles record drives a transparent particle image over the live Everest scene; camera pose, field of view
+and render extent follow the Scene Viewport. The full implementation and validation details are in
+`Exhibits/SceneViewport/README.md`.
+
+![Everest Scene Viewport with particles alpha-composited over the scene](Images/EverestParticleOverlay.png)
+
+[Normals inspection](Images/EverestParticleOverlay-Normals.png) · [Direct shading](Images/EverestParticleOverlay-Direct.png)
 
 ## Engine captures
 
@@ -121,28 +132,51 @@ _ClaudeScratch/build/UI/ParticleEditorCapture EngineContent Projects/Everest _Cl
 | `Code/ParticleLibraryValidation.cpp` | The C++ port against that reference |
 | `Code/ParticleSimulationCapture.cpp` | The engine alone: one scene per capture |
 | `Code/ParticleEditorCapture.cpp` | The editor in the Everest workspace |
-| `Code/ParticleSpaceValidation.cpp` | The `.particlespace` file, the level wind and the box volumes |
+| `Code/ParticleSpaceValidation.cpp` | The `.particlespace` file, shared native field lattice, and box volumes |
+| `Code/FluidSpaceValidation.cpp` | Fluid source queue, native-field handoff, and Fluid-to-Particle burst routing |
+| `../FluidEditor/Code/FluidSimulationGpuValidation.cpp` | Slang/Vulkan Fluid execution, readback, pressure projection, preview, and burst validation |
 
-## ParticleSpace in the level (2026-11-04)
+## ParticleSpace in the level and shared native ForceField (2026-11-09)
 
 - **File:** a Particles record keeps its ParticleSpace in `<level>.<record>.particlespace` beside the level.
   - It is TOML in the preset library's own spelling, with the level key `space_file`.
   - The editor creates the file from the library's opening space the first time it opens the record.
   - The title shows the file and `UNSAVED`. Close and the level's Ctrl+S write it back.
   - The record's Inspector shows the space's figures; the six unused sliders are gone.
-- **Level wind:** Wind page › Level. The level's Force Field (100 m to 100 km), sampled at an anchor in the level,
-  joins the lattice as one more prevailing flow.
-- **Box volumes:** the drag volume (type 4) and the current (type 5) now run in the field program. The prototype parity
-  check covers eos's own entries and checks the box volumes separately.
+- **Native level field:** Wind page › Level. With **Follow the level's Force Field** enabled, Everest snapshots the level's
+  native `ForceFieldSpace` from its ForceField, Wind, and ForceSource records and samples it at all 6,912 texel centres of
+  Particle's 24 × 12 × 24 lattice. The configured anchor is transformed from level Z-up coordinates into ForceField axes;
+  Particle acceleration fields remain local, while Particle-local flow generators are bypassed to avoid double-counting
+  environmental wind and authored sources. If no sampler is available or Follow is off, the standalone Particle lattice remains.
+  The default Particle sidecar enables Follow.
+- **Fluid access:** `InspectorRuntime::AcquireLevelFieldSampler()` provides the same native sampler snapshot to any level tool.
+  `FluidSimulationSequence::Advance` samples the enabled native field at each Fluid cell centre into a GPU-readable 3D input;
+  Slang compute then applies it alongside queued sources, advection, diffusion, buoyancy, and pressure projection. Fluid state
+  evolves on Vulkan compute, not in a CPU fallback. `FluidSpace` holds authored inputs and the last explicit readback;
+  `FluidSimulationSequence::Readback` is a separate telemetry step. The existing Fluid editor UI remains a shell and is not
+  wired to this native simulation path.
+- **Burst routing:** Fluid's `CollectBurstTriggers` events continue through `ParticleTriggerRouter::DispatchFluidBurst`, which
+  deposits bursts into the same `ParticleSpace`; `FluidSpaceValidation` exercises this route.
+- **Box volumes:** the drag volume (type 4) and the current (type 5) run in the Particle acceleration program. The prototype
+  parity check covers eos's entries and checks the box volumes separately.
 - **Tornado funnels:** authored tornado ForceSource records raise condensation funnels in the GPU clouds.
-- **Test:** `ParticleSpaceValidation`, 146/146 assertions:
-  - 56 effects survive the round trip bit for bit, and 1680/1680 refresh uniforms are identical.
-  - The level wind adds one flow only while it is followed.
-  - Both box volumes are packed, and 6 malformed files are refused.
-  - Ledger: `Results/ParticleSpaceValidation.txt`.
+- **Default level:** `Projects/Everest/Content/Levels/Default.levelspace` has an enabled **Particles** record; its shipped
+  `Default.Particle_Effects.particlespace` is the library's four opening presets. The same space is visible as a transparent
+  layer in Everest's main Scene Viewport, using the live camera and actual scene-image extent (see
+  `Exhibits/SceneViewport/README.md#transparent-main-viewport-particle-layer`).
+- **Tests:** `ParticleSpaceValidation` passes 161/161 assertions, including coordinate conversion, per-cell centre sampling,
+  flow de-duplication, disabled-sampler fallback, and preservation of Particle acceleration fields. `FluidSpaceValidation`
+  checks source queuing and Fluid-to-Particle routing; `FluidSimulationGpuValidation` runs the native Slang solver. The selected
+  Particle/Fluid/ForceField and stored-shader archive CTests pass 5/5.
+- **GPU captures:** `ParticleSimulationCapture`'s `SharedForceField` scene passed on `SwiftShader Device (Subzero)` (73
+  refreshes; native lattice readback verified and duplicate local flows absent). `FluidSimulationGpuValidation` also passed on
+  SwiftShader, including pressure projection and preview. SwiftShader is software Vulkan; physical hardware GPU execution has
+  not been run.
 
 ## Limits
 
 - Captured offscreen on Linux with SwiftShader. The Windows build is cross-compiled and was not run on Windows.
-- The level wind enters the lattice as one horizontal prevailing flow; the lattice's flows are horizontal.
+- The shared native ForceField now supplies full 3D velocities across Particle's lattice. The legacy standalone Particle flow
+  generators remain available when the level sampler is unavailable or Follow is off; the UI shell for the Fluid workspace is
+  not yet wired to a live Fluid simulation.
 - The prototype's thunder sound is not ported: the engine has no audio output yet.

@@ -20,9 +20,9 @@ namespace Frontier
 RenderSettingsReading ResolveRenderSettingsReading(const RenderPipelineConfiguration& P)
 {
     RenderSettingsReading Reading;
-    Reading.Grade     = &RenderQualityGrades[static_cast<size_t>(std::clamp(P.QualityTier, 0, 2))];
-    Reading.Analytic  = P.AnalyticIllumination;
-    Reading.RayTraced = P.HardwareRayQueryTier && !P.AnalyticIllumination;
+    Reading.Grade         = &RenderQualityGrades[static_cast<size_t>(std::clamp(P.QualityTier, 0, 2))];
+    Reading.DirectShading = P.DirectShading;
+    Reading.RayTraced     = P.HardwareRayQueryTier && !P.DirectShading;
     const uint32_t TraceScale = static_cast<uint32_t>(std::clamp(P.TraceScale, 1, 4));
     if (P.Measured.Presenting && P.Measured.ScreenExtent[0] > 0)
     {
@@ -73,7 +73,7 @@ namespace RenderAvailability
 
 const char* Lighting(const RenderPipelineConfiguration& P) noexcept
 {
-    return P.AnalyticIllumination ? "The analytic illumination is showing (Debug views)" : nullptr;
+    return P.DirectShading ? "Direct shading is showing (Debug views)" : nullptr;
 }
 
 const char* RayTracedOnly(const RenderPipelineConfiguration& P) noexcept

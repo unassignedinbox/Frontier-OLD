@@ -125,6 +125,15 @@ std::string EncodeParticleSpace(const ParticleSpace& Space)
                                                             { "links", static_cast<int64_t>(Space.LightningWeb.Links) } });
     Document.insert_or_assign("probe", toml::table{ { "enabled", Space.ProbeEnabled }, { "position_metres", SpellPoint(Space.Probe) } });
     Document.insert_or_assign("level_wind", toml::table{ { "follow", Space.LevelWind.Follow }, { "anchor_metres", SpellPoint(Space.LevelWind.AnchorMetres) } });
+    toml::table SpatialKeys;
+    EncodeSpaceTable(SpatialKeys, Space.Spatial);
+    Document.insert_or_assign("spatial", std::move(SpatialKeys));
+    toml::table MassKeys;
+    EncodeSpaceTable(MassKeys, Space.Mass);
+    Document.insert_or_assign("mass", std::move(MassKeys));
+    toml::table ReplicationKeys;
+    EncodeSpaceTable(ReplicationKeys, Space.Replication);
+    Document.insert_or_assign("replication", std::move(ReplicationKeys));
     toml::array Forces;
     for (const ParticleField& Field : Space.Fields)
     {
@@ -142,9 +151,26 @@ std::string EncodeParticleSpace(const ParticleSpace& Space)
         Keys.insert_or_assign("number", static_cast<int64_t>(Effect.Number));
         if (Effect.OverrideOrigin) Keys.insert_or_assign("origin_override_metres", SpellPoint(*Effect.OverrideOrigin));
         EncodeParticleEffectParameters(Effect.Parameters, Keys);
+        toml::table EffectSpatial;
+        EncodeSpaceTable(EffectSpatial, Effect.Spatial);
+        Keys.insert_or_assign("spatial", std::move(EffectSpatial));
+        toml::table EffectMass;
+        EncodeSpaceTable(EffectMass, Effect.Mass);
+        Keys.insert_or_assign("mass", std::move(EffectMass));
+        toml::table EffectReplication;
+        EncodeSpaceTable(EffectReplication, Effect.Replication);
+        Keys.insert_or_assign("replication", std::move(EffectReplication));
         Effects.push_back(std::move(Keys));
     }
     Document.insert_or_assign("effect", std::move(Effects));
+    toml::array Rules;
+    for (const ParticleTriggerRule& Rule : Space.TriggerRules)
+    {
+        toml::table Keys;
+        EncodeSpaceTable(Keys, Rule);
+        Rules.push_back(std::move(Keys));
+    }
+    Document.insert_or_assign("rule", std::move(Rules));
     std::ostringstream Out;
     Out << "# Frontier particle space: the effects, force fields, wind and lightning of one Particles record.\n" << Document << '\n';
     return Out.str();
@@ -201,6 +227,9 @@ bool DecodeParticleSpace(std::string_view Text, ParticleSpace& Space, std::strin
         ReadValue(Level, "follow", Loaded.LevelWind.Follow);
         ReadPoint((*Level)["anchor_metres"], Loaded.LevelWind.AnchorMetres);
     }
+    if (const toml::table* Spatial = Document["spatial"].as_table()) DecodeSpaceTable(*Spatial, Loaded.Spatial);
+    if (const toml::table* Mass = Document["mass"].as_table()) DecodeSpaceTable(*Mass, Loaded.Mass);
+    if (const toml::table* Replication = Document["replication"].as_table()) DecodeSpaceTable(*Replication, Loaded.Replication);
     if (const toml::array* Forces = Document["force"].as_array())
     {
         for (size_t Index = 0; Index < Forces->size(); ++Index)
@@ -237,6 +266,9 @@ bool DecodeParticleSpace(std::string_view Text, ParticleSpace& Space, std::strin
                 Effect.OverrideOrigin = Origin;
             }
             if (!DecodeParticleEffectParameters(*Keys, Effect.Parameters, Where, Diagnostic)) return false;
+            if (const toml::table* EffectSpatial = (*Keys)["spatial"].as_table()) DecodeSpaceTable(*EffectSpatial, Effect.Spatial);
+            if (const toml::table* EffectMass = (*Keys)["mass"].as_table()) DecodeSpaceTable(*EffectMass, Effect.Mass);
+            if (const toml::table* EffectReplication = (*Keys)["replication"].as_table()) DecodeSpaceTable(*EffectReplication, Effect.Replication);
             if (std::any_of(Loaded.Effects.begin(), Loaded.Effects.end(), [&](const ParticleEffectInstance& Other) { return Other.Token == Effect.Token; }))
             {
                 Diagnostic = Where + ": number " + std::to_string(Effect.Number) + " is used twice";
@@ -247,6 +279,18 @@ bool DecodeParticleSpace(std::string_view Text, ParticleSpace& Space, std::strin
         }
     }
     Loaded.NextNumber = std::max<uint32_t>(Highest + 1, static_cast<uint32_t>(Document["next_number"].value<int64_t>().value_or(1)));
+    if (const toml::array* Rules = Document["rule"].as_array())
+    {
+        for (size_t Index = 0; Index < Rules->size(); ++Index)
+        {
+            if (const toml::table* Keys = (*Rules)[Index].as_table())
+            {
+                ParticleTriggerRule Rule;
+                DecodeSpaceTable(*Keys, Rule);
+                Loaded.TriggerRules.push_back(std::move(Rule));
+            }
+        }
+    }
     Space             = std::move(Loaded);
     return true;
 }

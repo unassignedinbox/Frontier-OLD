@@ -11,11 +11,11 @@ const XYZ = V => [V.GetX(), V.GetY(), V.GetZ()];
 const XYZW = Q => [...XYZ(Q), Q.GetW()];
 const Same = (A,B) => A.every((V,I) => Math.abs(V-B[I]) < 1e-7);
 export class JoltWorld extends RigidBodyWorld {
-    static async Create(Options = {}) {
+    static async Create() {
         const J = await (ModulePromise ||= InitJolt());
-        return new JoltWorld(J, Options);
+        return new JoltWorld(J);
     }
-    constructor(J, Options = {}) {
+    constructor(J) {
         super(); this.J = J; this.Backend = 'Jolt Physics 1.1.0 · WebAssembly';
         const Settings = new J.JoltSettings();
         Settings.mMaxWorkerThreads = 0;
@@ -39,18 +39,10 @@ export class JoltWorld extends RigidBodyWorld {
         this.V.Set(0,0,-9.81); this.System.SetGravity(this.V);
         this.StaticBodies = []; this.TerrainBodies = [];
         this.TerrainBodies.push(this.AddBox({ Minimum: [-500,-500,-2], Maximum: [500,500,0] }));
-        if (Options.CourseRelief !== false) {
-            for (const [X0,X1,Y0,Y1] of KerbConstants.Strips)
-                this.TerrainBodies.push(this.AddBox({ Minimum: [X0,Y0,0], Maximum: [X1,Y1,KerbConstants.Height] }));
-            const Ramp = EmitRampFacets().flatMap(F => F.Corners);
-            this.TerrainBodies.push(this.CreateHull(Ramp, [0,0,0], [0,0,0,1], 0, Static));
-        }
-        if (Array.isArray(Options.TerrainHulls)) {
-            for (const HullPoints of Options.TerrainHulls) {
-                if (HullPoints && HullPoints.length >= 4)
-                    this.TerrainBodies.push(this.CreateHull(HullPoints, [0,0,0], [0,0,0,1], 0, Static));
-            }
-        }
+        for (const [X0,X1,Y0,Y1] of KerbConstants.Strips)
+            this.TerrainBodies.push(this.AddBox({ Minimum: [X0,Y0,0], Maximum: [X1,Y1,KerbConstants.Height] }));
+        const Ramp = EmitRampFacets().flatMap(F => F.Corners);
+        this.TerrainBodies.push(this.CreateHull(Ramp, [0,0,0], [0,0,0,1], 0, Static));
         this.Metrics.Backend = this.Backend;
     }
     Pose(Position, Orientation) { this.P.Set(...Position); this.Q.Set(...Orientation); }

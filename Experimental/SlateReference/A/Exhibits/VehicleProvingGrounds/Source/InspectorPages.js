@@ -13,13 +13,11 @@ import { GasParameterCatalogue, ConstructGasParameters } from "./SmokeSequence.j
 import { FractureMaterials, FractureMaterialOrder } from "./FractureStructure.js";
 import { FractureModes } from "./FractureSequence.js";
 import { VehicleGeometry } from "./VehicleSpecification.js";
-import { ArenaZones, TrainingDrills, LevelCatalog } from "./LevelStructure.js";
-import { RotateVector } from "./TransformProjection.js";
+import { ArenaZones, TrainingDrills } from "./LevelStructure.js";
 import { DerezPresets } from "./EffectSequence.js";
 import { FormatPrimary } from "./TrainingSequence.js";
 import { CameraRigs } from "./CabinStructure.js";
 import { AutomotiveMode, RoofFixtureType } from "./LightingSystem.js";
-import { templateCatalog } from "./RoadStudioAdapter.js";
 
 export const InspectionModes = [
     ["Final image", 0], ["Direct sun only", 1], ["Indirect diffuse (GI)", 2], ["Indirect irradiance (denoised)", 3],
@@ -98,14 +96,6 @@ export function ConstructEntities(Host)
           Switches: () => [{ Name: "See-through glass", Glyph: "Eye", Read: () => Host.Cabin.Settings.SeeThroughGlass,
                              Write: (On) => { Host.Cabin.Settings.SeeThroughGlass = On; } },
                            { Name: "Screens", Glyph: "Monitor", Read: () => Host.Cabin.Settings.Screens, Write: (On) => { Host.Cabin.Settings.Screens = On; } }] },
-        ...(Host.DrivingHud ? [{
-            Id: "arhud", Group: "Vehicle", Name: "Interactive AR-HUD", Type: "2D + 3D ADAS HUD", Glyph: "Compass", Colour: Accent.Vehicle, Parent: "vehicle",
-            Description: "Proximity-triggered 3D obstacle/train highlights, low-fuel station beacon & Cockpit combiner HUD",
-            Meta: () => Host.DrivingHud.QuerySummary().ActiveMode.toUpperCase(),
-            State: () => (Host.DrivingHud.BrakeAlertActive ? "warm" : (Host.DrivingHud.Enabled && Host.DrivingHud.QueryDisplayMode() !== "hidden" ? "live" : "")),
-            Toggle: { Read: () => Host.DrivingHud.Enabled, Write: (On) => { Host.DrivingHud.Enabled = On; Host.DrivingHud.SyncControlBarButtons(); } },
-            Build: (C, B) => BuildDrivingHud(Host, C, B)
-        }] : []),
         { Id: "marks", Group: "Vehicle", Name: "Tyre marks", Type: "Rubber deposit", Glyph: "CircleDot", Colour: Accent.Vehicle, Parent: "vehicle",
           Description: "Rubber laid by sliding work", Meta: () => `${Host.Marks.Metrics.LaidMetres.toFixed(0)} m`, State: () => (S.TyreMarks ? "live" : ""),
           Build: (C, B) => BuildMarks(Host, C, B),
@@ -145,107 +135,18 @@ export function ConstructEntities(Host)
           Description: "Particle Editor presets · recovery & respawn", Meta: () => Host.Effects.Settings.Preset,
           State: () => (Host.Recovery.Busy || Host.Effects.Metrics.Live > 0 ? "warm" : "live"), Build: (C, B) => BuildDerez(Host, C, B),
           Switches: () => [Feature("Auto recovery", "Shield", Host.Recovery.Settings, "Enabled")] },
-        { Id: "training", Group: "Level", Name: Host.LevelKey === "inversion" ? "Stunt runs" : "Training arena", Type: "Drills", Glyph: "Flag", Colour: Accent.Level,
-          Description: "Timed stunt & precision runs · best times",
-          Meta: () => (Host.Training.Active ? Host.Training.Active.Drill.Name : `${Host.Training.Drills.length} runs`),
+        { Id: "training", Group: "Level", Name: "Training arena", Type: "Drills", Glyph: "Flag", Colour: Accent.Level,
+          Description: "Ten timed stations · best times", Meta: () => (Host.Training.Active ? Host.Training.Active.Drill.Name : `${TrainingDrills.length} drills`),
           State: () => (Host.Training.Active && Host.Training.Active.Phase === "running" ? "warm" : "live"), Build: (C, B) => BuildTraining(Host, C, B) },
         { Id: "cones", Group: "Level", Name: "Cones", Type: "Rigid bodies", Glyph: "TrafficCone", Colour: Accent.Level, Parent: "training",
           Description: "Knockable cones · rez back on reset", Meta: () => `${Host.Cones.Cones.length}`,
           State: () => (Host.Cones.Metrics.Moving > 0 ? "warm" : "live"), Build: (C, B) => BuildCones(Host, C, B) },
-        { Id: "level", Group: "Level", Name: Host.LevelDescriptor ? Host.LevelDescriptor.Title : "Proving grounds", Type: "Level", Glyph: "Map", Colour: Accent.Level,
-          Description: "Level selection, ramp teleports & scene budget",
-          Meta: () => `${(Host.LevelZones || LevelZones).length} zones`, State: () => "live", Build: (C, B) => BuildLevel(Host, C, B) },
+        { Id: "level", Group: "Level", Name: "Proving grounds", Type: "Level", Glyph: "Map", Colour: Accent.Level,
+          Description: "Zones, teleports & scene budget", Meta: () => `${LevelZones.length} zones`, State: () => "live", Build: (C, B) => BuildLevel(Host, C, B) },
         { Id: "stress", Group: "Level", Name: "Stress test", Type: "Object pool", Glyph: "Boxes", Colour: Accent.Level,
           Description: "Pre-built pool · union, cards & draws under load", Meta: () => `${Host.Stress.QueryActive()}`,
           State: () => (Host.Stress.QueryActive() > 0 ? "warm" : ""), Build: (C, B) => BuildStress(Host, C, B) }
     );
-    if (Host.DDay?.Enabled)
-    {
-        Entities.push({
-            Id: "dday", Group: "Level", Name: "D-Day · Wall Assault", Type: "Militarized Wall Run", Glyph: "Shield", Colour: Accent.Destruction,
-            Description: "Bunkers, MG turrets, 155mm cannons, advancing tanks (cover & cookoffs), bombers/kamikaze planes & mines",
-            Meta: () =>
-            {
-                const Sum = Host.DDay.QuerySummary();
-                return Sum.WallReached ? "WALL BREACHED" : `${Math.round(Sum.DistanceToWall)} m`;
-            },
-            State: () => (Host.DDay.WallReached ? "live" : (Host.DDay.PlayerArmor < 45 ? "warm" : "live")),
-            Toggle: { Read: () => Host.DDay.Enabled, Write: (On) => { Host.DDay.Enabled = On; } },
-            Build: (C, B) => BuildDDayAssault(Host, C, B)
-        });
-    }
-    if (Host.Collapse)
-    {
-        Entities.push({
-            Id: "collapse", Group: "Destruction", Name: "Collapse bridge & road", Type: "Seismic decks", Glyph: "Zap", Colour: Accent.Destruction,
-            Description: "Session-baked movie cracks · rear-to-front collapse & sand",
-            Meta: () => `0x${(Host.Collapse.SessionSeed >>> 0).toString(16).slice(0, 6).toUpperCase()}`,
-            State: () => (Host.Collapse.Spans.some((Span) => Span.State === "collapsing") ? "warm" : "live"),
-            Toggle: { Read: () => Host.Collapse.Enabled, Write: (On) => { Host.Collapse.Enabled = On; } },
-            Build: (C, B) => BuildCollapse(Host, C, B)
-        });
-    }
-    if (Host.Trams)
-    {
-        Entities.push({
-            Id: "trams", Group: "Level", Name: "Trams & trains", Type: "Rail traffic", Glyph: "Compass", Colour: Accent.Level,
-            Description: "Separate articulated streetcar trams & express rail trains",
-            Meta: () => `${Host.Trams.QuerySummary().CarCount} cars`,
-            State: () => (Host.Trams.Enabled ? "live" : ""),
-            Toggle: { Read: () => Host.Trams.Enabled, Write: (On) => { Host.Trams.Enabled = On; } },
-            Build: (C, B) => BuildTrams(Host, C, B)
-        });
-    }
-    if (Host.ServiceStations)
-    {
-        Entities.push({
-            Id: "service", Group: "Level", Name: "Factory & Industrial Robots", Type: "Industrial robotics", Glyph: "Zap", Colour: Accent.Level,
-            Description: "Drive-through megafactory + 6-axis industrial robot arms (assembly welding + Auto-Fuel / 800V EV)",
-            Meta: () =>
-            {
-                const S = Host.ServiceStations.QuerySummary();
-                return S.ActiveKind ? S.ActiveState.toUpperCase() : `F:${S.FuelPercent}% E:${S.BatteryPercent}%`;
-            },
-            State: () => (Host.ServiceStations.QuerySummary().ActiveKind ? "warm" : (Host.ServiceStations.Enabled ? "live" : "")),
-            Toggle: { Read: () => Host.ServiceStations.Enabled, Write: (On) => { Host.ServiceStations.Enabled = On; } },
-            Build: (C, B) => BuildServiceStations(Host, C, B)
-        });
-    }
-    if (Host.RoadEditor)
-    {
-        Entities.push({
-            Id: "roadeditor", Group: "Level", Name: "Road Studio", Type: "Roads · bridges · junctions", Glyph: "Route", Colour: Accent.Environment,
-            Description: "Dedicated 2D/3D Road Studio workspace — filleted junctions, steel I-girder bridges & interchanges",
-            Meta: () =>
-            {
-                const S = Host.RoadEditor.QuerySummary();
-                return `${S.RoadCount} rd · ${S.BridgeCount} br`;
-            },
-            State: () => (Host.RoadEditor.Enabled ? "live" : ""),
-            Toggle: { Read: () => Host.RoadEditor.Enabled, Write: (On) => { Host.RoadEditor.Enabled = On; Host.RoadEditor.CommitChanges(); } },
-            Switches: () => [
-                { Name: "Open Road Studio workspace", Glyph: "Scan",
-                  Read: () => Host.RoadEditor.ActiveWorkspace === "roadstudio",
-                  Write: (On) => { if (On) Host.RoadEditor.OpenWorkspace(); else Host.RoadEditor.CloseWorkspace(); } }
-            ],
-            Build: (C, B) => BuildRoadEditor(Host, C, B)
-        });
-    }
-    if (Host.TrafficLights)
-    {
-        Entities.push({
-            Id: "trafficlights", Group: "Level", Name: "Hover traffic lights", Type: "Intersection robotics", Glyph: "Lightbulb", Colour: Accent.Environment,
-            Description: "Pole-less hovering robotic intersection signals (Red · Orange · Yellow · Green)",
-            Meta: () =>
-            {
-                const Near = Host.TrafficLights.QueryNearestSignal(Host.Vehicle.Position);
-                return Near ? Near.Aspect : `${Host.TrafficLights.QuerySummary().ActiveCount} active`;
-            },
-            State: () => (Host.TrafficLights.Enabled ? "live" : ""),
-            Toggle: { Read: () => Host.TrafficLights.Enabled, Write: (On) => { Host.TrafficLights.Enabled = On; } },
-            Build: (C, B) => BuildTrafficLights(Host, C, B)
-        });
-    }
     return Entities;
 }
 
@@ -281,9 +182,6 @@ function BuildRender(Host, C, Body)
     C.Segmented(Quality, S, "Quality", [["Low", 0], ["Medium", 1], ["High", 2]], { Label: "Quality grade · reloads" });
     C.Segmented(Quality, S, "TraceScale", [["Full", 1], ["Half", 2], ["Quarter", 4]], { Label: "Trace resolution" });
     Slider(C, Quality, S, "RenderScale", "Render scale", 0.25, 2.0, 0.05, "×", 2, ["Faster", "Sharper"]);
-    const Profile = C.ActionRow(Quality);
-    C.Button(Profile, "Apply fast profile", "Gauge", () => Host.ApplyFastPerformanceProfile(), "primary");
-    C.Button(Profile, "Restore saved", "RotateCcw", () => Host.RestorePerformanceProfile());
 
     const Gather = C.Card(Body, "Global illumination · ReSTIR", "Sparkles", { Accent: Accent.Render, Index: 2 });
     C.Switch(Gather, S, "ScreenTraversal", { Label: "Screen traces, then distance field", Detail: "Nearest-depth pyramid walk first (?screentraces=1)" });
@@ -317,30 +215,14 @@ function BuildRender(Host, C, Body)
     C.Metric(Timing, () => 1.0 / Math.max(Host.FrameSeconds || 1, 1.0e-4), "fps", 0, () => [`1% low ${Host.LowRate || "–"}`, ""]);
     C.Stats(Timing, [["Frame", () => (Host.FrameSeconds || 0) * 1000.0, "ms", 1], ["Draw runs", () => Host.Scene.DrawRuns.length],
                      ["Bricks / frame", () => Host.Distance.FrameBricks.length / 4]]);
-    C.Muted(Timing, "CPU timings are main-thread wall time. GPU pass timings are separate asynchronous timestamp queries; unsupported adapters report unavailable, not zero.");
-    C.Switch(Timing, Host.PerformanceCapture, "Enabled", {
-        Label: "Log every second",
-        Detail: "vehiclehmi_perf_v1 JSON in the developer console",
-        OnChange: (Enabled) => Host.SetPerformanceLogging(Enabled)
-    });
     C.Readout(Timing, () =>
     {
-        const Samples = Host.PerformanceWindowSamples;
-        const Mean = (Values) => Values.length ? (Values.reduce((Total, Value) => Total + Value, 0.0) / Values.length).toFixed(2) : "–";
-        const Lines = [`CPU callback       ${Mean(Samples.callback_cpu_ms)} ms avg`,
-                       `CPU scene update   ${Mean(Samples.scene_update_cpu_ms)} ms avg`,
-                       `CPU command encode ${Mean(Samples.command_encode_cpu_ms)} ms avg`,
-                       `CPU queue submit   ${Mean(Samples.queue_submit_cpu_ms)} ms avg`];
         if (!Host.Metrics.Enabled)
-            Lines.push("GPU timestamps unavailable on this adapter.");
-        else
-            Lines.push(...Object.entries(Host.Metrics.Durations).filter(([Name]) => Host.Metrics.PassSamples[Name] > 0)
-                .map(([Name, Milliseconds]) => `GPU ${Name.padEnd(20)} ${Milliseconds.toFixed(2)} ms EMA`));
-        return Lines;
+            return ["GPU pass timings need the timestamp-query feature;", "this adapter does not expose it."];
+        return Object.entries(Host.Metrics.Durations).filter(([, Milliseconds]) => Milliseconds > 0.0)
+                     .map(([Name, Milliseconds]) => `${Name.padEnd(24)}${Milliseconds.toFixed(2).padStart(7)} ms`);
     });
-    const LogActions = C.ActionRow(Timing);
-    C.Button(LogActions, "Copy JSON", "Copy", () => Host.CopyTimingLog(), "primary");
-    C.Button(LogActions, "Download JSON", null, () => Host.DownloadTimingLog());
+    C.Button(Timing, "Copy timing log", "Activity", () => Host.CopyTimingLog());
 }
 
 function BuildField(Host, C, Body)
@@ -526,14 +408,6 @@ function BuildVehicle(Host, C, Body)
     C.Switch(Camera, S, "SpeedFov", { Label: "Speed-based FOV" });
     Slider(C, Camera, S, "SpeedFovBoost", "FOV boost at speed", 0, 24, 1, "°", 0);
     C.Muted(Camera, "Shake and speed FOV apply to driving cameras only; the HMI touch view and tyre inspection stay steady.");
-    C.Switch(Camera, Host.ActiveCamera.MotionBlur, "Enabled", {
-        Label: "Camera motion blur",
-        Detail: "Camera component · Proving Grounds only",
-        OnChange: () => { Host.PriorValid = false; }
-    });
-    Slider(C, Camera, Host.ActiveCamera.MotionBlur, "Strength", "Blur strength", 0, 1, 0.05, "×", 2,
-           ["Subtle", "Strong"], () => { Host.PriorValid = false; });
-    C.Muted(Camera, "Uses the camera's screen-space motion vectors in the Vehicle Proving Grounds antialias/resolve pass. Other exhibits and the native editor are unaffected.");
     C.Muted(Camera, "Drag to orbit the chase camera, wheel to zoom; inside the car drag to look around and click the tablet to use it. Free camera: WASD, Q/E, Shift.");
 }
 
@@ -964,69 +838,12 @@ function HexToRgb(Hex)
 
 function BuildLevel(Host, C, Body)
 {
-    const Selector = C.Card(Body, "Level arena", "Layers", { Accent: Accent.Level, Index: 1, Subtitle: "Switch active environment" });
-    C.Segmented(Selector, Host.Settings, "Level", LevelCatalog.map((Entry) => [Entry.Title, Entry.Key]),
-                { Label: "Arena", OnChange: () => Host.ApplySetting("Level") });
-    if (Host.LevelKey === "inversion")
-    {
-        Slider(C, Selector, Host.Settings, "AeroGripScale", "Ground-effect downforce", 0.0, 2.5, 0.05, "×", 2, ["Pure mass", "High aero"]);
-        C.Stats(Selector, [
-            ["Surface tilt", () =>
-            {
-                const Upward = RotateVector(Host.Vehicle.Orientation, [0.0, 0.0, 1.0]);
-                return Math.acos(Math.max(-1.0, Math.min(1.0, Upward[2]))) * (180.0 / Math.PI);
-            }, "°", 1],
-            ["Tyres planted", () => Host.Vehicle.Wheels.filter((Wheel) => Wheel.Contact).length, "/ 4", 0],
-            ["Altitude", () => Host.Vehicle.Position[2], "m", 1]
-        ]);
-    }
+    const Zones = C.Card(Body, "Proving grounds", "Map", { Accent: Accent.Level, Index: 1, Subtitle: "Teleport the car" });
+    C.Muted(Zones, "A 216 × 120 m asphalt pad in a grass surround. West: the main straight with kerbs and a jump, a skidpad, a concrete burnout box, a smash alley of breakable props, a slatted hangar for bounce light, a container yard and a lit tunnel. East: the training arena — launch strip, slalom, moose test, cone bowling, spin box and a figure-8.");
+    for (const Zone of LevelZones)
+        C.LinkButton(Zones, `${Zone.Name} · ${Zone.Note}`, () => Host.TeleportVehicle(Zone));
 
-    const ActiveZones = Host.LevelZones || LevelZones;
-    const ActiveTitle = Host.LevelDescriptor ? Host.LevelDescriptor.Title : "Proving grounds";
-    if (Host.LevelKey === "inversion" && Host.LevelDescriptor?.Tracks?.length)
-    {
-        const TracksCard = C.Card(Body, "Open-World Track Wings", "Compass",
-                                  { Accent: Accent.Level, Index: 2, Subtitle: "Drive freely across Tracks A–F — or jump directly" });
-        C.Muted(TracksCard, "All six districts share one interconnected open complex linked by North/South boulevards and gateways:");
-        const AllTracks = Host.LevelDescriptor.Tracks;
-        for (let Start = 0; Start < AllTracks.length; Start += 3)
-        {
-            const TrackRow = C.ActionRow(TracksCard);
-            for (const Track of AllTracks.slice(Start, Start + 3))
-                C.Button(TrackRow, Track.Label, Track.Icon || "Flag", () => Host.TeleportVehicle(Track));
-        }
-        if (Host.Bollards && Host.Bollards.Zones.length > 0)
-        {
-            C.Stats(TracksCard, Host.Bollards.Zones.map((Zone) => [
-                Zone.ShortName || Zone.Name,
-                () => Zone.Triggered ? "OPEN" : "ARMED"
-            ]));
-        }
-        if (Host.Collapse && Host.Collapse.Spans.length > 0)
-        {
-            C.Stats(TracksCard, Host.Collapse.Spans.map((Span) => [
-                Span.ShortName || Span.Name,
-                () => Span.State.toUpperCase()
-            ]));
-            const CollapseRow = C.ActionRow(TracksCard);
-            C.Button(CollapseRow, "Rebake unique cracks", "Zap", () => Host.RebakeCollapseDecks());
-            C.Button(CollapseRow, "Reset collapse", "RotateCcw", () => Host.ResetCollapseDecks());
-        }
-    }
-    const MaxKey = Math.min(9, ActiveZones.length);
-    const Zones = C.Card(Body, ActiveTitle, "Map", { Accent: Accent.Level, Index: 3, Subtitle: `Teleport the car (keys 1–${MaxKey})` });
-    if (Host.LevelKey === "inversion")
-    {
-        C.Muted(Zones, "[Track A] Original 1.05 km Grand Prix stunt circuit (preserved intact). [Track B] Split Over/Under Tunnel + Sky-Bridge & Linear Bollards. [Track C] 84 m Travelling-Wave Bollards & Viaduct Canyon. [Track D] Rear-to-front Collapsing Sky-Bridge (+5 m) & Collapsing Sinkhole Road (0 m) with session-unique movie cracks & sand effects. [Track E] 3-Lane Center-Portal Subway. [Track F] Streetcar Trams & Express Commuter Trains. [Track G] Underground Construction Site (Thru-Trench & Dead-End Pit). [Track H] Drive-Through Megafactory + Automatic Fuel & 800V EV Charging Stations.");
-    }
-    else
-    {
-        C.Muted(Zones, "A 216 × 120 m asphalt pad in a grass surround. West: the main straight with kerbs and a jump, a skidpad, a concrete burnout box, a smash alley of breakable props, a slatted hangar for bounce light, a container yard and a lit tunnel. East: the training arena — launch strip, slalom, moose test, cone bowling, spin box and a figure-8.");
-    }
-    ActiveZones.forEach((Zone, Slot) =>
-        C.LinkButton(Zones, `${Slot < 9 ? `${Slot + 1}. ` : "• "}${Zone.Name} · ${Zone.Note}`, () => Host.TeleportVehicle(Zone)));
-
-    const Budget = C.Card(Body, "Scene budget", "Cpu", { Accent: Accent.Level, Index: 4 });
+    const Budget = C.Card(Body, "Scene budget", "Cpu", { Accent: Accent.Level, Index: 2 });
     C.Stats(Budget, [["Occupants", () => Host.Scene.Occupants.length], ["In the field", () => Host.Scene.QueryUnionCount()],
                      ["Volumes", () => Host.Volumes.Volumes.length]]);
     C.Stats(Budget, [["Cards", () => Host.Cards.Cards.length], ["Draw runs", () => Host.Scene.DrawRuns.length],
@@ -1050,76 +867,6 @@ function BuildStress(Host, C, Body)
     C.Readout(Stress, () => Host.Stress.QueryReadout());
 }
 
-function BuildCollapse(Host, C, Body)
-{
-    const Collapse = Host.Collapse;
-    const Card = C.Card(Body, "Seismic Collapse Decks", "Zap",
-                        { Accent: Accent.Destruction, Index: 1, Subtitle: "Session-baked Voronoi faultlines · rear-to-front escape" });
-    C.Muted(Card, "Every new session bakes a unique oblique Voronoi fracture pattern and continuous lightning-bolt faultline crack network across both the +5.0 m Sky-Bridge and the 0.0 m Sinkhole Road. Enter at speed to outrun the rear-to-front collapse as cracks & sand plumes race ahead!");
-    C.Stats(Card, [
-        ["Session seed", () => `0x${(Collapse.SessionSeed >>> 0).toString(16).toUpperCase()}`],
-        ["Bakes", () => Collapse.BakeCount]
-    ]);
-    C.Stats(Card, Collapse.Spans.map((Span) => [
-        Span.ShortName || Span.Name,
-        () => Span.State === "collapsing"
-            ? `${Math.min(100, Math.max(0, Span.CrackFrontU * 100)).toFixed(0)}% cracked`
-            : Span.State.toUpperCase()
-    ]));
-    const Row1 = C.ActionRow(Card);
-    C.Button(Row1, "Rebake unique cracks", "Zap", () => Host.RebakeCollapseDecks());
-    C.Button(Row1, "Reset intact", "RotateCcw", () => Host.ResetCollapseDecks());
-    const Row2 = C.ActionRow(Card);
-    C.Button(Row2, "Jump · Bridge", "Flag", () => Host.TeleportVehicle({ Name: "Track D · Collapsing Bridge", Position: [-106.0, -250.0], Yaw: 0.0 }));
-    C.Button(Row2, "Jump · Road", "Flag", () => Host.TeleportVehicle({ Name: "Track D · Collapsing Road", Position: [84.0, -318.0], Yaw: 180.0 }));
-}
-
-function BuildTrams(Host, C, Body)
-{
-    const Trams = Host.Trams;
-    const Card = C.Card(Body, "Tram & Train Traffic", "Compass",
-                        { Accent: Accent.Level, Index: 1, Subtitle: "Separate 4-track streetcar & commuter rail corridor" });
-    C.Muted(Card, "Two-way articulated low-floor streetcar trams share the northern transit avenue (dwelling briefly at the Central Island Platform) alongside high-speed 3-car express commuter trains on dedicated steel rails.");
-    C.Stats(Card, [
-        ["Consists", () => Trams.Consists.length],
-        ["Active railcars", () => Trams.QuerySummary().CarCount],
-        ["State", () => Trams.Enabled ? "RUNNING" : "PAUSED"]
-    ]);
-    Slider(C, Card, Trams, "SpeedScale", "Traffic speed", 0.0, 2.5, 0.05, "×", 2);
-    const Row = C.ActionRow(Card);
-    C.Button(Row, "Jump to Tramway", "Compass", () => Host.TeleportVehicle({ Name: "Track F · Trams & Trains", Position: [-98.0, 314.0], Yaw: 0.0 }));
-    C.Button(Row, "Toggle traffic", "Play", () => { Trams.Enabled = !Trams.Enabled; });
-}
-
-function BuildServiceStations(Host, C, Body)
-{
-    const Service = Host.ServiceStations;
-    const Card = C.Card(Body, "Industrial Robots · Auto-Fuel, 800V EV & Megafactory", "Zap",
-                        { Accent: Accent.Level, Index: 1, Subtitle: "Bolted multi-axis industrial robot arms · IK coupling & spot-welding" });
-    C.Muted(Card, "Pull into the crimson Octane-100 Fuel Bay or cobalt/emerald 800V Supercharger Bay on Track H and stop: a bolted multi-axis industrial robot arm solves elbow-up inverse kinematics to swing its waist turret, shoulder boom, forearm & 6-axis wrist coupler into your fuel/charge port, refills to 100% with synthesized audio, and folds back to its home stance. Inside the Megafactory Hall, 4 articulated industrial spot-welding robot arms weld chassis along the automated conveyor lines!");
-    C.Stats(Card, [
-        ["Industrial robots", () => `${Service.QuerySummary().TotalRobotCount} (${Service.QuerySummary().StationCount} bay · ${Service.QuerySummary().FactoryRobotCount} factory)`],
-        ["Octane-100 tank",   () => `${Service.QuerySummary().FuelPercent}%`],
-        ["800V EV battery",   () => `${Service.QuerySummary().BatteryPercent}%`],
-        ["Active bay",        () => Service.QuerySummary().ActiveName || "STANDBY"],
-        ["Arm state",         () => Service.QuerySummary().ActiveState.toUpperCase()],
-        ["Completed fills",   () => Service.QuerySummary().CompletedServices]
-    ]);
-    Toggle(C, Card, Service.Audio, "Enabled", "Procedural station & robot audio", () => Service.Audio.SetEnabled(Service.Audio.Enabled));
-    Slider(C, Card, Service.Audio, "MasterVolume", "Station audio volume", 0.0, 1.0, 0.05, "", 2);
-    const Row1 = C.ActionRow(Card);
-    C.Button(Row1, "Park in Auto-Fuel Bay", "Compass", () => Host.TeleportVehicle({ Name: "Track H · Auto-Fuel Bay", Position: [-56.0, 392.0], Yaw: 0.0 }));
-    C.Button(Row1, "Park in Auto-EV Bay",   "Zap",     () => Host.TeleportVehicle({ Name: "Track H · Auto-EV Bay",   Position: [-56.0, 420.0], Yaw: 0.0 }));
-    const Row2 = C.ActionRow(Card);
-    C.Button(Row2, "Jump · Factory Hall",   "Boxes",   () => Host.TeleportVehicle({ Name: "Track H · Factory Hall",  Position: [ -4.0, 408.0], Yaw: 0.0 }));
-    C.Button(Row2, "Drain to 25%",          "RotateCcw", () =>
-    {
-        Service.FuelLevel = 0.25;
-        Service.BatteryLevel = 0.25;
-        Host.Shell?.Announce("Fuel tank & 800V battery set to 25% for station test");
-    });
-}
-
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  TRAINING ARENA
 //------------------------------------------------------------------------------------------------------------------------
@@ -1135,7 +882,7 @@ function BuildTraining(Host, C, Body)
     C.Button(Row, "Stop drill", "Pause", () => T.Cancel());
 
     const List = C.Card(Body, "Stations", "Flag", { Accent: Accent.Level, Index: 2, Subtitle: "Best times are kept in this browser" });
-    for (const Drill of T.Drills)
+    for (const Drill of TrainingDrills)
     {
         const Row = document.createElement("div");
         Row.className = "drill-row";
@@ -1229,234 +976,3 @@ function Distance(Left, Right)
 {
     return Math.hypot(Left[0] - Right[0], Left[1] - Right[1]);
 }
-
-//------------------------------------------------------------------------------------------------------------------------
-//                      DEDICATED ROAD STUDIO WORKSPACE LINK & INTERCHANGE / BRIDGE STREAMER
-//------------------------------------------------------------------------------------------------------------------------
-
-function BuildRoadEditor(Host, C, Body)
-{
-    const R = Host.RoadEditor;
-
-    // ① Card 01: Dedicated Road Studio Workspace Launcher & Live GPU Network Telemetry
-    const WorkspaceCard = C.Card(Body, "Road Studio workspace", "Route",
-                                 { Accent: Accent.Environment, Index: 1, Subtitle: "Linked 2D Plan + 3D Orbit · Live GPU Sync" });
-    C.Metric(WorkspaceCard,
-             () => R.QuerySummary().RoadCount,
-             "roads",
-             0,
-             () =>
-             {
-                 const S = R.QuerySummary();
-                 return [`${S.BridgeCount} bridge${S.BridgeCount === 1 ? "" : "s"} · ${(S.TriangleCount / 1000).toFixed(1)}k tris`, "live"];
-             });
-    C.Muted(WorkspaceCard, "Author multi-lane roads, tangent-filleted junctions, steel I-girder & concrete girder highway bridges, bearings, piers, 2:1 embankments, cycleways, kerbs, and interchanges in the dedicated Road Studio workspace — synced live to Proving Grounds.");
-
-    const LaunchRow = C.ActionRow(WorkspaceCard);
-    C.Button(LaunchRow, "Open Road Studio", "Scan", () => R.OpenWorkspace());
-    C.Button(LaunchRow, "Drive showcase", "Car", () => R.DriveOnSelectedRoad());
-
-    C.Stats(WorkspaceCard, [
-        ["Junctions",       () => R.QuerySummary().NodeCount,     "", 0],
-        ["Highway bridges", () => R.QuerySummary().BridgeCount,   "", 0],
-        ["Physics spans",   () => R.QuerySummary().PhysicsCount,  "", 0],
-        ["Hover signals",   () => R.QuerySummary().SignalCount,   "", 0]
-    ]);
-
-    // ② Card 02: Interchange, Bridge & Urban District Templates (1-click load & live WebGPU stream)
-    const TemplateCard = C.Card(Body, "Interchange & street templates", "Map",
-                                { Accent: Accent.Environment, Index: 2, Subtitle: "15 complete road & bridge networks" });
-
-    const TemplateState = { Selected: "demo" };
-    const TemplateOptions = [
-        ["Spline & Highway Bridge Demo (Connected)", "demo"],
-        ...templateCatalog.map((Entry) => [Entry.name, Entry.id])
-    ];
-    C.Select(TemplateCard, TemplateState, "Selected", TemplateOptions,
-             { Label: "Template", OnChange: (Id) => { R.LoadTemplate(Id); C.Synchronise(); } });
-
-    const QuickRow1 = C.ActionRow(TemplateCard);
-    C.Button(QuickRow1, "Connected Demo", "Sparkles", () => { TemplateState.Selected = "demo"; R.LoadTemplate("demo"); C.Synchronise(); });
-    C.Button(QuickRow1, "Highway bridge", "GitFork", () => { TemplateState.Selected = "bridge"; R.LoadTemplate("bridge"); C.Synchronise(); });
-
-    const QuickRow2 = C.ActionRow(TemplateCard);
-    C.Button(QuickRow2, "Cloverleaf", "Compass", () => { TemplateState.Selected = "cloverleaf"; R.LoadTemplate("cloverleaf"); C.Synchronise(); });
-    C.Button(QuickRow2, "Trumpet", "Route", () => { TemplateState.Selected = "trumpet"; R.LoadTemplate("trumpet"); C.Synchronise(); });
-
-    const QuickRow3 = C.ActionRow(TemplateCard);
-    C.Button(QuickRow3, "Diamond bridge", "TrendingUp", () => { TemplateState.Selected = "diamond"; R.LoadTemplate("diamond"); C.Synchronise(); });
-    C.Button(QuickRow3, "Grand Prix circuit", "Flag", () => { TemplateState.Selected = "race"; R.LoadTemplate("race"); C.Synchronise(); });
-
-    // ③ Card 03: Atomic Highway Bridge Insertion & Network JSON
-    const BridgeCard = C.Card(Body, "Bridge & network actions", "SlidersHorizontal",
-                              { Accent: Accent.Environment, Index: 3, Subtitle: "Grade-continuous bridge spans & JSON" });
-
-    const BridgeRow = C.ActionRow(BridgeCard);
-    C.Button(BridgeRow, "Insert bridge on road", "Plus", () =>
-    {
-        const TargetRoad = R.Project.roads.find((Rd) => !Rd.bridge) || R.Project.roads[0];
-        if (TargetRoad && R.InsertBridgeOnRoad(TargetRoad.id))
-            Host.Shell?.Announce(`Inserted connected highway bridge on ${TargetRoad.name}`);
-        C.Synchronise();
-    });
-    C.Button(BridgeRow, "Copy JSON", "Check", () =>
-    {
-        if (navigator.clipboard?.writeText)
-            navigator.clipboard.writeText(R.ExportJson()).then(() => Host.Shell?.Announce("Copied Road Studio JSON"));
-    });
-    C.Button(BridgeRow, "Reset default", "RotateCcw", () => { R.ResetToDefault(); C.Synchronise(); });
-}
-
-function BuildTrafficLights(Host, C, Body)
-{
-    const TL = Host.TrafficLights;
-
-    const Card1 = C.Card(Body, "Hovering intersection signals", "Lightbulb",
-                         { Accent: Accent.Environment, Index: 1, Subtitle: "Pole-less robotic 4-aspect heads" });
-    C.Metric(Card1,
-             () =>
-             {
-                 const Near = TL.QueryNearestSignal(Host.Vehicle.Position);
-                 return Near ? Near.RemainingSeconds : 0.0;
-             },
-             "s",
-             1,
-             () =>
-             {
-                 const Near = TL.QueryNearestSignal(Host.Vehicle.Position);
-                 const Name = Near ? Near.Aspect : "IDLE";
-                 return [Name, (Name === "RED" || Name === "ORANGE") ? "warm" : ""];
-             });
-    C.Muted(Card1, "Autonomous pole-less traffic signal heads hover in place at major intersections on dual side antigrav thrusters, cycling GREEN → YELLOW → ORANGE → RED and projecting real clustered light onto the road below.");
-
-    C.Segmented(Card1, TL, "OverrideMode",
-                [["Auto", "AUTO"], ["Green", "GREEN"], ["Yellow", "YELLOW"], ["Orange", "ORANGE"], ["Red", "RED"]],
-                { Label: "Signal phase", OnChange: () => { TL.UpdateAllPoses(false); Host.UploadTrafficLightOccupants(); } });
-    Slider(C, Card1, TL, "CycleSpeed", "Cycle tempo", 0.25, 3.0, 0.05, "×", 2, ["Slow", "Rapid"]);
-
-    C.Stats(Card1, [
-        ["Green",  () => TL.QuerySummary().Counts.GREEN,  "", 0],
-        ["Yellow", () => TL.QuerySummary().Counts.YELLOW, "", 0],
-        ["Orange", () => TL.QuerySummary().Counts.ORANGE, "", 0],
-        ["Red",    () => TL.QuerySummary().Counts.RED,    "", 0]
-    ], 4);
-
-    const Card2 = C.Card(Body, "Intersection roster", "Map",
-                         { Accent: Accent.Level, Index: 2, Subtitle: "Click to inspect or teleport" });
-    const JumpRow = C.ActionRow(Card2);
-    for (const Sig of TL.Units.filter((U) => U.Active).slice(0, 3))
-    {
-        C.Button(JumpRow, Sig.Name.split(" ")[0], "Target", () =>
-            Host.TeleportVehicle({ Name: Sig.Name, Position: [Sig.Anchor[0] - 14.0, Sig.Anchor[1]], Yaw: 0 }));
-    }
-    C.Readout(Card2, () =>
-        TL.Units.filter((U) => U.Active).map((U) =>
-            `${U.Name.padEnd(32)}  ${U.CurrentAspect.padEnd(7)} ${U.RemainingSeconds.toFixed(1).padStart(4)}s  Z=${U.WorldPosition[2].toFixed(2)}m`
-        )
-    );
-}
-
-function BuildDrivingHud(Host, C, Body)
-{
-    const Hud = Host.DrivingHud;
-    const Card = C.Card(Body, "Interactive 2D + 3D Augmented-Reality HUD", "Compass",
-                        { Accent: Accent.Vehicle, Index: 1, Subtitle: "Spatial proximity triggers · Chase Dual-Wing & Cockpit Windshield Combiner" });
-    C.Muted(Card, "Active in Chase/Exterior and Cockpit/Passenger cameras (automatically hidden in F8 Free Camera & Road Studio editor). Uses a 32 m spatial hash + 15 Hz proximity broadphase to highlight obstacles, commuter trains, trams, raised bollards & open pits in 3D, flashes BRAKE with procedural FCW audio, and guides you to the nearest Auto-Fuel or 800V EV bay when low. Click any 3D reticle to lock Δv telemetry, or press U to cycle HUD style.");
-
-    C.Segmented(Card, Hud, "DisplayStyle",
-                [["Full AR", "full"], ["Minimal", "minimal"], ["Off", "off"]],
-                { Label: "HUD display", OnChange: () => { Hud.Audio.PlayUiClick(1.05); Hud.SyncControlBarButtons(); } });
-    C.Segmented(Card, Hud, "SpeedUnit",
-                [["KM/H", "kmh"], ["MPH", "mph"]],
-                { Label: "Speed & range units", OnChange: () => { Hud.Audio.PlayUiClick(1.05); Hud.SyncControlBarButtons(); } });
-    C.Segmented(Card, Hud, "Sensitivity",
-                [["Auto proximity", "auto"], ["Extended (98m)", "high"], ["Warnings only", "warnings"]],
-                { Label: "Sensor trigger mode", OnChange: () => { Hud.ScanAccumulator = 99.0; Hud.Audio.PlayUiClick(1.0); } });
-
-    Toggle(C, Card, Hud.Audio, "Enabled", "UI micro-clicks & ADAS collision chimes", () =>
-    {
-        Hud.Audio.SetEnabled(Hud.Audio.Enabled);
-        Hud.SyncControlBarButtons();
-    });
-    Slider(C, Card, Hud.Audio, "MasterVolume", "HUD audio volume", 0.0, 1.0, 0.05, "", 2);
-
-    C.Stats(Card, [
-        ["Active layout",   () => Hud.QuerySummary().ActiveMode.toUpperCase()],
-        ["Tracked 3D locks", () => Hud.QuerySummary().TrackedCount],
-        ["Spatial cells",   () => Hud.QuerySummary().SpatialCells],
-        ["Collision state", () => Hud.BrakeAlertActive ? "BRAKE!" : "CLEAR"],
-        ["Fuel / 800V EV",  () => `${Hud.QuerySummary().FuelPercent}% / ${Hud.QuerySummary().BatteryPercent}%`],
-        ["Nearest bay",     () => Hud.QuerySummary().NearestStationM !== null ? `${Hud.QuerySummary().NearestStationM} m` : "—"]
-    ]);
-
-    const RowCam = C.ActionRow(Card);
-    C.Button(RowCam, "Chase Wing HUD",    "Car",     () => Host.AssignCameraMode("Chase"));
-    C.Button(RowCam, "Cockpit Windshield", "Monitor", () => Host.AssignCameraMode("Cockpit"));
-
-    const RowTest = C.ActionRow(Card);
-    C.Button(RowTest, "Test Low Fuel (18%)", "AlertTriangle", () =>
-    {
-        Hud.TriggerLowFuelDemo();
-        Hud.SyncControlBarButtons();
-        Host.Shell?.Announce("Simulated 18% low fuel — AR station guidance active when within 235 m!");
-    });
-    C.Button(RowTest, "Jump · Near Fuel Bay", "Zap", () =>
-    {
-        Hud.TriggerLowFuelDemo();
-        Host.TeleportVehicle({ Name: "Track H · Approaching Fuel Bay", Position: [-112.0, 392.0], Yaw: 0.0 });
-    });
-}
-
-function BuildDDayAssault(Host, C, Body)
-{
-    const DDay = Host.DDay;
-    const Card = C.Card(Body, "D-Day · Militarized Wall Run", "Shield",
-                        { Accent: Accent.Destruction, Index: 1, Subtitle: "Omaha Beachhead → Bunkers & Minefields → Atlantic Fortress Wall" });
-    C.Metric(Card,
-             () => DDay.QuerySummary().DistanceToWall,
-             "m to Wall",
-             1,
-             () => DDay.WallReached
-                 ? ["WALL BREACHED", ""]
-                 : (DDay.PlayerCoverState.includes("COVER")
-                     ? [DDay.PlayerCoverState, ""]
-                     : [`ARMOR ${Math.round(DDay.PlayerArmor)}%`, DDay.PlayerArmor < 45 ? "warm" : ""]));
-    C.Muted(Card, "Race east (+X) from the Omaha Beachhead landing craft to the fortified Atlantic Wall Breach Gate (X = +318 m). Pull behind or alongside the 6 advancing Allied Tanks or Concrete Cover Walls to block MG turret tracers and 155mm cannon shells — watch out when hit tanks cook off and explode! Evade armed Teller-mines, overhead carpet-bombers, and kamikaze crash-planes.");
-
-    C.Segmented(Card, DDay, "ControlMode",
-                [["Manual Drive", "player"], ["AI Assault Autopilot", "autopilot"]],
-                { Label: "Driver mode", OnChange: (V) => DDay.SetControlMode(V) });
-
-    C.Stats(Card, [
-        ["Hull armor",     () => `${Math.round(DDay.QuerySummary().PlayerArmor)}%`],
-        ["Cover status",   () => DDay.QuerySummary().CoverState],
-        ["Advancing tanks",() => `${DDay.QuerySummary().ActiveTanks} / 6`],
-        ["Tanks blown",    () => DDay.QuerySummary().Stats.TanksDestroyed],
-        ["Armed mines",    () => `${DDay.QuerySummary().ActiveMines} / ${DDay.Mines.length}`],
-        ["Mines blown",    () => DDay.QuerySummary().Stats.MinesDetonated],
-        ["Cover saves",    () => DDay.QuerySummary().Stats.BlockedByCover],
-        ["Plane crashes",  () => DDay.QuerySummary().Stats.AircraftCrashes]
-    ]);
-
-    const RowOps = C.ActionRow(Card);
-    C.Button(RowOps, "Restart Wall Run", "RotateCcw", () => DDay.RestartAssaultRun());
-    C.Button(RowOps, "Crash-Plane Dive", "AlertTriangle", () =>
-    {
-        const Pos = Host.Vehicle.Position;
-        DDay.LaunchKamikazeDive(2, [Pos[0] + 18.0, Pos[1], Pos[2]]);
-    });
-    C.Button(RowOps, "Explode Nearest Tank", "Flame", () =>
-    {
-        const Alive = DDay.Tanks.find((T) => T.State !== "wreck");
-        if (Alive)
-            DDay.DetonateTank(Alive);
-    });
-
-    const CardZones = C.Card(Body, "Battlefield sector teleports", "Map",
-                             { Accent: Accent.Level, Index: 2, Subtitle: "Jump directly to any D-Day combat sector" });
-    const RowZ = C.ActionRow(CardZones);
-    for (const Z of (Host.LevelZones || []))
-        C.Button(RowZ, Z.Name.split("·")[0].trim(), "Target", () => Host.TeleportVehicle(Z));
-}
-
-

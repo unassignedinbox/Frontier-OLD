@@ -53,6 +53,34 @@ float DecodeHalf(uint16_t Half) noexcept
     return Signed * std::ldexp(1.0f + static_cast<float>(Fraction) / 1024.0f, static_cast<int>(Exponent) - 15);
 }
 
+// 📝 IEEE-754 binary16, round-to-nearest-even; non-finite inputs become zero and finite overflow saturates.
+uint16_t EncodeHalf(float Scalar) noexcept
+{
+    if (!std::isfinite(Scalar)) Scalar = 0.0f;
+    Scalar = std::clamp(Scalar, -65504.0f, 65504.0f);
+    uint32_t Bits = 0;
+    std::memcpy(&Bits, &Scalar, sizeof(Bits));
+    const uint32_t Sign = (Bits >> 16u) & 0x8000u;
+    const int32_t Exponent = static_cast<int32_t>((Bits >> 23u) & 0xffu) - 127 + 15;
+    uint32_t Mantissa = Bits & 0x7fffffu;
+    if (Exponent <= 0)
+    {
+        if (Exponent < -10) return static_cast<uint16_t>(Sign);
+        Mantissa |= 0x800000u;
+        const uint32_t Shift = static_cast<uint32_t>(14 - Exponent);
+        uint32_t Half = Mantissa >> Shift;
+        const uint32_t Rest = Mantissa & ((1u << Shift) - 1u);
+        const uint32_t Mid = 1u << (Shift - 1u);
+        if (Rest > Mid || (Rest == Mid && (Half & 1u))) ++Half;
+        return static_cast<uint16_t>(Sign | Half);
+    }
+    if (Exponent >= 31) return static_cast<uint16_t>(Sign | 0x7bffu);
+    uint32_t Half = Sign | (static_cast<uint32_t>(Exponent) << 10u) | (Mantissa >> 13u);
+    const uint32_t Rest = Mantissa & 0x1fffu;
+    if (Rest > 0x1000u || (Rest == 0x1000u && (Half & 1u))) ++Half;
+    return static_cast<uint16_t>(std::min<uint32_t>(Half, Sign | 0x7bffu));
+}
+
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -205,7 +233,7 @@ bool ParticleSimulationSequence::Construct(const VulkanDeviceAccess* HostDevice,
     Lattice.DepthOrLayers = ParticleDomainDimensions[2];
     Lattice.Dimension     = TextureDimension::Volumetric;
     Lattice.Format        = TextureFormat::Rgba16Float;
-    Lattice.Usage         = TextureUsage::Storage | TextureUsage::Sampled | TextureUsage::CopySource;
+    Lattice.Usage         = TextureUsage::Storage | TextureUsage::Sampled | TextureUsage::CopySource | TextureUsage::CopyTarget;
     WindTexture_          = Exchange_->ConstructTexture(Lattice);
     TextureViewSpecification Volume;
     Volume.Dimension    = ViewDimension::Volumetric;
@@ -331,8 +359,14 @@ bool ParticleSimulationSequence::ConstructTargets(uint32_t Width, uint32_t Heigh
 //                                                    REFRESH
 //------------------------------------------------------------------------------------------------------------------------
 
-bool ParticleSimulationSequence::Refresh(const ParticleRefreshPlan& Plan, std::span<const ParticleEffectInstance> Effects, std::string* Diagnostic)
+bool ParticleSimulationSequence::Refresh(const ParticleRefreshPlan& Plan, std::span<const ParticleEffectInstance> Effects, std::string* Diagnostic,
+                                          const IFieldSampler* SharedFieldSampler)
 {
+    if (Plan.SharedFieldActive && SharedFieldSampler == nullptr)
+    {
+        if (Diagnostic) *Diagnostic = "the particle plan follows the level ForceField, but no shared IFieldSampler was supplied";
+        return false;
+    }
     const auto Started = std::chrono::steady_clock::now();
     if (!Exchange_ || !ConstructTargets(Plan.ViewWidth, Plan.ViewHeight))
     {
@@ -382,12 +416,25 @@ bool ParticleSimulationSequence::Refresh(const ParticleRefreshPlan& Plan, std::s
     // 📝 With no lens and no shimmer the lensing program copies the image unchanged.
     Exchange_->WriteRegion(LensingConstants_, 0, Plan.Lensing.data(), sizeof(float) * Plan.Lensing.size());
 
+    const bool UseSharedField = Plan.SharedFieldActive && SharedFieldSampler != nullptr;
+    if (UseSharedField)
+    {
+        const std::vector<float> Flow = SampleParticleWindLattice(*SharedFieldSampler, Plan.SharedFieldOriginMetres, true);
+        std::vector<uint16_t> Packed(Flow.size());
+        std::transform(Flow.begin(), Flow.end(), Packed.begin(), EncodeHalf);
+        Exchange_->WriteTexture(WindTexture_, 0, Packed.data(), Packed.size() * sizeof(uint16_t),
+                                ParticleDomainDimensions[0], ParticleDomainDimensions[1], ParticleDomainDimensions[2]);
+    }
+
     CommandSequence Sequence = Exchange_->BeginSequence();
 
-    // ③ the wind lattice, rebuilt every refresh (6,912 cells)
-    Sequence.BindProgram(WindProgram_);
-    Sequence.BindGroup(0, WindGroup_);
-    Sequence.Dispatch(ParticleDomainDimensions[0] / 4u, ParticleDomainDimensions[1] / 4u, ParticleDomainDimensions[2] / 4u);
+    // ③ the wind lattice: either the ForceField sampler baked over all 6,912 cells or Particle's standalone local wind builder.
+    if (!UseSharedField)
+    {
+        Sequence.BindProgram(WindProgram_);
+        Sequence.BindGroup(0, WindGroup_);
+        Sequence.Dispatch(ParticleDomainDimensions[0] / 4u, ParticleDomainDimensions[1] / 4u, ParticleDomainDimensions[2] / 4u);
+    }
 
     // ④ the effects
     const auto Dispatch = [&](const std::shared_ptr<DeviceProgram>& Program, const EffectStores& Stores, uint32_t Count)
@@ -432,7 +479,9 @@ bool ParticleSimulationSequence::Refresh(const ParticleRefreshPlan& Plan, std::s
     }
 
     // ⑤ the raster (eos render pass order: floor, guides, arrows, fibres, particles, lightning)
-    const ColorAttachment Clear{ ColourView_, LoadOperation::Clear, { Plan.Clear[0], Plan.Clear[1], Plan.Clear[2], 1.0f } };
+    const ColorAttachment Clear{ ColourView_, LoadOperation::Clear,
+                                 Plan.TransparentBackground ? std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f}
+                                                           : std::array<float, 4>{Plan.Clear[0], Plan.Clear[1], Plan.Clear[2], 1.0f} };
     const DepthAttachment Depth{ DepthView_, LoadOperation::Clear, 1.0f };
     Sequence.BeginRaster(std::span<const ColorAttachment>(&Clear, 1), &Depth, "Particle raster");
     const auto Bind = [&](const std::shared_ptr<DeviceProgram>& Program, const std::shared_ptr<DescriptorGroup>& Group)
@@ -504,7 +553,8 @@ bool ParticleSimulationSequence::Refresh(const ParticleRefreshPlan& Plan, std::s
     Sequence.EndRaster();
 
     // ⑥ lensing into the presented image
-    const ColorAttachment Presented{ LensedView_, LoadOperation::Clear, { 0.0f, 0.0f, 0.0f, 1.0f } };
+    const ColorAttachment Presented{ LensedView_, LoadOperation::Clear,
+                                      { 0.0f, 0.0f, 0.0f, Plan.TransparentBackground ? 0.0f : 1.0f } };
     Sequence.BeginRaster(std::span<const ColorAttachment>(&Presented, 1), nullptr, "Particle lensing");
     Sequence.BindProgram(LensingProgram_);
     Sequence.BindGroup(0, LensingGroup_);

@@ -6,6 +6,8 @@
 
 #include "Engine/Scene/GeometryLayout.h"
 
+#include "Frontier/Engine/Foundation/Constants.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -14,8 +16,6 @@ namespace Frontier
 
 namespace
 {
-
-constexpr double DegreesToRadians = 3.14159265358979323846 / 180.0;
 
 double& At(PlacementMatrix& Matrix, int Row, int Column) noexcept
 {
@@ -30,7 +30,7 @@ double At(const PlacementMatrix& Matrix, int Row, int Column) noexcept
 PlacementMatrix ConstructZTurn(double Degrees) noexcept
 {
     PlacementMatrix Turn = ConstructIdentityPlacement();
-    const double    θ    = Degrees * DegreesToRadians;
+    const double    θ    = DegreesToRadians(Degrees);
     At(Turn, 0, 0) = std::cos(θ);
     At(Turn, 0, 1) = -std::sin(θ);
     At(Turn, 1, 0) = std::sin(θ);
@@ -54,7 +54,7 @@ PlacementMatrix ConstructIdentityPlacement() noexcept
 PlacementMatrix ConstructPlacement(const std::array<double, 3>& Position, const std::array<double, 3>& RotationDegrees,
                                    const std::array<double, 3>& Scale) noexcept
 {
-    const double α = RotationDegrees[0] * DegreesToRadians, β = RotationDegrees[1] * DegreesToRadians, γ = RotationDegrees[2] * DegreesToRadians;
+    const double α = DegreesToRadians(RotationDegrees[0]), β = DegreesToRadians(RotationDegrees[1]), γ = DegreesToRadians(RotationDegrees[2]);
     const double Cosα = std::cos(α), Sinα = std::sin(α), Cosβ = std::cos(β), Sinβ = std::sin(β), Cosγ = std::cos(γ), Sinγ = std::sin(γ);
     // 📝 R = Rz(γ) · Ry(β) · Rx(α), each column then scaled.
     const double Rotation[3][3] = {{Cosβ * Cosγ, Cosγ * Sinα * Sinβ - Cosα * Sinγ, Cosα * Cosγ * Sinβ + Sinα * Sinγ},
@@ -150,7 +150,7 @@ void DecomposePlacement(const PlacementMatrix& Matrix, std::array<double, 3>& Po
     {
         γ = std::atan2(-Rotation[0][1], Rotation[1][1]);
     }
-    RotationDegrees = {α / DegreesToRadians, β / DegreesToRadians, γ / DegreesToRadians};
+    RotationDegrees = {RadiansToDegrees(α), RadiansToDegrees(β), RadiansToDegrees(γ)};
     Position        = {At(Matrix, 0, 3), At(Matrix, 1, 3), At(Matrix, 2, 3)};
 }
 

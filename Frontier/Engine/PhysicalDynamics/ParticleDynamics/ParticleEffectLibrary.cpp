@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                          PARTICLEEFFECTLIBRARY.CPP
 ==========================================================================================================================================*/
-// 🧩 ParticleLibrary.toml decoded: the presets with every parameter, their wind links, the default wind and force list.
+// 🧩 ParticleLibrary.particlespace decoded: the presets with every parameter, their wind links, the default wind and force list.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectLibrary.h"
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleEffectCodec.h"
@@ -69,6 +69,32 @@ public:
         {
             Target = static_cast<int32_t>(*Reading);
             return;
+        }
+        Fail(Key, "an integer");
+    }
+
+    // 📝 eos presets hold some enum-like counts (assemble: 0 burst, 1 rebuild, 2 stack) as JavaScript numbers, so the
+    //    generated library spells them 0.0 / 1.0 / 2.0; an integral float reads as its integer.
+    void ReadIntegral(const char* Key, int32_t& Target)
+    {
+        const toml::node* Found = Keys.get(Key);
+        if (!Found)
+        {
+            return;
+        }
+        if (const auto Reading = Found->value<int64_t>())
+        {
+            Target = static_cast<int32_t>(*Reading);
+            return;
+        }
+        if (const auto Reading = Found->value<double>())
+        {
+            const double Whole = std::floor(*Reading);
+            if (*Reading == Whole && Whole >= -2147483648.0 && Whole <= 2147483647.0)
+            {
+                Target = static_cast<int32_t>(Whole);
+                return;
+            }
         }
         Fail(Key, "an integer");
     }
@@ -422,7 +448,7 @@ bool DecodeEffectParameters(const toml::table& Keys, ParticleEffectParameters& P
         SectionReading.Read("fragment", Decoded.Fragment);
         SectionReading.Read("fragment_life_seconds", Decoded.FragmentLifeSeconds);
         SectionReading.Read("wave", Decoded.Wave, WaveSpellings);
-        SectionReading.Read("assemble", Decoded.Assemble);
+        SectionReading.ReadIntegral("assemble", Decoded.Assemble);
         SectionReading.Read("launch_distance_metres", Decoded.LaunchDistanceMetres);
         SectionReading.Read("after", After);
         Decoded.Butterflies = After == "butterfly";
@@ -592,14 +618,42 @@ void EncodeLightFibre(const LightFibreParameters& Fibre, toml::table& Keys)
 
 bool ParseDocument(const std::filesystem::path& File, toml::table& Document, std::string& Diagnostic)
 {
+    std::filesystem::path Resolved = File;
+    std::error_code       Ec;
+    if (!std::filesystem::exists(Resolved, Ec))
+    {
+        if (Resolved.extension() == ".particlespace")
+        {
+            const std::filesystem::path Alt = Resolved.parent_path() / (Resolved.stem().string() + ".toml");
+            if (std::filesystem::exists(Alt, Ec)) Resolved = Alt;
+        }
+        else if (Resolved.extension() == ".toml")
+        {
+            const std::filesystem::path Alt = Resolved.parent_path() / (Resolved.stem().string() + ".particlespace");
+            if (std::filesystem::exists(Alt, Ec)) Resolved = Alt;
+        }
+    }
     try
     {
-        Document = toml::parse_file(File.string());
+        Document = toml::parse_file(Resolved.string());
     }
     catch (const toml::parse_error& Error)
     {
-        Diagnostic = File.filename().string() + ": " + std::string(Error.description());
+        Diagnostic = Resolved.filename().string() + ": " + std::string(Error.description());
         return false;
+    }
+    if (const auto Format = Document["format"].value<std::string>())
+    {
+        if (*Format != "frontier.particlelibrary" && *Format != "frontier.particlespace")
+        {
+            Diagnostic = Resolved.filename().string() + ": unsupported format \"" + *Format + "\"";
+            return false;
+        }
+        if (Document["version"].value<int64_t>().value_or(1) > 1)
+        {
+            Diagnostic = Resolved.filename().string() + ": unsupported format version";
+            return false;
+        }
     }
     return true;
 }

@@ -60,7 +60,7 @@ export class SceneDistanceSpace
         const BrickSlots = 4 * this.BricksPerAxis ** 3;
         this.BrickRecords  = this.Exchange.ConstructRecords(BrickSlots * 16, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Invalidated bricks");
         this.EpochRecords  = this.Exchange.ConstructRecords(BrickSlots * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Brick stamps");
-        this.UniformRecords = this.Exchange.ConstructRecords(352, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, "Distance record");
+        this.UniformRecords = this.Exchange.ConstructRecords(160, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, "Distance record");
         // 📝 The union's active list: occupant indices, at most one per identity.
         this.ListRecords = this.Exchange.ConstructRecords(IdentityCeiling * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, "Distance list");
         Device.queue.writeBuffer(this.EpochRecords, 0, new Uint32Array(BrickSlots).fill(0xFFFFFFFF));
@@ -161,7 +161,7 @@ export class SceneDistanceSpace
 
     EncodeDistanceRecord(DistanceOccupantCount, FrameIndex)
     {
-        const Bytes = new ArrayBuffer(352);
+        const Bytes = new ArrayBuffer(160);
         const Integers = new Int32Array(Bytes);
         const Unsigned = new Uint32Array(Bytes);
         const Scalars = new Float32Array(Bytes);
@@ -179,7 +179,6 @@ export class SceneDistanceSpace
             Scalars[Offset + 5] = Clip.Band;
             Scalars[Offset + 6] = 1.0 / (Resolution * Clip.VoxelExtent);
         }
-        const Cutouts = (this.Cutouts || []).slice(0, 12);
         Unsigned[32] = this.Configuration.ClipCount;
         Unsigned[33] = DistanceOccupantCount;
         Scalars[34]  = 0.0;
@@ -187,15 +186,6 @@ export class SceneDistanceSpace
         Unsigned[36] = this.FrameBricks.length / 4;
         Unsigned[37] = FrameIndex;
         Unsigned[38] = this.BricksPerAxis;
-        Unsigned[39] = Cutouts.length;
-        for (let Index = 0; Index < Cutouts.length; ++Index)
-        {
-            const Base = 40 + Index * 4;
-            Scalars[Base + 0] = Cutouts[Index][0];
-            Scalars[Base + 1] = Cutouts[Index][1];
-            Scalars[Base + 2] = Cutouts[Index][2];
-            Scalars[Base + 3] = Cutouts[Index][3];
-        }
         return Bytes;
     }
 

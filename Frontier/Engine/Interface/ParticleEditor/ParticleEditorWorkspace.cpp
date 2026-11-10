@@ -377,14 +377,11 @@ bool ParticleEditorWorkspace::Perform(std::string_view Action)
 void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double DeltaSeconds)
 {
     if (Library.Presets.empty()) return;
-    // 📝 The level's Force Field at the anchor, turned into the domain's axes (level x, y, z up → domain x, z, −y).
-    Space.LevelWind.FlowMps.reset();
-    if (Space.LevelWind.Follow && LevelFlow)
-    {
-        if (const std::optional<std::array<double, 3>> Flow = LevelFlow(Space.LevelWind.AnchorMetres))
-            Space.LevelWind.FlowMps = std::array<double, 3>{ (*Flow)[0], (*Flow)[2], -(*Flow)[1] };
-    }
-    Plan    = Space.Advance(Planned ? DeltaSeconds : 0.0, Width, Height);
+    // 📝 One immutable ForceField snapshot drives both the Wind-page anchor reading and all 6,912 lattice cells this refresh.
+    std::shared_ptr<const IFieldSampler> FieldSampler;
+    if (Space.LevelWind.Follow && LevelFieldAvailable && LevelFieldSampler) FieldSampler = LevelFieldSampler();
+    if (!FieldSampler) Space.LevelWind.FlowMps.reset();
+    Plan = Space.Advance(Planned ? DeltaSeconds : 0.0, Width, Height, nullptr, FieldSampler.get());
     Planned = true;
     ChangeClock += DeltaSeconds;
     if (!Presenter)
@@ -396,6 +393,7 @@ void ParticleEditorWorkspace::Present(uint32_t Width, uint32_t Height, double De
     ParticleViewportRequest Request;
     Request.Plan        = &Plan;
     Request.Effects     = &Space.Effects;
+    Request.FieldSampler = std::move(FieldSampler);
     Request.ReadLattice = Overlay.Settings.Enabled && LatticeClock >= 0.15;
     const bool Fresh    = Image.Adapter.empty();
     ParticleViewportImage Next = Presenter(Request);
@@ -813,7 +811,8 @@ void ParticleEditorWorkspace::ConstructInspector(ImVec2 Minimum, ImVec2 Maximum,
     {
         const ControlTheme    Theme = ControlTheme::ResolveNative();
         ControlColumn         Page(Theme, Style.Faces, Scale);
-        ParticleEditorContext Context{ Space, Library, Overlay.Settings, Image, Planned ? &Plan : nullptr, Requests, static_cast<bool>(LevelFlow) };
+        ParticleEditorContext Context{ Space, Library, Overlay.Settings, Image, Planned ? &Plan : nullptr, Requests,
+                                       LevelFieldAvailable };
         const std::string&    Selected = Space.Selected;
         if (Selected == "Wind") ParticleEditorPages::ConstructWindPage(Page, Context);
         else if (Selected == "Lightning") ParticleEditorPages::ConstructLightningPage(Page, Context);

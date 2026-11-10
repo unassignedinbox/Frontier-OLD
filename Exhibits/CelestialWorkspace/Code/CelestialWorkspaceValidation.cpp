@@ -108,9 +108,8 @@ int main(int Count, char **Arguments)
             Require(Centre.Initialize() && Centre.Activate(), "Native UI initialized");
             Everest::EverestWorkspace Workspace(Centre, Project);
             auto &World = Workspace.QueryWorldSpace();
-            Require(World.QueryRecordCount() == 69 && World.FindAllByType("Camera").size() == 2 &&
-                        World.FindAllByType("Geometry").size() == 37 && World.FindAllByType("ForceSource").size() == 14,
-                    "Clean default retains only rendered environment, the two Camera records, the one Render settings record, the 37 scene objects and the 14 forces");
+            Require(World.QueryRecordCount() == 67 && World.FindAllByType("Geometry").size() == 37 && World.FindAllByType("ForceSource").size() == 14,
+                    "Clean default retains only rendered environment, the one Render settings record, the 37 scene objects and the 14 forces");
             for (const char *Type : {"SpatialNode", "RigidBody", "ThermalBody", "ChemicalVessel", "FluidPlume", "Fracture", "Particles",
                                      "HarmonicOscillator", "Lightning", "AerialFog"})
                 Require(World.FindFirstByType(Type) == nullptr, std::string("No unused default ") + Type);
@@ -191,8 +190,8 @@ int main(int Count, char **Arguments)
             Tick();
             Tick();
             Capture("Moon-Native.png");
-            Require(Workspace.QueryOutliner().QueryTotal() == 69,
-                    "Outliner lists the fifteen rendered scene entries, the two Camera records, the one Render settings component, the 37 scene objects and "
+            Require(Workspace.QueryOutliner().QueryTotal() == 67,
+                    "Outliner lists the fifteen rendered scene entries, the one Render settings component, the 37 scene objects and "
                     "the 14 localized forces under the Force Field");
             Require(Centre.QueryQuickActionCount() == 3, "Render settings remain available from the Control Centre too");
             int RenderSettingsRows = 0;

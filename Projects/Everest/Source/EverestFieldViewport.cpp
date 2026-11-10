@@ -107,19 +107,28 @@ void EverestWorkspace::AdvanceFieldTimeline(double DeltaSeconds)
 //                                                    SLICE CONFIGURATION
 //------------------------------------------------------------------------------------------------------------------------
 
-// 📝 One slice from the level's records: the field as the renderer evaluates it (ConfigureAtmosphericFlow, at the timeline's
-//    time), the Force Field's view settings and the sources' outlines. False without a Force Field record.
-std::optional<std::array<double, 3>> EverestWorkspace::SampleLevelFlow(const std::array<double, 3>& LevelMetres)
+// 📝 One immutable native field snapshot from the level's records. The same IFieldSampler contract feeds Particle's full wind
+//    lattice and Fluid's per-cell advection; ForceSource records remain authored only once in the level.
+std::shared_ptr<const Frontier::IFieldSampler> EverestWorkspace::BuildLevelFieldSampler()
 {
     const FieldRecords Records = ResolveFieldRecords(QueryWorldSpace());
-    if (Records.Field == nullptr || !Records.Field->QueryConfiguration().Enabled) return std::nullopt;
+    if (Records.Field == nullptr) return {};
     Frontier::WindConfiguration Wind = Records.Wind != nullptr ? Records.Wind->QueryConfiguration() : Frontier::WindConfiguration{};
     if (Records.Wind == nullptr) Wind.Enabled = false;
     std::vector<Frontier::ForceSourceConfiguration> Sources;
     for (const Frontier::ForceSourceRecord* Source : Records.Sources) Sources.push_back(Source->QueryConfiguration());
-    Frontier::ForceFieldSpace Space;
-    Frontier::ConfigureAtmosphericFlow(Space, Records.Field->QueryConfiguration(), Wind, QueryElapsedSeconds(), Sources);
-    return Frontier::EvaluateWorldFlow(Space, LevelMetres);
+    auto Field = std::make_shared<Frontier::ForceFieldSpace>();
+    Frontier::ConfigureAtmosphericFlow(*Field, Records.Field->QueryConfiguration(), Wind, QueryElapsedSeconds(), Sources);
+    return Field;
+}
+
+// 📝 The level's flow at one world point (legacy readout API), delegated to the exact same native IFieldSampler snapshot.
+std::optional<std::array<double, 3>> EverestWorkspace::SampleLevelFlow(const std::array<double, 3>& LevelMetres)
+{
+    const std::shared_ptr<const Frontier::IFieldSampler> Field = BuildLevelFieldSampler();
+    if (!Field || !Field->QueryFieldEnabled()) return std::nullopt;
+    const Frontier::Vec3d Flow = Field->SampleWorldFlow({ LevelMetres[0], LevelMetres[1], LevelMetres[2] }, 0.0, true);
+    return std::array<double, 3>{ Flow.X, Flow.Y, Flow.Z };
 }
 
 bool EverestWorkspace::ConfigureFieldSlice(Frontier::ForceFieldVisualization& Slice, bool Camera)

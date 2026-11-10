@@ -53,8 +53,15 @@ bool ConstructFrameWithRecovery(const std::function<void()> &ConstructInterface,
     {
         FaultMessage = "Unknown interface construction failure";
     }
+    ImGuiIO& IO = ImGui::GetIO();
+    const bool AssertOnRecovery = IO.ConfigErrorRecoveryEnableAssert;
+    const bool DebugLogOnRecovery = IO.ConfigErrorRecoveryEnableDebugLog;
+    IO.ConfigErrorRecoveryEnableAssert = false;
+    IO.ConfigErrorRecoveryEnableDebugLog = true;
     try { ImGui::EndFrame(); }
     catch (...) { }
+    IO.ConfigErrorRecoveryEnableAssert = AssertOnRecovery;
+    IO.ConfigErrorRecoveryEnableDebugLog = DebugLogOnRecovery;
     return false;
 }
 } // namespace
@@ -102,6 +109,8 @@ int main()
             }, Fault);
             Require(!Ok, "A frame that threw was incorrectly reported as having succeeded");
             Require(Fault == "std::bad_alloc", "Unexpected fault message for an injected std::bad_alloc");
+            Require(IO.ConfigErrorRecoveryEnableAssert && IO.ConfigErrorRecoveryEnableDebugLog,
+                    "Frame recovery did not restore ImGui's normal error settings");
             ++FaultedFrames;
             // Critically: execution reached here. In the pre-patch code, std::bad_alloc from this point
             // would have propagated out of the entire application main loop instead.

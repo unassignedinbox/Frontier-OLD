@@ -419,7 +419,7 @@ float4 LightningFragment(StripVarying In) : SV_Target0
     let Glow = exp(-Across * Across * 4.0);
     let Filament = exp(-Across * Across * 60.0);
     let Colour = (float3(0.35, 0.6, 1.0) * Glow * 0.9 + float3(1.0) * Filament) * In.Intensity;
-    return float4(Colour, 1.0);
+    return float4(Colour, clamp(max(Colour.r, max(Colour.g, Colour.b)), 0.0, 1.0));
 }
 
 float3 ResolveArrowColour(float Level)

@@ -78,9 +78,11 @@ struct SceneViewportReadout
 
 struct SceneViewportImage
 {
-    uint64_t             Texture = 0;   // [-] ImTextureID of the presented image; 0 while unavailable
-    std::string          Status{};      // [-] renderer, extent and refresh time, or the bring-up / failure line
-    SceneViewportReadout Readout{};     // [-]
+    uint64_t                Texture = 0;   // [-] ImTextureID of the presented scene image; 0 while unavailable
+    std::array<uint32_t, 2> Extent{};      // [px] actual scene render extent, used by aligned scene effects
+    uint64_t                ParticleTexture = 0;   // [-] ImTextureID of the transparent particle layer, when present
+    std::string             Status{};      // [-] renderer, extent and refresh time, or the bring-up / failure line
+    SceneViewportReadout    Readout{};     // [-]
 };
 
 } // namespace Frontier

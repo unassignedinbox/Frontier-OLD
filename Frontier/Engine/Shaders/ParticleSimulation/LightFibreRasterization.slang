@@ -290,7 +290,8 @@ float4 FibreFragment(FibreVarying In) : SV_Target0
     let Tint = lerp(Hue, Fibre.AccentColour.xyz, Fibre.Accent.x * ResolveFibreUnit(In.Strand, 12.0));
     let Vary = 0.4 + 0.9 * ResolveFibreUnit(In.Strand, 13.0);
     let Level = Fibre.Light.x * Vary * (Filament + Glow) * Lit * Ends * In.Fade * ResolveFibrePulse(In.Along);
-    return float4(Tint * Level, 1.0);
+    let Colour = Tint * Level;
+    return float4(Colour, clamp(max(Colour.r, max(Colour.g, Colour.b)), 0.0, 1.0));
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -339,5 +340,6 @@ float4 FibreSparkFragment(SparkVarying In) : SV_Target0
 {
     let RadiusSquared = dot(In.Corner, In.Corner);
     let Disc = exp(-RadiusSquared * 7.0) * (1.0 - smoothstep(0.7, 1.0, RadiusSquared));
-    return float4(In.Colour * Disc, 1.0);
+    let Colour = In.Colour * Disc;
+    return float4(Colour, clamp(max(Colour.r, max(Colour.g, Colour.b)), 0.0, 1.0));
 }

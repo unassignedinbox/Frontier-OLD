@@ -1,5 +1,6 @@
+scene camera: 0.029577 × 0.026291 NDC projection, FOV 60.0°
 space: 56 effects, 4 forces
-text: 84029 bytes, identical after the round trip
+text: 122572 bytes, identical after the round trip
 effects: 56 / 56 identical
 refresh plans: 1680 / 1680 job uniforms identical over 30 refreshes
 level wind: 4 flows still, 5 following 6.3 m/s
@@ -10,4 +11,4 @@ refused an unknown force: force 1: unknown force category "whirlpool"
 refused a number used twice: effect 2: number 2 is used twice
 refused a mistyped parameter: effect 1: capacity must be an integer
 refused broken TOML: Error while parsing table header: expected ']', saw '\n'
-🟢 146 / 146 assertions
+🟢 154 / 154 assertions

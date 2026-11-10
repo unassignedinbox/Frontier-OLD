@@ -122,7 +122,7 @@ int main(int ArgumentCount, char** Arguments)
         WorldSpace& World    = Workspace.QueryWorldSpace();
         auto*       Pipeline = dynamic_cast<RenderPipelineRecord*>(World.FindFirstByType("RenderPipeline"));
         Require(Pipeline != nullptr, "no Render settings record");
-        Pipeline->AccessConfiguration().AnalyticIllumination = AnalyticOnly;
+        Pipeline->AccessConfiguration().DirectShading        = AnalyticOnly;
         Pipeline->AccessConfiguration().HardwareRayQueryTier = Mode != "distance";
         Pipeline->AccessConfiguration().VirtualizedGeometry  = Mode == "virtualized";
         Pipeline->AccessConfiguration().AdvanceRevision();

@@ -79,38 +79,15 @@ fn UniteDistance(@builtin(workgroup_id) Group: vec3u, @builtin(local_invocation_
     let BrickMaximum = BrickMinimum + vec3f(f32(BrickEdge) * Clip.VoxelExtent);
     let InverseSpace = 1.0 / vec3f(textureDimensions(VolumeSpace));
 
-    // ① each lane owns a 2×2×2 sub-cube of the brick, seeded with the analytic course plane (carved open inside subterranean cutouts)
+    // ① each lane owns a 2×2×2 sub-cube of the brick, seeded with the analytic course plane
     let LaneVoxel = vec3u(Lane & 3u, (Lane >> 2u) & 3u, Lane >> 4u) * 2u;
     var Nearest  : array<f32, 8>;
     var Identity : array<u32, 8>;
     for (var Sub = 0u; Sub < 8u; Sub++)
     {
         let WorldVoxel = Brick.xyz * i32(BrickEdge) + vec3i(LaneVoxel + vec3u(Sub & 1u, (Sub >> 1u) & 1u, Sub >> 2u));
-        let WorldPoint = (vec3f(WorldVoxel) + 0.5) * Clip.VoxelExtent;
-        var Excavated = false;
-        var RimDistance = Clip.Band;
-        for (var Cut = 0u; Cut < Distance.CutoutCount; Cut++)
-        {
-            let Box = Distance.Cutouts[Cut];
-            if (WorldPoint.x > Box.x && WorldPoint.x < Box.z && WorldPoint.y > Box.y && WorldPoint.y < Box.w)
-            {
-                Excavated = true;
-                let RimXY = min(min(WorldPoint.x - Box.x, Box.z - WorldPoint.x),
-                                min(WorldPoint.y - Box.y, Box.w - WorldPoint.y));
-                let Above = max(WorldPoint.z - Distance.GroundHeight, 0.0);
-                RimDistance = min(RimDistance, sqrt(RimXY * RimXY + Above * Above));
-            }
-        }
-        if (Excavated)
-        {
-            Nearest[Sub]  = RimDistance;
-            Identity[Sub] = select(VacantIdentity, GroundIdentity, RimDistance < Clip.Band);
-        }
-        else
-        {
-            Nearest[Sub]  = WorldPoint.z - Distance.GroundHeight;
-            Identity[Sub] = GroundIdentity;
-        }
+        Nearest[Sub]  = (f32(WorldVoxel.z) + 0.5) * Clip.VoxelExtent - Distance.GroundHeight;
+        Identity[Sub] = GroundIdentity;
     }
 
     // ② pages: cull 64 occupants against the brick grown by the band, stage the survivors, fold them in

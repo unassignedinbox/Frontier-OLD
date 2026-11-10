@@ -129,6 +129,22 @@ struct ControlTheme
     bool  CapsuleSliders     = false;
     float SliderMargin       = 0.0f;
     ImU32 SliderCapsule      = 0;
+    ImU32 CardTop            = 0; // Remastered .property-group gradient top (#212121)
+    ImU32 CardBottom         = 0; // Remastered .property-group gradient bottom (#191919)
+    ImU32 PillFill           = 0; // Remastered .value-pill black field (#000000)
+    ImU32 PillBorder         = 0;
+    ImU32 TrackFull          = 0; // Remastered --slider-fill (#4e4e4e)
+    ImU32 TrackEmpty         = 0; // Remastered pill-range empty (#232323)
+    ImU32 ThumbFill          = 0; // Remastered --slider-thumb (#e6e6e6)
+    ImU32 HighlightFill      = 0; // Remastered --highlight-bg (#eff4cf)
+    ImU32 HighlightInk       = 0; // Remastered --highlight-ink (#17190e)
+    ImU32 SwitchOn           = 0; // Remastered checked switch (#ffffff)
+    ImU32 SwitchOff          = 0; // Remastered idle switch (#232323)
+    ImU32 KnobOn             = 0; // Remastered checked knob (#111111)
+    ImU32 KnobOff            = 0; // Remastered idle knob (#bcbcbc)
+    ImU32 SegmentFill        = 0; // Remastered active segment/tab (#292929/#282828)
+    ImU32 SegmentText        = 0; // Remastered active segment text (#f2f2f2)
+    ImU32 SegmentIdle        = 0; // Remastered idle segment text (#828282)
 
     [[nodiscard]] static ControlTheme ResolveNative() noexcept;
     [[nodiscard]] static ControlTheme ResolveGeometry() noexcept;   // [-] the Project Zero editor's object inspector
@@ -140,6 +156,7 @@ struct ControlTheme
     [[nodiscard]] static ControlTheme ResolveSolar() noexcept;
     [[nodiscard]] static ControlTheme ResolveCloud() noexcept;
     [[nodiscard]] static ControlTheme ResolveAtmosphere() noexcept;
+    [[nodiscard]] static ControlTheme ResolveRemastered() noexcept;   // [-] the Remastered Studio charcoal system
 };
 
 } // namespace Frontier

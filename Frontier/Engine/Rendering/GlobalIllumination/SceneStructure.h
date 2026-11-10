@@ -76,14 +76,14 @@ struct FacetSet
     uint32_t                VertexCount    = 0;     // [-]
     uint32_t                VertexCapacity = 0;     // [-] reserved vertices of a fragmented set
     bool                    Fragmented     = false;   // [-] the demo's fragment-set flag (bit 0)
-    int32_t                 VolumeIndex    = -1;    // [-] OccupantDistanceSpace volume, -1 when none
-    // 📝 An engine shape's baked signed distance volume (ShapeArchive): its layout replaces the one OccupantDistanceSpace would
+    int32_t                 VolumeIndex    = -1;    // [-] SubjectDistanceSpace volume, -1 when none
+    // 📝 An engine shape's baked signed distance volume (ShapeArchive): its layout replaces the one SubjectDistanceSpace would
     //    choose and its texels are written instead of transferred.
     std::shared_ptr<const ShapeDistanceVolume> BakedVolume{};
 };
 
-// 📝 Placement of one occupant's distance volume inside the occupant distance space (OccupantDistanceSpace volumes).
-struct OccupantVolume
+// 📝 Placement of one occupant's distance volume inside the occupant distance space (SubjectDistanceSpace volumes).
+struct SubjectVolume
 {
     uint32_t                FacetSet    = 0;
     double                  VoxelExtent = 0.0;   // [m]
@@ -116,7 +116,7 @@ struct OccupantEntry
     int32_t     Cone             = -1;
     int32_t     StressSlot       = -1;
     std::optional<Transform> UnionTransform{};    // [-] transform the scene field last unioned (ResolveMovedBounds)
-    std::optional<OccupantVolume> Volume{};       // [-] fragment pool volume
+    std::optional<SubjectVolume> Volume{};       // [-] fragment pool volume
 };
 
 struct DrawRun
@@ -143,8 +143,8 @@ class SceneStructure
     void RetainOccupantTransform(uint32_t Occupant);
 
     // 📝 336-byte OccupantProfile records for occupants [First, First + Count), volumes from the distance space.
-    [[nodiscard]] std::vector<uint8_t> EncodeOccupantRange(const std::vector<OccupantVolume>* Volumes, uint32_t First, uint32_t Count) const;
-    [[nodiscard]] std::vector<uint8_t> EncodeOccupantProfiles(const std::vector<OccupantVolume>* Volumes, uint32_t Count) const
+    [[nodiscard]] std::vector<uint8_t> EncodeOccupantRange(const std::vector<SubjectVolume>* Volumes, uint32_t First, uint32_t Count) const;
+    [[nodiscard]] std::vector<uint8_t> EncodeOccupantProfiles(const std::vector<SubjectVolume>* Volumes, uint32_t Count) const
     {
         return EncodeOccupantRange(Volumes, 0, Count);
     }

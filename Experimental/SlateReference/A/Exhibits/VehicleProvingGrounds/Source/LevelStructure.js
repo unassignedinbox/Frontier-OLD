@@ -6,17 +6,6 @@
 import { CourseMaterial } from "./MaterialSpecification.js";
 import { CourseConstants, KerbConstants, SpawnPoint, EmitQuad, EmitBoxFacets, EmitPanelFacets, EmitPrismFacets,
          EmitExtrusionFacets, EmitConeFacets, EmitRampFacets, EmitTyreBarrierFacets, EmitSphereFacets } from "./CourseStructure.js";
-import { InversionArenaBounds, InversionArenaTracks, InversionArenaSurfaces, InversionArenaShapes, InversionArenaTerrainHulls,
-         InversionArenaSpawn, InversionArenaZones, InversionArenaDrills, InversionClearZones, InversionPhysicsCutouts,
-         InversionDistanceCutouts, EmitInversionGroundFacets, ResolveInversionPlacements, ResolveInversionBollards,
-         ResolveInversionCollapseSpans, ResolveInversionTrams, ResolveInversionServiceStations, ResolveInversionFactoryRobots,
-         ResolveInversionTrafficLights, ResolveInversionCones, ResolveInversionBreakables } from "./InversionArenaStructure.js";
-import { ConstructTrafficLightShapes } from "./TrafficLightSequence.js";
-import { CityPursuitShapes, CityPursuitSpawn, CityPursuitZones, CityClearZones,
-         ResolveCityPlacements, ResolveCityTrafficLights, ResolveCityCones, ResolveCityBreakables, EmitCityGroundFacets,
-         PolicePursuitShapes } from "./CityPursuitStructure.js";
-import { DDayShapes, DDayBounds, DDaySpawn, DDayZones, DDayClearZones,
-         ResolveDDayPlacements, ResolveDDayTrafficLights, ResolveDDayCones, ResolveDDayBreakables, EmitDDayGroundFacets } from "./DDayStructure.js";
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      SHAPES
@@ -84,8 +73,7 @@ export const LevelShapes = Object.freeze({
     GardenMirror:    { Emit: () => EmitBoxFacets(2.4, 0.15, 2.0, CourseMaterial.SteelDark,
                                                 [CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.SteelDark,
                                                  CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.Mirror]),
-                       Voxel: 0.08, Cards: 12 },
-    ...ConstructTrafficLightShapes()
+                       Voxel: 0.08, Cards: 12 }
 });
 
 // 📝 Shapes the car collides with (as world boxes)
@@ -461,176 +449,5 @@ export const LevelClearZones = Object.freeze([
     [-60.0, -16.0, -47.0, -6.0],   // control tower
     [60.0, -58.0, 154.0, 58.0]     // east training grounds
 ]);
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                                   LEVEL CATALOG
-//------------------------------------------------------------------------------------------------------------------------
-
-export const LevelCatalog = Object.freeze([
-    { Key: "dday",      Title: "D-Day · Militarized Wall Run", Subtitle: "Race from Omaha Beachhead through bunkers, MG turrets, cannons, tanks, airstrikes & mines to the Wall" },
-    { Key: "inversion", Title: "Inversion Arena",              Subtitle: "Tracks A–I: Stunt loops, collapsing bridge/road, 3-lane subway, trams & robot factory" },
-    { Key: "city",      Title: "City Pursuit & AI Lab",        Subtitle: "Highway interchange, city blocks, narrow alleys, police chase & fast self-play RL" },
-    { Key: "proving",   Title: "Proving Grounds",              Subtitle: "Skidpad, jump wedge, smash alley, tunnel & slalom" }
-]);
-
-export function ResolveLevelShapes(LevelKey = "proving")
-{
-    if (LevelKey === "dday")
-    {
-        const { Cone, Jersey } = LevelShapes;
-        return {
-            Cone:   { ...Cone,   Voxel: 0.05 },
-            Jersey: { ...Jersey, Voxel: 0.09 },
-            ...DDayShapes,
-            ...PolicePursuitShapes
-        };
-    }
-    if (LevelKey === "city")
-    {
-        const { Cone, Jersey, Pole, PoleHead,
-                HoverTrafficHousing, TrafficAspectRed, TrafficAspectOrange, TrafficAspectYellow, TrafficAspectGreen } = LevelShapes;
-        return {
-            Cone:   { ...Cone,   Voxel: 0.05 },
-            Jersey: { ...Jersey, Voxel: 0.09 },
-            Pole,
-            PoleHead,
-            HoverTrafficHousing,
-            TrafficAspectRed,
-            TrafficAspectOrange,
-            TrafficAspectYellow,
-            TrafficAspectGreen,
-            ...CityPursuitShapes,
-            ...PolicePursuitShapes
-        };
-    }
-    if (LevelKey === "inversion")
-    {
-        const { Cone, Jersey, TrafficPost, TrafficHead, Pole, PoleHead,
-                GardenAluminium, GardenGold, GardenGlass, GardenMirror } = LevelShapes;
-        return {
-            Cone:            { ...Cone,            Voxel: 0.05 },
-            Jersey:          { ...Jersey,          Voxel: 0.09 },
-            TrafficPost,
-            TrafficHead,
-            Pole,
-            PoleHead,
-            GardenAluminium: { ...GardenAluminium, Voxel: 0.08 },
-            GardenGold:      { ...GardenGold,      Voxel: 0.08 },
-            GardenGlass:     { ...GardenGlass,     Voxel: 0.08 },
-            GardenMirror:    { ...GardenMirror,    Voxel: 0.06 },
-            ...InversionArenaShapes,
-            ...PolicePursuitShapes
-        };
-    }
-    return {
-        ...LevelShapes,
-        ...PolicePursuitShapes
-    };
-}
-
-export function ResolveProvingTrafficLights()
-{
-    return [
-        { Id: "tl_proving_west", Name: "Start Straight Crossroads Signal", Anchor: [ 18.0,  0.0, 4.35], Yaw: 0.0, PhaseOffset: 0.0 },
-        { Id: "tl_proving_east", Name: "Training Arena Junction Signal",   Anchor: [ 82.0,  0.0, 4.35], Yaw: 0.0, PhaseOffset: 7.5 }
-    ];
-}
-
-export function ResolveLevelDescriptor(LevelKey = "proving")
-{
-    if (LevelKey === "dday")
-    {
-        return {
-            Key:           "dday",
-            Title:         "D-Day · Militarized Wall Run",
-            Relief:        false,
-            AeroGrip:      0.45,
-            DDayAssault:   true,
-            Bounds:        DDayBounds,
-            Spawn:         DDaySpawn,
-            Zones:         DDayZones,
-            Drills:        [],
-            ClearZones:    DDayClearZones,
-            Surfaces:      [],
-            TerrainHulls:  null,
-            Shapes:        ResolveLevelShapes("dday"),
-            Placements:    ResolveDDayPlacements,
-            TrafficLights: ResolveDDayTrafficLights,
-            Cones:         ResolveDDayCones,
-            Breakables:    ResolveDDayBreakables,
-            EmitGround:    EmitDDayGroundFacets
-        };
-    }
-    if (LevelKey === "city")
-    {
-        return {
-            Key:           "city",
-            Title:         "City Pursuit & AI Lab",
-            Relief:        false,
-            AeroGrip:      0.35,
-            PolicePursuit: true,
-            Spawn:         CityPursuitSpawn,
-            Zones:         CityPursuitZones,
-            Drills:        [],
-            ClearZones:    CityClearZones,
-            Surfaces:      [],
-            TerrainHulls:  null,
-            Shapes:        ResolveLevelShapes("city"),
-            Placements:    ResolveCityPlacements,
-            TrafficLights: ResolveCityTrafficLights,
-            Cones:         ResolveCityCones,
-            Breakables:    ResolveCityBreakables,
-            EmitGround:    EmitCityGroundFacets
-        };
-    }
-    if (LevelKey === "inversion")
-    {
-        return {
-            Key:             "inversion",
-            Title:           "Inversion Arena",
-            Relief:          false,
-            AeroGrip:        1.0,
-            Bounds:          InversionArenaBounds,
-            Tracks:          InversionArenaTracks,
-            Spawn:           InversionArenaSpawn,
-            Zones:           InversionArenaZones,
-            Drills:          InversionArenaDrills,
-            ClearZones:      InversionClearZones,
-            Surfaces:        InversionArenaSurfaces,
-            TerrainHulls:    InversionArenaTerrainHulls,
-            PhysicsCutouts:  InversionPhysicsCutouts,
-            DistanceCutouts: InversionDistanceCutouts,
-            Shapes:          ResolveLevelShapes("inversion"),
-            Placements:      ResolveInversionPlacements,
-            Bollards:        ResolveInversionBollards,
-            CollapseSpans:   ResolveInversionCollapseSpans,
-            Trams:           ResolveInversionTrams,
-            ServiceStations: ResolveInversionServiceStations,
-            FactoryRobots:   ResolveInversionFactoryRobots,
-            TrafficLights:   ResolveInversionTrafficLights,
-            Cones:           ResolveInversionCones,
-            Breakables:      ResolveInversionBreakables,
-            EmitGround:      EmitInversionGroundFacets
-        };
-    }
-    return {
-        Key:           "proving",
-        Title:         "Proving Grounds",
-        Relief:        true,
-        AeroGrip:      0.0,
-        Spawn:         SpawnPoint,
-        Zones:         ArenaZones,
-        Drills:        TrainingDrills,
-        ClearZones:    LevelClearZones,
-        Surfaces:      [],
-        TerrainHulls:  null,
-        Shapes:        LevelShapes,
-        Placements:    ResolveLevelPlacements,
-        TrafficLights: ResolveProvingTrafficLights,
-        Cones:         ResolveConePlacements,
-        Breakables:    ResolveBreakables,
-        EmitGround:    EmitLevelGroundFacets
-    };
-}
 
 export { SpawnPoint };

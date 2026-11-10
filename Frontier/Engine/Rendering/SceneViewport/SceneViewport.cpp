@@ -7,6 +7,7 @@
 #include "SceneViewport.h"
 
 #include "Engine/DeviceExchange/VulkanComputeExchange.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,7 +19,7 @@ namespace Frontier::GlobalIllumination
 namespace
 {
 
-constexpr double Pi = 3.141592653589793;
+constexpr double Pi = MathConstantsD::Pi;
 
 bool ReadArchive(const std::filesystem::path& Path, std::vector<uint8_t>& OutBytes, std::string* OutDiagnostic)
 {
@@ -38,7 +39,8 @@ SceneViewport::SceneViewport() = default;
 
 SceneViewport::~SceneViewport()
 {
-    // 📝 Device resources die before their exchanges; the borrowed environment views before the environment images.
+    // 📝 Drain the device queue before freeing any GPU resource so tier transitions or teardown never race active work.
+    if (Exchange_) Exchange_->AwaitIdle();
     PresentedView_.reset();
     Pick_.reset();
     Overlay_.reset();
@@ -231,24 +233,24 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         PresentedView_ = Exchange_->ConstructView(Host_->CaptureTexture);
     }
     ElapsedSeconds_ += std::max(0.0, DeltaSeconds);
-    if (Rendering.AnalyticIllumination)
+    if (Rendering.DirectShading)
     {
-        // 📝 The analytic illumination draws the loaded scene into the same presented image; the global illumination rests.
-        if (!Analytic_)
+        // 📝 Direct shading draws the loaded scene into the same presented image; the global illumination rests.
+        if (!DirectShading_)
         {
-            auto Candidate = std::make_unique<AnalyticIllumination::AnalyticIlluminationSequence>(
-                *Exchange_, Configuration_.GlobalIlluminationShaders.parent_path() / "AnalyticIllumination");
+            auto Candidate = std::make_unique<DirectShading::DirectShadingSequence>(
+                *Exchange_, Configuration_.GlobalIlluminationShaders.parent_path() / "DirectShading");
             if (!Candidate->Construct(Host_->Scene, Host_->VertexRegion, Host_->OccupantRegion, Host_->MaterialRegion, OutDiagnostic)) return false;
-            Analytic_ = std::move(Candidate);
-            if (Configuration_.Journal) Configuration_.Journal("analytic illumination up");
+            DirectShading_ = std::move(Candidate);
+            if (Configuration_.Journal) Configuration_.Journal("direct shading up");
         }
-        AnalyticIllumination::AnalyticCamera View;
+        DirectShading::DirectShadingCamera View;
         View.Position            = Camera.Position;
         View.Target              = Camera.Target;
         View.Up                  = Camera.Up;
         View.VerticalFieldOfView = Camera.VerticalFieldOfView;
         View.Near                = Camera.Near;
-        AnalyticIllumination::AnalyticSun Sun;
+        DirectShading::DirectShadingSun Sun;
         Sun.Enabled              = Environment.Solar.Enabled;
         Sun.ElevationDegrees     = Environment.Solar.ElevationDegrees;
         Sun.AzimuthDegrees       = Environment.Solar.AzimuthDegrees;
@@ -256,9 +258,9 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         Sun.KelvinTemperature    = Environment.Solar.KelvinTemperature;
         Sun.AngularDiameter      = Environment.Solar.AngularDiameterDeg;
         Sun.ExposureCompensation = Rendering.ExposureCompensation;
-        // 📝 The analytic illumination reads the occupant profiles too: relocated occupants are written before it draws.
+        // 📝 Direct shading reads the occupant profiles too: relocated occupants are written before it draws.
         if (!Host_->RelocatedOccupants.empty() || !Host_->SettlingOccupants.empty()) Host_->SettleRelocatedOccupants();
-        if (!Analytic_->Refresh(View, Sun, ScreenExtent, Host_->CaptureView, OutDiagnostic)) return false;
+        if (!DirectShading_->Refresh(View, Sun, ScreenExtent, Host_->CaptureView, OutDiagnostic)) return false;
         PickCamera_ = Camera;
         PickExtent_ = ScreenExtent;
         return true;
@@ -305,7 +307,7 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
     //    presentation word carries only exposure/scale metadata.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20) | EncodeCameraMotionBlurControl(Rendering.CameraMotionBlur);
+    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20);
     Inputs.External.FireBlock      = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.46f, 0.14f, 14.0f};
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
@@ -371,9 +373,9 @@ std::array<uint32_t, 2> SceneViewport::QueryScreenExtent() const noexcept
     return Host_ ? Host_->ScreenExtent : std::array<uint32_t, 2>{0, 0};
 }
 
-uint32_t SceneViewport::RelocateOccupants(const std::vector<OccupantPlacement>& Placements)
+uint32_t SceneViewport::RelocateSubjects(const std::vector<SubjectPlacement>& Placements)
 {
-    return Host_ ? GlobalIllumination::RelocateOccupants(*Host_, Placements) : 0u;
+    return Host_ ? GlobalIllumination::RelocateSubjects(*Host_, Placements) : 0u;
 }
 
 Transform SceneViewport::ResolveViewProjection(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent) noexcept
@@ -383,7 +385,7 @@ Transform SceneViewport::ResolveViewProjection(const ViewportCamera& Camera, std
                              ConstructViewTransform(Camera.Position, Camera.Target, Camera.Up));
 }
 
-bool SceneViewport::PickOccupants(std::array<double, 2> Point, OccupantPick& Outcome, std::string* OutDiagnostic)
+bool SceneViewport::PickSubjects(std::array<double, 2> Point, SubjectPick& Outcome, std::string* OutDiagnostic)
 {
     if (!PickCamera_ || PickExtent_[0] == 0 || PickExtent_[1] == 0)
     {
@@ -397,11 +399,11 @@ bool SceneViewport::PickOccupants(std::array<double, 2> Point, OccupantPick& Out
         const double Scaled = std::floor(std::clamp(Point[Axis], 0.0, 1.0) * PickExtent_[Axis]);
         Pixel[Axis]         = static_cast<uint32_t>(std::min(Scaled, static_cast<double>(PickExtent_[Axis] - 1u)));
     }
-    return PickOccupants(*PickCamera_, PickExtent_, Pixel, Outcome, OutDiagnostic);
+    return PickSubjects(*PickCamera_, PickExtent_, Pixel, Outcome, OutDiagnostic);
 }
 
-bool SceneViewport::PickOccupants(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent, std::array<uint32_t, 2> Pixel,
-                                  OccupantPick& Outcome, std::string* OutDiagnostic)
+bool SceneViewport::PickSubjects(const ViewportCamera& Camera, std::array<uint32_t, 2> ScreenExtent, std::array<uint32_t, 2> Pixel,
+                                  SubjectPick& Outcome, std::string* OutDiagnostic)
 {
     if (!Host_ || !Host_->VertexRegion || !Host_->OccupantRegion)
     {

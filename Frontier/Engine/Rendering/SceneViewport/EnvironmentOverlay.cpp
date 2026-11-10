@@ -9,6 +9,7 @@
 #include "Engine/PlanetaryAtmosphere/PlanetaryEnsemble.h"
 #include "Engine/PhysicalDynamics/AtmosphericFlow.h"
 #include "Engine/PlanetaryAtmosphere/CelestialAuthoring.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 #include <unordered_map>
 #include <unordered_set>
 
@@ -22,8 +23,8 @@ namespace Frontier::GlobalIllumination
 namespace
 {
 
-constexpr double Pi              = 3.141592653589793;
-constexpr double DegreesToRadian = Pi / 180.0;
+constexpr double Pi              = MathConstantsD::Pi;
+constexpr double DegreesToRadian = MathConstantsD::DegreesToRadians;
 // 📝 Local sidereal angle the Hipparcos catalogue is baked for (DecodeHipparcosCatalogue defaults: J2000.0 at 0°, 0°).
 constexpr double CatalogueSidereal = 280.46061837 * DegreesToRadian;
 constexpr double SiderealRate      = 2.0 * Pi / 86164.0905;   // [rad/s]

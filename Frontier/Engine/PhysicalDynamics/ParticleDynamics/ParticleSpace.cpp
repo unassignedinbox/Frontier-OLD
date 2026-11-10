@@ -4,10 +4,14 @@
 // 🧩 The particle space and its refresh in C++ (the prototype's Scene): effects with their wind links, bursts, molecular sub-steps, the jobs, the guides.
 
 #include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpace.h"
+#include "Frontier/Engine/PhysicalDynamics/ParticleDynamics/ParticleSpaceCodec.h"
+
+#include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <sstream>
 
 namespace Frontier
 {
@@ -104,6 +108,46 @@ void ParticleSpace::ApplyWindLink(const ParticlePreset& Preset)
         Found->Centre[2] = Preset.Parameters.OriginMetres[2];
     }
     Found->Enabled = true;
+}
+
+void ParticleSpace::SampleLevelForceField(const IFieldSampler& Field)
+{
+    if (!Field.QueryFieldEnabled())
+    {
+        if (LevelWind.FlowMps)
+        {
+            LevelWind.FlowMps.reset();
+            AdvanceRevision();
+        }
+        return;
+    }
+    const Vec3d Anchor{ LevelWind.AnchorMetres[0], LevelWind.AnchorMetres[1], LevelWind.AnchorMetres[2] };
+    const Vec3d Flow = Field.SampleFieldFlow(WorldToFieldAxes(Anchor), 0.0, true);
+    const std::array<double, 3> Reading{ Flow.X, Flow.Y, Flow.Z };
+    if (!LevelWind.FlowMps || *LevelWind.FlowMps != Reading)
+    {
+        LevelWind.FlowMps = Reading;
+        AdvanceRevision();
+    }
+}
+
+void ParticleSpace::SerializeDomainState(toml::table& Out) const
+{
+    Out = toml::parse(EncodeParticleSpace(*this));
+}
+
+void ParticleSpace::DeserializeDomainState(const toml::table& In)
+{
+    std::ostringstream Stream;
+    Stream << In;
+    ParticleSpace Loaded;
+    std::string   Diagnostic;
+    if (!DecodeParticleSpace(Stream.str(), Loaded, Diagnostic))
+    {
+        return;   // 📝 a malformed replication payload leaves the local space untouched
+    }
+    *this = std::move(Loaded);
+    AdvanceRevision();
 }
 
 void ParticleSpace::ConstructDefault(const ParticleEffectLibrary& Library, const std::vector<std::string>* Presets)
@@ -287,7 +331,9 @@ std::array<uint32_t, 3> ParticleSpace::ResolveProbeCell() const noexcept
 //                                                    REFRESH
 //------------------------------------------------------------------------------------------------------------------------
 
-ParticleRefreshPlan ParticleSpace::Advance(double RealDeltaSeconds, uint32_t ViewWidth, uint32_t ViewHeight)
+ParticleRefreshPlan ParticleSpace::Advance(double RealDeltaSeconds, uint32_t ViewWidth, uint32_t ViewHeight,
+                                           const ParticleCameraPose* CameraOverride,
+                                           const IFieldSampler* SharedFieldSampler)
 {
     ParticleRefreshPlan Plan;
     Plan.ViewWidth  = std::max(1u, ViewWidth);
@@ -323,9 +369,21 @@ ParticleRefreshPlan ParticleSpace::Advance(double RealDeltaSeconds, uint32_t Vie
     }
 
     const double Aspect = static_cast<double>(Plan.ViewWidth) / static_cast<double>(std::max(1u, Plan.ViewHeight));
-    Plan.Camera         = ResolveParticleCamera(Camera, Aspect);
-    std::vector<ParticleField> Flowing(Fields.begin(), Fields.end());
-    if (LevelWind.Follow && LevelWind.FlowMps && CountFlowFields() < ParticleWindComponentLimit)
+    const double VerticalFieldOfView = CameraOverride != nullptr ? CameraOverride->VerticalFieldOfView : std::numbers::pi / 4.0;
+    Plan.Camera = CameraOverride != nullptr ? ResolveParticleCamera(*CameraOverride, Aspect) : ResolveParticleCamera(Camera, Aspect);
+    Plan.SharedFieldActive = LevelWind.Follow && SharedFieldSampler != nullptr && SharedFieldSampler->QueryFieldEnabled();
+    if (LevelWind.Follow && SharedFieldSampler != nullptr) SampleLevelForceField(*SharedFieldSampler);
+    if (Plan.SharedFieldActive)
+    {
+        const Vec3d Origin = WorldToFieldAxes({ LevelWind.AnchorMetres[0], LevelWind.AnchorMetres[1], LevelWind.AnchorMetres[2] });
+        Plan.SharedFieldOriginMetres = { Origin.X, Origin.Y, Origin.Z };
+    }
+
+    // 📝 A followed native ForceField already includes ambient wind and authored environmental flows. Do not also pack
+    //    Particle's legacy flow generators into the same lattice; its acceleration and damping fields below remain local.
+    std::vector<ParticleField> Flowing;
+    if (!Plan.SharedFieldActive) Flowing.assign(Fields.begin(), Fields.end());
+    if (!Plan.SharedFieldActive && LevelWind.Follow && LevelWind.FlowMps && CountFlowFields() < ParticleWindComponentLimit)
     {
         const double Speed = std::hypot((*LevelWind.FlowMps)[0], (*LevelWind.FlowMps)[2]);
         if (Speed > 1.0e-6)
@@ -379,7 +437,7 @@ ParticleRefreshPlan ParticleSpace::Advance(double RealDeltaSeconds, uint32_t Vie
             }
             LightFibreRefresh FibreRefresh;
             FibreRefresh.LoopFraction    = std::fmod(TimeSeconds / Fibre.LoopSeconds, 1.0);
-            FibreRefresh.ProjectionScale = (0.5 * Plan.ViewHeight) / std::tan(std::numbers::pi / 8.0);
+            FibreRefresh.ProjectionScale = (0.5 * Plan.ViewHeight) / std::tan(VerticalFieldOfView * 0.5);
             FibreRefresh.ViewWidth       = Plan.ViewWidth;
             FibreRefresh.ViewHeight      = Plan.ViewHeight;
             PackLightFibreUniform(Job.FibreUniform, P, FibreRefresh);
@@ -488,7 +546,7 @@ ParticleRefreshPlan ParticleSpace::Advance(double RealDeltaSeconds, uint32_t Vie
     {
         Placements.push_back({ &Effect.Parameters });
     }
-    Plan.LensingCounts = PackParticleLensing(Plan.Lensing, Placements, Plan.Camera, Aspect, TimeSeconds);
+    Plan.LensingCounts = PackParticleLensing(Plan.Lensing, Placements, Plan.Camera, Aspect, TimeSeconds, VerticalFieldOfView);
     PackParticleAccelerationFields(Plan.Fields, Placements, ResolveParticleFieldPayloads(Fields, TimeSeconds).Accelerations, TimeSeconds);
     const float Flash = static_cast<float>(Lightning.Flash * 0.22);
     Plan.Clear  = { 0.035f + Flash, 0.037f + Flash, 0.045f + Flash };

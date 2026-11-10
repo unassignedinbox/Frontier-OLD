@@ -5,6 +5,8 @@
 
 #include "Engine/Geometry/PrimitiveGeometryGenerator.h"
 
+#include "Frontier/Engine/Foundation/Constants.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -17,8 +19,8 @@ namespace Frontier
 namespace
 {
 
-constexpr double π    = 3.14159265358979323846;
-constexpr double Twoπ = 6.28318530717958647692;
+constexpr double π    = MathConstantsD::Pi;
+constexpr double Twoπ = MathConstantsD::TwoPi;
 
 FacetPoint3D TransformLocalPoint(FacetPoint3D Local, const PrimitivePlacement& Placement) noexcept
 {

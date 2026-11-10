@@ -46,12 +46,14 @@ enum class ControlCentrePageCategory
 };
 
 // 📝 A host workspace's own action on the Quick Controls grid (the Everest editor's Projects and Save level), drawn
-//    after the built-in toggles with the same 64 px disc. Evaluating one closes the drawer.
+//    after the built-in toggles with the same 64 px disc. Evaluating one closes the drawer. QueryActive, when set,
+//    makes the action a toggle: the disc takes the accent while it reports true.
 struct ControlCentreQuickAction
 {
     std::string               Caption;
     ControlCentreIconCategory Icon = ControlCentreIconCategory::ChevronBack;
     std::function<void()>     Evaluate;
+    std::function<bool()>     QueryActive;
 };
 
 class ControlCentrePanel final : public ActivationSequence

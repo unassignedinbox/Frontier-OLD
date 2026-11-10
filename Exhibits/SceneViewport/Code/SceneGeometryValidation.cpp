@@ -6,7 +6,8 @@
 //    then the editor's own objects: the baked engine shapes, the reserve that copies and constructed objects take, the
 //    per-object shadow / indirect / dynamic switches, material blocks, removal and the distance field's scale bound.
 
-#include "Frontier/Extensions/Rendering/SceneGeometryOccupancy.h"
+#include "Frontier/Extensions/Rendering/SceneSubjectPlacement.h"
+#include "Frontier/Engine/Interface/Controls/PlacementGizmo.h"
 
 #include "Frontier/Engine/Geometry/ShapeArchive.h"
 #include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
@@ -30,7 +31,22 @@
 namespace
 {
 
-using Frontier::GlobalIllumination::OccupantPlacement;
+struct SpatialEditableFixture
+{
+    Frontier::SpatialProfile Spatial{};
+};
+
+static_assert(Frontier::SpatialEditable<SpatialEditableFixture>);
+static_assert(requires(Frontier::PlacementGizmo& Gizmo, const Frontier::PlacementView& View,
+                       const SpatialEditableFixture& ReadOnly, SpatialEditableFixture& Editable, ImVec2 Pointer)
+{
+    { Gizmo.Probe(View, Frontier::PlacementGizmoMode::Move, ReadOnly, Pointer, 1.0f) } -> std::same_as<int>;
+    { Gizmo.Construct(nullptr, View, Frontier::PlacementGizmoMode::Move, Editable, false, false, 1.0f) }
+        -> std::same_as<Frontier::PlacementGizmoOutcome>;
+    { Gizmo.Cancel(Editable) } -> std::same_as<void>;
+});
+
+using Frontier::GlobalIllumination::SubjectPlacement;
 using Frontier::GlobalIllumination::SceneStructure;
 
 int Failures = 0;
@@ -55,10 +71,10 @@ double Translation(const Frontier::PlacementMatrix& Matrix, int Axis)
     return Matrix[static_cast<size_t>(12 + Axis)];
 }
 
-std::map<uint32_t, OccupantPlacement> Index(const std::vector<OccupantPlacement>& Placements)
+std::map<uint32_t, SubjectPlacement> Index(const std::vector<SubjectPlacement>& Placements)
 {
-    std::map<uint32_t, OccupantPlacement> Indexed;
-    for (const OccupantPlacement& Placement : Placements) Indexed[Placement.Occupant] = Placement;
+    std::map<uint32_t, SubjectPlacement> Indexed;
+    for (const SubjectPlacement& Placement : Placements) Indexed[Placement.SubjectIndex] = Placement;
     return Indexed;
 }
 
@@ -96,10 +112,10 @@ int main(int ArgumentCount, char** Arguments)
         Report(Records == 37, "the level holds " + std::to_string(Records) + " Geometry records (37)");
 
         // ② binding: every record binds, and the static occupants are bound once each
-        Frontier::SceneGeometryOccupancy Occupancy;
-        Occupancy.Reset(&Scene, Materials);
-        const std::vector<OccupantPlacement> Initial = Occupancy.ResolvePlacements(World);
-        const auto                           Resolutions = Occupancy.QueryResolutions();
+        Frontier::SceneSubjectPlacement GeometryPlacement;
+        GeometryPlacement.Reset(&Scene, Materials);
+        const std::vector<SubjectPlacement> Initial = GeometryPlacement.ResolvePlacements(World);
+        const auto                           Resolutions = GeometryPlacement.QueryResolutions();
         size_t Bound = 0;
         for (const auto& [Token, Resolution] : *Resolutions)
         {
@@ -109,7 +125,7 @@ int main(int ArgumentCount, char** Arguments)
         Report(Bound == Records, std::to_string(Bound) + " of " + std::to_string(Records) + " records bind to the archive");
         std::set<uint32_t> Covered;
         size_t             Duplicates = 0;
-        for (const OccupantPlacement& Placement : Initial) Duplicates += Covered.insert(Placement.Occupant).second ? 0 : 1;
+        for (const SubjectPlacement& Placement : Initial) Duplicates += Covered.insert(Placement.SubjectIndex).second ? 0 : 1;
         size_t Outside = 0, Unexplained = 0;
         for (uint32_t Occupant = 0; Occupant < Scene.Occupants.size(); ++Occupant)
         {
@@ -132,26 +148,26 @@ int main(int ArgumentCount, char** Arguments)
 
         // ③ the default level shows the archive exactly
         size_t Exact = 0, Active = 0;
-        for (const OccupantPlacement& Placement : Initial)
+        for (const SubjectPlacement& Placement : Initial)
         {
-            Exact += Placement.Current == Scene.Occupants[Placement.Occupant].Current ? 1 : 0;
+            Exact += Placement.Current == Scene.Occupants[Placement.SubjectIndex].Current ? 1 : 0;
             Active += Placement.Active ? 1 : 0;
         }
         Report(Exact == Initial.size() && Active == Initial.size(),
                std::to_string(Exact) + " of " + std::to_string(Initial.size()) + " placements are the archive's transforms bit for bit, all active");
-        Report(Occupancy.ResolvePlacements(World).empty(), "an unchanged level resolves no placements again");
+        Report(GeometryPlacement.ResolvePlacements(World).empty(), "an unchanged level resolves no placements again");
 
         // ④ a smaller array hides the copies past its count
         auto& North = FindGeometry(World, "Boundary north")->AccessConfiguration();
         North.Modifiers.front().Count = 20;
         North.AdvanceRevision();
         {
-            const auto Placed = Index(Occupancy.ResolvePlacements(World));
+            const auto Placed = Index(GeometryPlacement.ResolvePlacements(World));
             const auto Copies = Matches(Scene, "Boundary North");
             size_t     Hidden = 0, Kept = 0;
             for (size_t Copy = 0; Copy < Copies.size(); ++Copy)
             {
-                const OccupantPlacement& Placement = Placed.at(Copies[Copy]);
+                const SubjectPlacement& Placement = Placed.at(Copies[Copy]);
                 if (Copy < 20) Kept += Placement.Active && Placement.Current == Scene.Occupants[Copies[Copy]].Current ? 1 : 0;
                 else Hidden += Placement.Active ? 0 : 1;
             }
@@ -163,7 +179,7 @@ int main(int ArgumentCount, char** Arguments)
         North.Modifiers.front().ConstantMetres[0] = 5.0f;
         North.AdvanceRevision();
         {
-            const auto Placed = Index(Occupancy.ResolvePlacements(World));
+            const auto Placed = Index(GeometryPlacement.ResolvePlacements(World));
             const auto Copies = Matches(Scene, "Boundary North");
             double     Worst  = 0.0;
             for (size_t Copy = 0; Copy < Copies.size(); ++Copy)
@@ -182,11 +198,11 @@ int main(int ArgumentCount, char** Arguments)
         Kerbs.Spatial.PositionMetres[1] += 2.0f;
         Kerbs.AdvanceRevision();
         {
-            const auto Placed = Occupancy.ResolvePlacements(World);
+            const auto Placed = GeometryPlacement.ResolvePlacements(World);
             double     Worst  = 0.0;
-            for (const OccupantPlacement& Placement : Placed)
+            for (const SubjectPlacement& Placement : Placed)
             {
-                const auto& Before = Scene.Occupants[Placement.Occupant].Current;
+                const auto& Before = Scene.Occupants[Placement.SubjectIndex].Current;
                 for (int Element = 0; Element < 12; ++Element) Worst = std::max(Worst, std::fabs(Placement.Current[static_cast<size_t>(Element)] - Before[static_cast<size_t>(Element)]));
                 Worst = std::max({Worst, std::fabs(Translation(Placement.Current, 0) - Before[12]), std::fabs(Translation(Placement.Current, 1) - Before[13] - 2.0),
                                   std::fabs(Translation(Placement.Current, 2) - Before[14])});
@@ -201,12 +217,12 @@ int main(int ArgumentCount, char** Arguments)
         Ring.Spatial.OrientationDegrees[2] = 10.0f;
         Ring.AdvanceRevision();
         {
-            const auto     Placed = Occupancy.ResolvePlacements(World);
+            const auto     Placed = GeometryPlacement.ResolvePlacements(World);
             double         Worst  = 0.0;
             const double   θ      = 10.0 * 3.14159265358979323846 / 180.0;
-            for (const OccupantPlacement& Placement : Placed)
+            for (const SubjectPlacement& Placement : Placed)
             {
-                const auto&  Before = Scene.Occupants[Placement.Occupant].Current;
+                const auto&  Before = Scene.Occupants[Placement.SubjectIndex].Current;
                 const double X = Before[12] + 30.0, Y = Before[13] - 30.0;
                 Worst = std::max({Worst, std::fabs(Translation(Placement.Current, 0) - (-30.0 + X * std::cos(θ) - Y * std::sin(θ))),
                                   std::fabs(Translation(Placement.Current, 1) - (30.0 + X * std::sin(θ) + Y * std::cos(θ)))});
@@ -221,9 +237,9 @@ int main(int ArgumentCount, char** Arguments)
         Lamps.Visible = false;
         Lamps.AdvanceRevision();
         {
-            const auto Placed   = Occupancy.ResolvePlacements(World);
+            const auto Placed   = GeometryPlacement.ResolvePlacements(World);
             size_t     Inactive = 0;
-            for (const OccupantPlacement& Placement : Placed) Inactive += Placement.Active ? 0 : 1;
+            for (const SubjectPlacement& Placement : Placed) Inactive += Placement.Active ? 0 : 1;
             Report(Placed.size() == 40 && Inactive == 40, "Street lamps hidden: " + std::to_string(Inactive) + " of 40 poles and heads inactive");
         }
 
@@ -231,9 +247,9 @@ int main(int ArgumentCount, char** Arguments)
         auto& Tower = FindGeometry(World, "Control tower")->AccessConfiguration();
         Tower.Modifiers.push_back(Frontier::ArrayModifierConfiguration{});
         Tower.AdvanceRevision();
-        (void)Occupancy.ResolvePlacements(World);
+        (void)GeometryPlacement.ResolvePlacements(World);
         {
-            const auto Resolved = Occupancy.QueryResolutions();
+            const auto Resolved = GeometryPlacement.QueryResolutions();
             const auto Entry    = Resolved->find(FindGeometry(World, "Control tower")->QueryToken().Value);
             Report(Entry != Resolved->end() && Entry->second.Copies == 2 && Entry->second.Shown == 1 && Entry->second.Parts == 3,
                    "Control tower with an Array of 2: 2 copies made, 1 shown (the archive holds one tower of 3 parts)");
@@ -301,15 +317,15 @@ int main(int ArgumentCount, char** Arguments)
         if (!Reserved.LoadFacetSpace(Archive / "ProvingGround.facetspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
         Reserved.AppendShapeSets(Shapes, static_cast<uint32_t>(Materials.size() / 48));
         Reserved.ConvertStressReserve(512);
-        Frontier::SceneGeometryOccupancy Objects;
+        Frontier::SceneSubjectPlacement Objects;
         Objects.Reset(&Reserved, Materials, Shapes);
         {
             const auto Start = Objects.ResolvePlacements(Editor);
             size_t     Same  = 0, FromReserve = 0;
-            for (const OccupantPlacement& Placement : Start)
+            for (const SubjectPlacement& Placement : Start)
             {
-                Same += Placement.Active && Placement.Current == Reserved.Occupants[Placement.Occupant].Current ? 1 : 0;
-                FromReserve += Reserved.QueryReserved(Placement.Occupant) ? 1 : 0;
+                Same += Placement.Active && Placement.Current == Reserved.Occupants[Placement.SubjectIndex].Current ? 1 : 0;
+                FromReserve += Reserved.QueryReserved(Placement.SubjectIndex) ? 1 : 0;
             }
             char Line[220];
             std::snprintf(Line, sizeof(Line), "a reserve of %u occupants (#%u-#%u, below the distance field's identity ceiling 2044): the default level "
@@ -328,10 +344,10 @@ int main(int ArgumentCount, char** Arguments)
         {
             const auto                     Placed  = Objects.ResolvePlacements(Editor);
             const auto                     Archived = Matches(Reserved, "Boundary North");
-            std::vector<OccupantPlacement> Extra;
-            for (const OccupantPlacement& Placement : Placed)
-                if (Reserved.QueryReserved(Placement.Occupant) && Placement.Active) Extra.push_back(Placement);
-            std::sort(Extra.begin(), Extra.end(), [](const OccupantPlacement& Left, const OccupantPlacement& Right) { return Left.Current[12] < Right.Current[12]; });
+            std::vector<SubjectPlacement> Extra;
+            for (const SubjectPlacement& Placement : Placed)
+                if (Reserved.QueryReserved(Placement.SubjectIndex) && Placement.Active) Extra.push_back(Placement);
+            std::sort(Extra.begin(), Extra.end(), [](const SubjectPlacement& Left, const SubjectPlacement& Right) { return Left.Current[12] < Right.Current[12]; });
             const auto& First  = Reserved.Occupants[Archived[0]].Current;
             const auto& Second = Reserved.Occupants[Archived[1]].Current;
             double      Worst  = Extra.size() == 6 ? 0.0 : 1.0;
@@ -372,12 +388,12 @@ int main(int ArgumentCount, char** Arguments)
             const auto Expected = Frontier::ConstructPlacement({-44.0, -21.0, 1.5}, {0.0, 0.0, 20.0}, {3.0, 3.0, 3.0});
             bool       Found    = false;
             // 📝 A reserve occupant already showing the shape (the reserve lends each shape one at bring-up) needs no template.
-            for (const OccupantPlacement& Placement : Placed)
-                if ((Placement.Template ? Placement.Template->FacetSet : Reserved.Occupants[Placement.Occupant].FacetSet) ==
+            for (const SubjectPlacement& Placement : Placed)
+                if ((Placement.Template ? Placement.Template->FacetSet : Reserved.Occupants[Placement.SubjectIndex].FacetSet) ==
                     Reserved.ShapeSetFirst + ShapeIndex("Cube"))
                 {
-                    Found        = Reserved.QueryReserved(Placement.Occupant) && Placement.Active && Frontier::ConfirmProximity(Placement.Current, Expected, 1.0e-5, 1.0e-5);
-                    CubeOccupant = Placement.Occupant;
+                    Found        = Reserved.QueryReserved(Placement.SubjectIndex) && Placement.Active && Frontier::ConfirmProximity(Placement.Current, Expected, 1.0e-5, 1.0e-5);
+                    CubeOccupant = Placement.SubjectIndex;
                 }
             const auto& Resolution = Objects.QueryResolutions()->at(CubeToken.Value);
             Report(Found && Resolution.Bound && Resolution.Shape && Resolution.Shown == 1 && Resolution.Facets == Shapes[ShapeIndex("Cube")].Facets.size(),
@@ -399,9 +415,9 @@ int main(int ArgumentCount, char** Arguments)
                 for (const uint32_t Occupant : Matches(Reserved, Stem)) TowerSets.insert(Reserved.Occupants[Occupant].FacetSet);
             size_t Parts = 0;
             double Worst = 0.0;
-            for (const OccupantPlacement& Placement : Placed)
+            for (const SubjectPlacement& Placement : Placed)
             {
-                if (!Reserved.QueryReserved(Placement.Occupant) || !Placement.Template || Placement.Template->FacetSet == Reserved.ShapeSetFirst + ShapeIndex("Cube"))
+                if (!Reserved.QueryReserved(Placement.SubjectIndex) || !Placement.Template || Placement.Template->FacetSet == Reserved.ShapeSetFirst + ShapeIndex("Cube"))
                     continue;
                 if (!TowerSets.count(Placement.Template->FacetSet)) continue;
                 ++Parts;
@@ -424,7 +440,7 @@ int main(int ArgumentCount, char** Arguments)
             TowerEdit.Dynamic            = true;
             TowerEdit.AdvanceRevision();
             size_t Set = 0, Cleared = 0;
-            for (const OccupantPlacement& Placement : Objects.ResolvePlacements(Editor))
+            for (const SubjectPlacement& Placement : Objects.ResolvePlacements(Editor))
                 Set += Placement.Participation && (*Placement.Participation & (Bits::ShadowExempt | Bits::IndirectExempt | Bits::Dynamic)) ==
                                                       (Bits::ShadowExempt | Bits::IndirectExempt | Bits::Dynamic)
                            ? 1
@@ -433,7 +449,7 @@ int main(int ArgumentCount, char** Arguments)
             TowerEdit.GlobalIllumination = true;
             TowerEdit.Dynamic            = false;
             TowerEdit.AdvanceRevision();
-            for (const OccupantPlacement& Placement : Objects.ResolvePlacements(Editor))
+            for (const SubjectPlacement& Placement : Objects.ResolvePlacements(Editor))
                 Cleared += Placement.Participation && (*Placement.Participation & (Bits::ShadowExempt | Bits::IndirectExempt | Bits::Dynamic)) == 0 ? 1 : 0;
             Report(Set == 3 && Cleared == 3, "Control tower with Cast shadows and GI off and Dynamic on: " + std::to_string(Set) +
                                                  " of 3 parts carry ShadowExempt | IndirectExempt | Dynamic, and " + std::to_string(Cleared) +
@@ -454,8 +470,8 @@ int main(int ArgumentCount, char** Arguments)
             const auto Placed = Objects.ResolvePlacements(Editor);
             const auto Blocks = Objects.ConsumeMaterialBlocks();
             bool       Overridden = false;
-            for (const OccupantPlacement& Placement : Placed)
-                if (Placement.Occupant == CubeOccupant)
+            for (const SubjectPlacement& Placement : Placed)
+                if (Placement.SubjectIndex == CubeOccupant)
                     Overridden = Placement.MaterialOverride && (static_cast<uint32_t>(*Placement.MaterialOverride) & Frontier::GlobalIllumination::MaterialBlockBit) != 0 &&
                                  Placement.Recapture;
             float Red = -1.0f;
@@ -467,8 +483,8 @@ int main(int ArgumentCount, char** Arguments)
                    "the block and its cards are captured again");
             // 📝 The override reaches the shaders through the occupant profile (OccupantProfile.MaterialOverride, word 71) unchanged.
             uint32_t Stored = 0, Expected = 0;
-            for (const OccupantPlacement& Placement : Placed)
-                if (Placement.Occupant == CubeOccupant && Placement.MaterialOverride)
+            for (const SubjectPlacement& Placement : Placed)
+                if (Placement.SubjectIndex == CubeOccupant && Placement.MaterialOverride)
                 {
                     Reserved.Occupants[CubeOccupant].MaterialOverride = *Placement.MaterialOverride;
                     Expected = static_cast<uint32_t>(*Placement.MaterialOverride);
@@ -539,7 +555,7 @@ int main(int ArgumentCount, char** Arguments)
         // ㉒ GPU picking's records: every shown part names its record (the ground names the Proving ground), the vehicle and removed
         //    objects name none, and a pick takes the record drawn at the picked pixel, else the nearest drawn within its reach
         {
-            using Frontier::GlobalIllumination::OccupantPick;
+            using Frontier::GlobalIllumination::SubjectPick;
             const auto North      = Matches(Reserved, "Boundary North");
             const auto Ramp       = Matches(Reserved, "Jump ramp");
             const auto Ground     = static_cast<uint32_t>(Reserved.GroundOccupant);
@@ -553,10 +569,10 @@ int main(int ArgumentCount, char** Arguments)
                    "pick owners: " + std::to_string(NorthOwned) + " of " + std::to_string(North.size()) + " Boundary north parts, the cube's reserve " +
                        "occupant and the ground (the Proving ground) name their records; the vehicle and the removed jump ramp name none");
             const auto Synthetic = [](std::initializer_list<std::tuple<int32_t, int32_t, uint32_t>> Texels) {
-                OccupantPick Pick;
+                SubjectPick Pick;
                 Pick.Reach = 4;
-                Pick.Occupants.assign(81, OccupantPick::NoOccupant);
-                for (const auto& [OffsetX, OffsetY, Occupant] : Texels) Pick.Occupants[static_cast<size_t>((4 + OffsetY) * 9 + 4 + OffsetX)] = Occupant;
+                Pick.Subjects.assign(81, SubjectPick::NoSubject);
+                for (const auto& [OffsetX, OffsetY, Occupant] : Texels) Pick.Subjects[static_cast<size_t>((4 + OffsetY) * 9 + 4 + OffsetX)] = Occupant;
                 return Pick;
             };
             // 📝 Occupant 0 is the vehicle, which no record owns: a click on it, or on the sky, looks around for the nearest record.

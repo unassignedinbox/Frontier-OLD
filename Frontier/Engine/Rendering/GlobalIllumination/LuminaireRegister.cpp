@@ -5,6 +5,7 @@
 //    with a 16×16×4 world grid of 64-bit cell masks (LightingSystem.js Update + BuildClusterGrid, ported 1:1).
 
 #include "LuminaireRegister.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,7 +17,7 @@ namespace Frontier::GlobalIllumination
 namespace
 {
 
-constexpr double Pi = 3.141592653589793;
+constexpr double Pi = MathConstantsD::Pi;
 
 // 📝 16×16×4 cluster grid over the proving grounds: [-80..180] in X, [-80..80] in Y, [-2..28] in Z.
 constexpr Vector3  GridMinimum{-80.0, -80.0, -2.0};

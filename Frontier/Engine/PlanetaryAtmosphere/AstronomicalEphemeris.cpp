@@ -5,6 +5,7 @@
 #include "Engine/PlanetaryAtmosphere/AstronomicalEphemeris.h"
 
 #include "Engine/Foundation/DeterministicRandom.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <cctype>
@@ -21,8 +22,8 @@ namespace Frontier
 namespace
 {
 
-constexpr double π        = 3.14159265358979323846;
-constexpr double DegToRad = π / 180.0;
+constexpr double π        = MathConstantsD::Pi;
+constexpr double DegToRad = MathConstantsD::DegreesToRadians;
 
 double WrapDegrees(double Degrees) noexcept
 {

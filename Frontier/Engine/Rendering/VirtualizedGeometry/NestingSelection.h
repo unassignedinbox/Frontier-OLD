@@ -9,6 +9,7 @@
 //    Demo vocabulary: HierarchyResidencyManager → NestingResidency, SelectHierarchyCut → SelectNestingCut, SelfErrorPx /
 //    ParentErrorPx → OwnErrorPx / CoarserErrorPx, ExecuteHierarchyRuntimeFrame → ExecuteNestingRefresh, Level → Tier.
 #pragma once
+#include "Frontier/Engine/Foundation/Constants.h"
 #include "NestingConstruction.h"
 #include <cstdint>
 #include <optional>
@@ -33,7 +34,7 @@ struct NestingCamera
     Point3                      Eye{0, -10, 4};               // [m]
     Point3                      Target{0, 0, 0};              // [m]
     Point3                      Up{0, 0, 1};                  // [-]
-    double                      FovY         = 3.141592653589793 / 3;   // [rad]
+    double                      FovY         = MathConstantsD::Pi / 3.0; // [rad]
     double                      ScreenWidth  = 720;           // [px]
     double                      ScreenHeight = 540;           // [px]
     double                      Near         = 0.1;           // [m]

@@ -94,10 +94,10 @@ std::vector<float> ReadHalfTexture(DeviceExchange& Exchange, const std::shared_p
 struct LightInputs
 {
     std::string Source{};
-    Vector3     Direction{0.0, 0.0, 1.0};
-    Vector3     Illuminance{0.0, 0.0, 0.0};
-    Vector3     Solar{0.0, 0.0, 0.0};
-    Vector3     Zenith{0.0, 0.0, 0.0};         // [-] sky view, zenith row mean
+    GlobalIllumination::Vector3 Direction{0.0, 0.0, 1.0};
+    GlobalIllumination::Vector3 Illuminance{0.0, 0.0, 0.0};
+    GlobalIllumination::Vector3 Solar{0.0, 0.0, 0.0};
+    GlobalIllumination::Vector3 Zenith{0.0, 0.0, 0.0};         // [-] sky view, zenith row mean
     double      ShadowedFraction = 0.0;        // [-] cloud shadow texels with τ > 0.05
     double      DeepestShadow    = 0.0;        // [-] largest τ
 };

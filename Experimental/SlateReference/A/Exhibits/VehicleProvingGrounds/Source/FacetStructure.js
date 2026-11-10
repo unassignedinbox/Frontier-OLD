@@ -7,20 +7,12 @@ import { CourseMaterial } from "./MaterialSpecification.js";
 import { RetrieveFacetStream } from "./FacetCodec.js";
 import { ConstructCabinFacets } from "./CabinStructure.js";
 import { ConstructRoofFixtureFacets } from "./LightingSystem.js";
-import { ResolveLevelDescriptor } from "./LevelStructure.js";
+import { LevelShapes, ResolveLevelPlacements, ResolveConePlacements, ResolveBreakables, EmitLevelGroundFacets } from "./LevelStructure.js";
 import { ConstructSolid, TriangulateFace, FractureMaterials, FragmentTriangleBudget } from "./FractureStructure.js";
 import { VehicleGeometry, ResolveCoMAuthoredZ } from "./VehicleSpecification.js";
 import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, InvertTransform, RotateVector, ConjugateQuaternion,
          SubtractVector, CrossVector, NormalizeVector } from "./TransformProjection.js";
 import { StressShapes, ResolveStressPlacements } from "./StressLayout.js";
-import { CollapseSequence } from "./CollapseSequence.js";
-import { TramSequence } from "./TramSequence.js";
-import { ServiceStationSequence } from "./ServiceStationSequence.js";
-import { TrafficLightSequence } from "./TrafficLightSequence.js";
-import { RoadEditorSequence, RoadEditorVertexCapacity } from "./RoadEditorSequence.js";
-import { ConstructPoliceVehicleBodyFacets } from "./CityPursuitStructure.js";
-import { DDayTankSpecs, DDayMgTurretSpecs, DDayCannonSpecs, DDayMineSpecs } from "./DDayStructure.js";
-import { DDayBombPoolSize, DDayShellPoolSize, DDayTracerPoolSize, DDayAircraftCount } from "./DDayAssaultSequence.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -45,9 +37,9 @@ export const GroundLayout = Object.freeze({
     PadMinimum:   Object.freeze([-60.0, -60.0]),   // [m]
     TileExtent:   12.0,                            // [m]
     TileCount:    Object.freeze([18, 10]),         // [-] along x, y
-    OuterExtent:  420.0,                           // [m] half extent of the authored surround quad, about the pad centre
+    OuterExtent:  240.0,                           // [m] half extent of the authored surround quad, about the pad centre
     PadDensity:   6.0,                             // [texel/m]
-    StripDensity: 0.35                             // [texel/m]
+    StripDensity: 0.5                              // [texel/m]
 });
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -80,10 +72,8 @@ export class SceneStructure
 
     // 📝 StressCapacity reserves that many stress-test occupants (inactive until the stress sequence enables them) in
     //    the distance span, after the level and before the ground tiles, clamped to the identity ceiling.
-    async ConstructScene(ArchiveFolder, StressCapacity = 0, LevelKey = "proving")
+    async ConstructScene(ArchiveFolder, StressCapacity = 0)
     {
-        const Descriptor = ResolveLevelDescriptor(LevelKey);
-        const ActiveShapes = Descriptor.Shapes;
         const [Body, Tyre, Rim] = await Promise.all([
             RetrieveFacetStream(`${ArchiveFolder}/ControlVehicleBody.facet`),
             RetrieveFacetStream(`${ArchiveFolder}/ControlVehicleTyre.facet`),
@@ -92,17 +82,14 @@ export class SceneStructure
 
         // ① facet sets ------------------------------------------------------------------------------------------------
         // 📝 The cabin (CabinStructure.js) and roof fixture (LightingSystem.js) are part of the body: they move, shade, derez and enter the field with it.
-        const ProjectedBody = ProjectBodyFacets(Body);
-        const BodySet       = this.ConstructFacetSet("ControlVehicle body", [...ProjectedBody, ...ConstructCabinFacets(), ...ConstructRoofFixtureFacets(0)], 0.05, 40.0);
+        const BodySet       = this.ConstructFacetSet("ControlVehicle body", [...ProjectBodyFacets(Body), ...ConstructCabinFacets(), ...ConstructRoofFixtureFacets(0)], 0.05, 40.0);
         this.VehicleBodySet = BodySet;
-        const PoliceBodySet = this.ConstructFacetSet("Police ControlVehicle body", [...ConstructPoliceVehicleBodyFacets(ProjectedBody), ...ConstructCabinFacets()], 0.05, 40.0);
-        this.PoliceBodySet  = PoliceBodySet;
         const WheelLeftSet  = this.ConstructFacetSet("ControlVehicle wheel (left)", ProjectWheelFacets(Tyre, Rim, false), 0.025, 40.0);
         const WheelRightSet = this.ConstructFacetSet("ControlVehicle wheel (right)", ProjectWheelFacets(Tyre, Rim, true), 0.025, 40.0);
-        const GroundSet     = this.ConstructFacetSet(Descriptor.Title, Descriptor.EmitGround(), 0.0, 0.0);
+        const GroundSet     = this.ConstructFacetSet("Proving ground", EmitLevelGroundFacets(), 0.0, 0.0);
         const ShapeSets = {};
-        for (const [Key, Shape] of Object.entries(ActiveShapes))
-            ShapeSets[Key] = this.ConstructFacetSet(Key, Shape.Emit(), Shape.Distance === false ? 0.0 : Shape.Voxel, Shape.Cards);
+        for (const [Key, Shape] of Object.entries(LevelShapes))
+            ShapeSets[Key] = this.ConstructFacetSet(Key, Shape.Emit(), Shape.Voxel, Shape.Cards);
 
         // ② the vehicle --------------------------------------------------------------------------------------------------
         const VehicleRoles = OccupantRole.Raster | OccupantRole.Distance | OccupantRole.Cards | OccupantRole.Dynamic;
@@ -118,9 +105,9 @@ export class SceneStructure
 
         // ③ the level's distance occupants; rastered-only shapes wait until after the ground ----------------------------
         const RasterOnly = [];
-        for (const Placement of Descriptor.Placements())
+        for (const Placement of ResolveLevelPlacements())
         {
-            if (ActiveShapes[Placement.Shape].Distance === false)
+            if (LevelShapes[Placement.Shape].Distance === false)
             {
                 RasterOnly.push(Placement);
                 continue;
@@ -134,170 +121,21 @@ export class SceneStructure
         // ③ cones: rigid bodies at rest — in the field and carded like any static occupant (Dynamic only so a knocked
         //    cone's motion invalidates the field; Moving lifts it onto the every-frame relighting list while it moves)
         const ConeRoles = StaticRoles | OccupantRole.Dynamic;
-        const ConePlacements = Descriptor.Cones();
+        const ConePlacements = ResolveConePlacements();
         this.ConeBlock = { First: this.Occupants.length, Count: ConePlacements.length, Placements: ConePlacements, FacetSet: ShapeSets.Cone };
         ConePlacements.forEach((Placement, Cone) =>
         {
-            const ShapeKey = (Placement.Shape && ShapeSets[Placement.Shape] !== undefined) ? Placement.Shape : "Cone";
-            const BaseZ = Placement.Position[2] ?? 0.0;
             const Half = 0.5 * Placement.Yaw;
-            const Transform = ConstructRigidTransform([Placement.Position[0], Placement.Position[1], BaseZ], [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
-            const Index = this.ConstructOccupant(Placement.Name, ShapeSets[ShapeKey], Transform, ConeRoles);
+            const Transform = ConstructRigidTransform([Placement.Position[0], Placement.Position[1], 0.0], [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
+            const Index = this.ConstructOccupant(Placement.Name, ShapeSets.Cone, Transform, ConeRoles);
             this.Occupants[Index].Cone = Cone;
             this.Occupants[Index].Moving = false;
             this.Occupants[Index].RestTransform = Transform;
         });
 
-        // ③b proximity-triggered kinetic bollards (linear retracting gates & travelling seesaw wave strips)
-        const RawBollardZones = Descriptor.Bollards ? Descriptor.Bollards() : [];
-        const BollardFirst = this.Occupants.length;
-        const BuiltBollardZones = RawBollardZones.map((Zone) =>
-        {
-            for (let PostIndex = 0; PostIndex < Zone.Posts.length; ++PostIndex)
-            {
-                const Post = Zone.Posts[PostIndex];
-                const Half = 0.5 * (Post.Yaw || 0.0);
-                const Transform = ConstructRigidTransform(Post.Position, [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
-                const Index = this.ConstructOccupant(`${Zone.Id} bollard ${PostIndex}`, ShapeSets[Post.Shape], Transform, ConeRoles, Post.Material ?? -1);
-                this.Occupants[Index].Obstacle = true;
-                this.Occupants[Index].Bollard = true;
-                this.Occupants[Index].Moving = false;
-                this.Occupants[Index].RestTransform = Transform;
-            }
-            return Zone;
-        });
-        const BollardAfterPosts = this.Occupants.length;
-        for (const Zone of BuiltBollardZones)
-        {
-            if (Zone.Beacon && ShapeSets[Zone.Beacon.Shape] !== undefined)
-            {
-                const Half = 0.5 * (Zone.Beacon.Yaw || 0.0);
-                const Transform = ConstructRigidTransform(Zone.Beacon.Position, [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
-                const BeaconIdx = this.ConstructOccupant(`${Zone.Name} beacon`, ShapeSets[Zone.Beacon.Shape], Transform, ConeRoles, CourseMaterial.WallCrimson);
-                this.Occupants[BeaconIdx].Obstacle = false;
-                this.Occupants[BeaconIdx].Moving = false;
-                Zone.BeaconOccupant = BeaconIdx;
-            }
-        }
-        this.BollardBlock = { First: BollardFirst, Count: BollardAfterPosts - BollardFirst, Zones: BuiltBollardZones };
-
-        // ③c seismic collapse bay distance proxies (distance + card occlusion only; visual mesh is session-baked Voronoi slabs!)
-        const RawCollapseSpans = Descriptor.CollapseSpans ? Descriptor.CollapseSpans() : [];
-        const ProxyFirst = this.Occupants.length;
-        if (RawCollapseSpans.length > 0 && ShapeSets.CollapseBayProxy !== undefined)
-        {
-            const ProxyRoles = OccupantRole.Distance | OccupantRole.Cards | OccupantRole.Dynamic;
-            for (const Span of RawCollapseSpans)
-            {
-                const Half = 0.5 * Span.Yaw;
-                const Quat = [0.0, 0.0, Math.sin(Half), Math.cos(Half)];
-                for (let BayIdx = 0; BayIdx < Span.Surface.BayCount; ++BayIdx)
-                {
-                    const RelX = (BayIdx + 0.5) * Span.Surface.BayLength;
-                    const Pos = [
-                        Span.StartWorld[0] + Span.CosineYaw * RelX,
-                        Span.StartWorld[1] + Span.SineYaw * RelX,
-                        Span.DeckZ - 0.60
-                    ];
-                    const Index = this.ConstructOccupant(`${Span.Id} bay proxy ${BayIdx}`, ShapeSets.CollapseBayProxy,
-                                                         ConstructRigidTransform(Pos, Quat), ProxyRoles);
-                    this.Occupants[Index].Moving = false;
-                }
-            }
-        }
-        const ProxyCount = this.Occupants.length - ProxyFirst;
-
-        // ③d dedicated articulated streetcar trams & express rail trains (added separately with dynamic GI, shadows & collision)
-        const RawTrams = Descriptor.Trams ? Descriptor.Trams() : [];
-        const TramFirst = this.Occupants.length;
-        for (const Consist of RawTrams)
-        {
-            if (ShapeSets[Consist.Shape] === undefined)
-                continue;
-            const Yaw = Consist.Direction >= 0.0 ? 0.0 : Math.PI;
-            const Quat = [0.0, 0.0, Math.sin(0.5 * Yaw), Math.cos(0.5 * Yaw)];
-            for (let CarIdx = 0; CarIdx < Consist.CarCount; ++CarIdx)
-            {
-                const Pos = [Consist.StartX, Consist.LaneY, Consist.BaseZ || 0.0];
-                const Index = this.ConstructOccupant(`${Consist.Name} car ${CarIdx}`, ShapeSets[Consist.Shape],
-                                                     ConstructRigidTransform(Pos, Quat), ConeRoles);
-                this.Occupants[Index].Moving = false;
-            }
-        }
-        this.TramBlock = { First: TramFirst, Count: this.Occupants.length - TramFirst, Consists: RawTrams };
-
-        // ③e multi-axis industrial robot arms: Auto-Fuel / 800V EV bays + Megafactory spot-welding assembly cells
-        const RawStations = Descriptor.ServiceStations ? Descriptor.ServiceStations() : [];
-        const RawFactoryRobots = Descriptor.FactoryRobots ? Descriptor.FactoryRobots() : [];
-        const ServiceFirst = this.Occupants.length;
-        const ConstructIndustrialRobotOccupants = (Label, BasePos, EndEffectorShapeKey) =>
-        {
-            if (ShapeSets.IndustrialRobotPedestal === undefined ||
-                ShapeSets.IndustrialRobotTurret === undefined ||
-                ShapeSets.IndustrialRobotUpperArm === undefined ||
-                ShapeSets.IndustrialRobotForearm === undefined ||
-                ShapeSets[EndEffectorShapeKey] === undefined)
-            {
-                return;
-            }
-            const IdQuat = [0.0, 0.0, 0.0, 1.0];
-            const BaseXform = ConstructRigidTransform(BasePos, IdQuat);
-            const PIdx = this.ConstructOccupant(`${Label} pedestal`,  ShapeSets.IndustrialRobotPedestal,    BaseXform, ConeRoles);
-            const TIdx = this.ConstructOccupant(`${Label} turret`,    ShapeSets.IndustrialRobotTurret,      BaseXform, ConeRoles);
-            const UIdx = this.ConstructOccupant(`${Label} upper arm`, ShapeSets.IndustrialRobotUpperArm,    BaseXform, ConeRoles);
-            const FIdx = this.ConstructOccupant(`${Label} forearm`,   ShapeSets.IndustrialRobotForearm,     BaseXform, ConeRoles);
-            const WIdx = this.ConstructOccupant(`${Label} wrist`,     ShapeSets[EndEffectorShapeKey],       BaseXform, ConeRoles);
-            this.Occupants[PIdx].Obstacle = true;
-            this.Occupants[PIdx].Moving   = false;
-            this.Occupants[TIdx].Moving   = false;
-            this.Occupants[UIdx].Moving   = false;
-            this.Occupants[FIdx].Moving   = false;
-            this.Occupants[WIdx].Moving   = false;
-        };
-        for (let StIdx = 0; StIdx < RawStations.length; ++StIdx)
-        {
-            const St = RawStations[StIdx];
-            const CouplerKey = St.Kind === "electric" ? "IndustrialRobotCouplerEV" : "IndustrialRobotCouplerFuel";
-            ConstructIndustrialRobotOccupants(St.Name, St.BasePosition || St.DockPosition, CouplerKey);
-        }
-        for (let RbIdx = 0; RbIdx < RawFactoryRobots.length; ++RbIdx)
-        {
-            const Rb = RawFactoryRobots[RbIdx];
-            ConstructIndustrialRobotOccupants(Rb.Name, Rb.BasePosition, "IndustrialRobotWelder");
-        }
-        this.ServiceBlock = {
-            First:         ServiceFirst,
-            Count:         this.Occupants.length - ServiceFirst,
-            Stations:      RawStations,
-            FactoryRobots: RawFactoryRobots
-        };
-
-        // ③g pole-less hovering robotic intersection traffic signal housings (+ 4 reserve slots for custom spline junctions)
-        const RawTrafficLights = Descriptor.TrafficLights ? Descriptor.TrafficLights() : [];
-        const DynamicSignalSlots = 6;
-        const TotalTrafficSlots = RawTrafficLights.length > 0 ? (RawTrafficLights.length + DynamicSignalSlots) : 0;
-        const TrafficHousingFirst = this.Occupants.length;
-        if (TotalTrafficSlots > 0 && ShapeSets.HoverTrafficHousing !== undefined)
-        {
-            const Parked = ConstructRigidTransform([0.0, 0.0, -40.0], [0.0, 0.0, 0.0, 1.0]);
-            for (let SigIdx = 0; SigIdx < TotalTrafficSlots; ++SigIdx)
-            {
-                const Spec = RawTrafficLights[SigIdx];
-                const Half = 0.5 * (Spec?.Yaw || 0.0);
-                const Initial = Spec
-                    ? ConstructRigidTransform(Spec.Anchor, [0.0, 0.0, Math.sin(Half), Math.cos(Half)])
-                    : Parked;
-                const OccIdx = this.ConstructOccupant(Spec?.Name || `Spline Junction Signal ${SigIdx - RawTrafficLights.length + 1}`,
-                                                      ShapeSets.HoverTrafficHousing, Initial, ConeRoles);
-                this.Occupants[OccIdx].Moving = false;
-                if (!Spec)
-                    this.Occupants[OccIdx].Inactive = true;
-            }
-        }
-
         // ④ breakable props, whole: rastered, in the field, carded and a collider until they break ------------------------
         const BreakableSets = new Map();
-        this.Breakables = Descriptor.Breakables().map((Definition) =>
+        this.Breakables = ResolveBreakables().map((Definition) =>
         {
             const Material = FractureMaterials[Definition.Material];
             const Key = Definition.Material + JSON.stringify(Definition.Shape);
@@ -350,33 +188,12 @@ export class SceneStructure
             }
         }
 
-        // ⑤b Police Interceptor Cruiser (same ControlVehicle chassis + 4 wheels, full GDF distance & cards) ------------
-        const ParkedBelow   = ConstructRigidTransform([0.0, 0.0, -45.0], [0.0, 0.0, 0.0, 1.0]);
-        const CruiserFirst  = this.Occupants.length;
-        const CruiserBody   = this.ConstructOccupant("Police ControlVehicle", PoliceBodySet, ParkedBelow, VehicleRoles);
-        const CruiserWheels = [-1, -1, -1, -1];
-        for (let Wheel = 0; Wheel < 4; ++Wheel)
-        {
-            const Set = (Wheel & 1) ? WheelRightSet : WheelLeftSet;
-            CruiserWheels[Wheel] = this.ConstructOccupant(`Police ${WheelNames[Wheel]}`, Set, ParkedBelow, VehicleRoles);
-        }
-
-        // ⑤c D-Day Advancing Allied Assault Tank Hulls (in SDF + Card Distance span so moving tanks cast GI & cover!) --
-        let DDayTankHullFirst = -1;
-        const DDayTankHulls   = [];
-        if (ShapeSets.DDayTankHull !== undefined)
-        {
-            DDayTankHullFirst = this.Occupants.length;
-            for (let T = 0; T < DDayTankSpecs.length; ++T)
-                DDayTankHulls.push(this.ConstructOccupant(DDayTankSpecs[T].Name, ShapeSets.DDayTankHull, ParkedBelow, VehicleRoles));
-        }
-
         // ⑥ the stress pool: shaped in runs, placed by slot, inactive until enabled -----------------------------------
         this.BaseDistanceCount = this.Occupants.length;
-        const GroundOccupants = 1 + GroundLayout.TileCount[0] * GroundLayout.TileCount[1] + 4 + 128;
+        const GroundOccupants = 1 + GroundLayout.TileCount[0] * GroundLayout.TileCount[1] + 4;
         const Capacity = Math.max(0, Math.min(Math.floor(StressCapacity), IdentityCeiling - this.BaseDistanceCount - GroundOccupants));
         const StressSets = StressShapes.map((Shape) => this.ConstructFacetSet(Shape.Name, Shape.Emit(), Shape.DistanceVoxel, Shape.CardDensity));
-        this.StressPool = { First: this.Occupants.length, Capacity, Active: 0, Placements: ResolveStressPlacements(Capacity, Descriptor.ClearZones), FacetSets: StressSets };
+        this.StressPool = { First: this.Occupants.length, Capacity, Active: 0, Placements: ResolveStressPlacements(Capacity), FacetSets: StressSets };
         this.StressPool.Placements.forEach((Placement, Slot) =>
         {
             const Half = 0.5 * Placement.Yaw;
@@ -427,179 +244,6 @@ export class SceneStructure
             this.Occupants[Index].Obstacle = Placement.Collider;
             this.Occupants[Index].Level = Placement.Shape;
         }
-
-        // ⑨ session-baked fractured collapsing bridge & road composite slabs, propagating movie cracks & sand clumps -----
-        this.CollapseBlock = null;
-        this.Collapse = null;
-        if (RawCollapseSpans.length > 0)
-        {
-            const Budget = CollapseSequence.ComputePieceCapacity(RawCollapseSpans);
-            const CollapseSet = this.ConstructFacetSet("Session collapse decks", [], 0.0, 0.0);
-            this.FacetSets[CollapseSet].LocalMinimum = [-8.0, -8.0, -2.0];
-            this.FacetSets[CollapseSet].LocalMaximum = [ 8.0,  8.0,  2.0];
-            this.FacetSets[CollapseSet].VertexCapacity = Budget.VertexCapacity;
-            this.FacetSets[CollapseSet].Composite = true;
-            const CollapseFirst = this.Occupants.length;
-            const Identity = ConstructIdentityTransform();
-            for (let Slot = 0; Slot < Budget.PieceCount; ++Slot)
-            {
-                const Roles = Slot === 0 ? (OccupantRole.Raster | OccupantRole.Dynamic) : OccupantRole.Dynamic;
-                const Index = this.ConstructOccupant(`Collapse piece ${Slot}`, CollapseSet, Identity, Roles);
-                this.Occupants[Index].Moving = false;
-            }
-            this.CollapseBlock = {
-                CompositeSet: CollapseSet,
-                First:        CollapseFirst,
-                Count:        Budget.PieceCount,
-                ProxyFirst,
-                ProxyCount,
-                Spans:        RawCollapseSpans
-            };
-            this.Collapse = new CollapseSequence(this, RawCollapseSpans);
-        }
-
-        this.Trams = RawTrams.length > 0 ? new TramSequence(this, RawTrams) : null;
-        this.ServiceStations = (RawStations.length > 0 || RawFactoryRobots.length > 0)
-            ? new ServiceStationSequence(this, RawStations, RawFactoryRobots)
-            : null;
-
-        // ⑩ hovering robotic traffic light optical aspect pucks (Red / Orange / Yellow / Green) — rastered + dynamic!
-        this.TrafficBlock = null;
-        this.TrafficLights = null;
-        if (TotalTrafficSlots > 0 && ShapeSets.HoverTrafficHousing !== undefined && ShapeSets.TrafficAspectRed !== undefined)
-        {
-            const LensFirst = this.Occupants.length;
-            const LensShapes = [
-                ShapeSets.TrafficAspectRed,
-                ShapeSets.TrafficAspectOrange,
-                ShapeSets.TrafficAspectYellow,
-                ShapeSets.TrafficAspectGreen
-            ];
-            const Parked = ConstructRigidTransform([0.0, 0.0, -40.0], [0.0, 0.0, 0.0, 1.0]);
-            for (let SigIdx = 0; SigIdx < TotalTrafficSlots; ++SigIdx)
-            {
-                for (let Aspect = 0; Aspect < 4; ++Aspect)
-                {
-                    const Occ = this.ConstructOccupant(`Traffic signal ${SigIdx} aspect ${Aspect}`, LensShapes[Aspect],
-                                                       Parked, OccupantRole.Raster | OccupantRole.Dynamic);
-                    this.Occupants[Occ].Moving = false;
-                    if (SigIdx >= RawTrafficLights.length)
-                        this.Occupants[Occ].Inactive = true;
-                }
-            }
-            this.TrafficBlock = {
-                HousingFirst: TrafficHousingFirst,
-                LensFirst,
-                BaseCount:    RawTrafficLights.length,
-                DynamicSlots: DynamicSignalSlots,
-                TotalCount:   TotalTrafficSlots
-            };
-            this.TrafficLights = new TrafficLightSequence(this, RawTrafficLights, DynamicSignalSlots);
-        }
-
-        // ⑩b Police Aerial Pursuit Units (Pursuit Helicopter + rotors + 3 Police Interceptor Drones — dynamic raster) --
-        let AerialFirst = -1, HeliBody = -1, HeliMainRotor = -1, HeliTailRotor = -1;
-        const PoliceDrones = [-1, -1, -1];
-        if (ShapeSets.PoliceHelicopterBody !== undefined && ShapeSets.PoliceInterceptorDrone !== undefined)
-        {
-            const AerialRoles = OccupantRole.Raster | OccupantRole.Dynamic;
-            AerialFirst   = this.Occupants.length;
-            HeliBody      = this.ConstructOccupant("Police Helicopter Body",       ShapeSets.PoliceHelicopterBody,      ParkedBelow, AerialRoles);
-            HeliMainRotor = this.ConstructOccupant("Police Helicopter Main Rotor", ShapeSets.PoliceHelicopterMainRotor, ParkedBelow, AerialRoles);
-            HeliTailRotor = this.ConstructOccupant("Police Helicopter Tail Rotor", ShapeSets.PoliceHelicopterTailRotor, ParkedBelow, AerialRoles);
-            for (let D = 0; D < 3; ++D)
-                PoliceDrones[D] = this.ConstructOccupant(`Police Interceptor Drone ${D}`, ShapeSets.PoliceInterceptorDrone, ParkedBelow, AerialRoles);
-        }
-        this.PoliceBlock = {
-            CruiserFirst,
-            CruiserCount: 5,
-            CruiserBody,
-            CruiserWheels,
-            AerialFirst,
-            AerialCount:  AerialFirst >= 0 ? 6 : 0,
-            HeliBody,
-            HeliMainRotor,
-            HeliTailRotor,
-            Drones:       PoliceDrones
-        };
-
-        // ⑩c D-Day Dynamic Combat Pool (Tank Turrets/Wrecks, MG Turrets, Cannons, Aircraft, Bombs, Shells, Tracers, Mines)
-        this.DDayBlock = null;
-        if (ShapeSets.DDayTankTurret !== undefined && DDayTankHullFirst >= 0)
-        {
-            const DynRoles     = OccupantRole.Raster | OccupantRole.Dynamic;
-            const DynamicFirst = this.Occupants.length;
-            const TankTurrets  = [];
-            const TankWrecks   = [];
-            const MgBases      = [];
-            const MgHeads      = [];
-            const CannonBases  = [];
-            const CannonBarrels= [];
-            const AircraftBodies = [];
-            const AircraftProps  = [];
-            const Bombs        = [];
-            const Shells       = [];
-            const Tracers      = [];
-            const Mines        = [];
-
-            for (let I = 0; I < DDayTankSpecs.length; ++I)
-                TankTurrets.push(this.ConstructOccupant(`D-Day Tank Turret ${I + 1}`, ShapeSets.DDayTankTurret, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayTankSpecs.length; ++I)
-                TankWrecks.push(this.ConstructOccupant(`D-Day Tank Wreck ${I + 1}`, ShapeSets.DDayTankWreckHull, ParkedBelow, DynRoles));
-
-            for (let I = 0; I < DDayMgTurretSpecs.length; ++I)
-                MgBases.push(this.ConstructOccupant(DDayMgTurretSpecs[I].Name + " Base", ShapeSets.DDayMgTurretBase, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayMgTurretSpecs.length; ++I)
-                MgHeads.push(this.ConstructOccupant(DDayMgTurretSpecs[I].Name, ShapeSets.DDayMgTurretHead, ParkedBelow, DynRoles));
-
-            for (let I = 0; I < DDayCannonSpecs.length; ++I)
-                CannonBases.push(this.ConstructOccupant(DDayCannonSpecs[I].Name + " Base", ShapeSets.DDayCannonBase, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayCannonSpecs.length; ++I)
-                CannonBarrels.push(this.ConstructOccupant(DDayCannonSpecs[I].Name, ShapeSets.DDayCannonBarrel, ParkedBelow, DynRoles));
-
-            for (let I = 0; I < DDayAircraftCount; ++I)
-                AircraftBodies.push(this.ConstructOccupant(`D-Day Attack Aircraft ${I + 1}`, ShapeSets.DDayAircraftBody, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayAircraftCount; ++I)
-                AircraftProps.push(this.ConstructOccupant(`D-Day Aircraft Propeller ${I + 1}`, ShapeSets.DDayAircraftPropeller, ParkedBelow, DynRoles));
-
-            for (let I = 0; I < DDayBombPoolSize; ++I)
-                Bombs.push(this.ConstructOccupant(`D-Day Aerial Bomb ${I + 1}`, ShapeSets.DDayAerialBomb, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayShellPoolSize; ++I)
-                Shells.push(this.ConstructOccupant(`D-Day Artillery Shell ${I + 1}`, ShapeSets.DDayArtilleryShell, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayTracerPoolSize; ++I)
-                Tracers.push(this.ConstructOccupant(`D-Day MG Tracer ${I + 1}`, ShapeSets.DDayTracerBolt, ParkedBelow, DynRoles));
-            for (let I = 0; I < DDayMineSpecs.length; ++I)
-                Mines.push(this.ConstructOccupant(DDayMineSpecs[I].Name, ShapeSets.DDayLandmine, ParkedBelow, DynRoles));
-
-            this.DDayBlock = {
-                TankHullFirst:  DDayTankHullFirst,
-                TankHullCount:  DDayTankHulls.length,
-                TankHulls:      DDayTankHulls,
-                DynamicFirst,
-                DynamicCount:   this.Occupants.length - DynamicFirst,
-                TankTurrets,
-                TankWrecks,
-                MgBases,
-                MgHeads,
-                CannonBases,
-                CannonBarrels,
-                AircraftBodies,
-                AircraftProps,
-                Bombs,
-                Shells,
-                Tracers,
-                Mines
-            };
-        }
-
-        // ⑪ live-streamed Road Studio road, junction & highway bridge network (editable in Road Studio workspace) ------
-        const RoadEditorSet = this.ConstructFacetSet("Road Studio network", [], 0.0, 0.0);
-        this.FacetSets[RoadEditorSet].LocalMinimum   = [-2200.0, -2200.0, -40.0];
-        this.FacetSets[RoadEditorSet].LocalMaximum   = [ 2400.0,  2200.0, 120.0];
-        this.FacetSets[RoadEditorSet].VertexCapacity = RoadEditorVertexCapacity;
-        const RoadEditorOcc = this.ConstructOccupant("Road Studio network", RoadEditorSet, ConstructIdentityTransform(), OccupantRole.Raster);
-        this.RoadEditorBlock = { FacetSet: RoadEditorSet, Occupant: RoadEditorOcc };
-        this.RoadEditor = new RoadEditorSequence(this, LevelKey);
 
         this.ConstructDistanceList();
     }
@@ -764,7 +408,7 @@ export class SceneStructure
         const Bounds = [];
         this.Occupants.forEach((Occupant, Index) =>
         {
-            if (Occupant.Obstacle && !Occupant.Inactive && (Occupant.Bollard || !(Occupant.Roles & OccupantRole.Dynamic)))
+            if (Occupant.Obstacle && !Occupant.Inactive && !(Occupant.Roles & OccupantRole.Dynamic))
                 Bounds.push(this.QueryWorldBounds(Index));
         });
         return Bounds;
@@ -901,11 +545,9 @@ export function ProjectWheelFacets(Tyre, Rim, Mirrored)
     return Facets;
 }
 
-export function ResolvePlacementTransform(Placement)
+function ResolvePlacementTransform(Placement)
 {
-    if (Placement.Orientation)
-        return ConstructRigidTransform(Placement.Position, Placement.Orientation);
-    const Half = 0.5 * (Placement.Yaw || 0.0);
+    const Half = 0.5 * Placement.Yaw;
     return ConstructRigidTransform(Placement.Position, [0.0, 0.0, Math.sin(Half), Math.cos(Half)]);
 }
 

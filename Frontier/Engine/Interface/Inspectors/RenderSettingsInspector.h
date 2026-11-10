@@ -35,7 +35,7 @@ class RenderSettingsInspector final : public RecordInspector
     [[nodiscard]] const char* QueryEyebrowText() const noexcept override { return "RENDERING / PIPELINE"; }
     [[nodiscard]] const char* QuerySectionNote() const noexcept override
     {
-        return Parameters.AnalyticIllumination ? "Analytic illumination" : (Parameters.HardwareRayQueryTier ? "RTX \xC2\xB7 ReSTIR" : "GTX \xC2\xB7 Distance field");
+        return Parameters.DirectShading ? "Direct shading" : (Parameters.HardwareRayQueryTier ? "RTX \xC2\xB7 ReSTIR" : "GTX \xC2\xB7 Distance field");
     }
     [[nodiscard]] bool        QueryToggleSupported() const noexcept override { return true; }
     [[nodiscard]] bool        QueryToggleEnabled() const noexcept override { return Parameters.Enabled; }

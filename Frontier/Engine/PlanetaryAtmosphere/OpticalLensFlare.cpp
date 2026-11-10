@@ -5,6 +5,8 @@
 
 #include "Engine/PlanetaryAtmosphere/OpticalLensFlare.h"
 
+#include "Frontier/Engine/Foundation/Constants.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -15,7 +17,7 @@ namespace Frontier
 namespace
 {
 
-constexpr double π = 3.14159265358979323846;
+constexpr double π = MathConstantsD::Pi;
 
 double ClampVisibility(double Visibility) noexcept
 {

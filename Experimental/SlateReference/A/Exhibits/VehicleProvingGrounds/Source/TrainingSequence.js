@@ -29,7 +29,7 @@ export class TrainingSequence
     constructor(Host)
     {
         this.Host    = Host;
-        this.Drills  = (Host && Host.LevelDescriptor && Host.LevelDescriptor.Drills) || TrainingDrills;
+        this.Drills  = TrainingDrills;
         this.Active  = null;    // { Drill, Phase, Clock, ... }
         this.Results = {};      // drill id → [latest first]
         this.Best    = this.RetrieveBest();
@@ -126,9 +126,7 @@ export class TrainingSequence
         if (!Gate)
             return false;
         const Axis = Gate.Axis === "x" ? 0 : 1, Other = 1 - Axis;
-        const Sign = Gate.Direction || 1.0;
-        const Before = (State.Previous[Axis] - Gate.At) * Sign;
-        const After = (State.Position[Axis] - Gate.At) * Sign;
+        const Before = State.Previous[Axis] - Gate.At, After = State.Position[Axis] - Gate.At;
         const Across = State.Position[Other];
         return Before < 0.0 && After >= 0.0 && Across >= Gate.From && Across <= Gate.To;
     }
@@ -153,8 +151,7 @@ export class TrainingSequence
             else if (Drill.Zone)
                 Enter = this.Within(Drill.Zone, State.Position) && !this.Within(Drill.Zone, State.Previous);
             else if (Drill.Lip !== undefined)
-                Enter = State.Previous[0] < Drill.Lip && State.Position[0] >= Drill.Lip &&
-                        Math.abs(State.Position[1] - (Drill.LateralY || 0.0)) < (Drill.HalfSpan || 3.4);
+                Enter = State.Previous[0] < Drill.Lip && State.Position[0] >= Drill.Lip && Math.abs(State.Position[1]) < 3.4;
             if (!Enter)
                 continue;
             this.Arm(Drill);
@@ -204,74 +201,11 @@ export class TrainingSequence
             case "bowling": this.AdvanceBowling(Run, Drill, State); break;
             case "spin":    this.AdvanceSpin(Run, Drill, State, Hits); break;
             case "drift":
-            case "skidpad":       this.AdvanceDrift(Run, Drill, State, Hits); break;
-            case "jump":
-            case "spinetransfer": this.AdvanceJump(Run, Drill, State); break;
-            case "smash":         this.AdvanceSmash(Run, Drill, State); break;
-            case "burnout":       this.AdvanceBurnout(Run, Drill, State); break;
-            case "grandprix":     this.AdvanceGrandPrix(Run, Drill, State, Hits); break;
-            case "loop360":
-            case "wallride45":
-            case "heartline":
-            case "pipecork":      this.AdvanceStuntRun(Run, Drill, State, Hits); break;
+            case "skidpad": this.AdvanceDrift(Run, Drill, State, Hits); break;
+            case "jump":    this.AdvanceJump(Run, Drill, State); break;
+            case "smash":   this.AdvanceSmash(Run, Drill, State); break;
+            case "burnout": this.AdvanceBurnout(Run, Drill, State); break;
         }
-    }
-
-    AdvanceGrandPrix(Run, Drill, State, Hits)
-    {
-        const Upward = RotateVector(State.Vehicle.Orientation, [0.0, 0.0, 1.0]);
-        const TiltDegrees = Math.acos(Math.max(-1.0, Math.min(1.0, Upward[2]))) * (180.0 / Math.PI);
-        Run.MaxTilt = Math.max(Run.MaxTilt || 0.0, TiltDegrees);
-        if (Upward[2] < -0.5)
-            Run.Inverted = true;
-        if (Run.Splits.S1 === undefined && this.Crossed(Drill.Sector1, State))
-            Run.Splits.S1 = Run.Clock;
-        if (Run.Splits.S1 !== undefined && Run.Splits.S2 === undefined && this.Crossed(Drill.Sector2, State))
-            Run.Splits.S2 = Run.Clock;
-        if (Run.Splits.S2 !== undefined && this.Crossed(Drill.Finish, State))
-        {
-            this.Finish({
-                Primary: Run.Clock + Hits,
-                Unit:    "s",
-                Lower:   true,
-                Lines:   [
-                    `S1 ${Run.Splits.S1.toFixed(1)} s · S2 ${Run.Splits.S2.toFixed(1)} s`,
-                    `peak ${(Run.MaxTilt || 0.0).toFixed(0)}°${Run.Inverted ? " · inverted ✓" : ""}`,
-                    Hits > 0 ? `+${Hits} s (${Hits} cones)` : "clean lap ✓"
-                ],
-                Valid:   true
-            });
-        }
-        else if (Run.Clock > 180.0)
-            this.Finish({ Primary: Run.Clock, Unit: "s", Lines: ["lap timed out"], Valid: false });
-    }
-
-    AdvanceStuntRun(Run, Drill, State, Hits)
-    {
-        const Upward = RotateVector(State.Vehicle.Orientation, [0.0, 0.0, 1.0]);
-        const TiltDegrees = Math.acos(Math.max(-1.0, Math.min(1.0, Upward[2]))) * (180.0 / Math.PI);
-        Run.MaxTilt = Math.max(Run.MaxTilt || 0.0, TiltDegrees);
-        if (TiltDegrees >= 35.0)
-            Run.BankSeconds = (Run.BankSeconds || 0.0) + State.Seconds;
-        if (Upward[2] < -0.5)
-            Run.Inverted = true;
-        if ((Drill.Id !== "loop360" || Run.Inverted) && this.Crossed(Drill.Finish, State))
-        {
-            const Qualified = Drill.Id === "loop360" ? !!Run.Inverted : (Run.MaxTilt || 0.0) >= 35.0;
-            this.Finish({
-                Primary: Run.Clock + Hits,
-                Unit:    "s",
-                Lower:   true,
-                Lines:   [
-                    `${Run.Clock.toFixed(2)} s · peak ${(Run.MaxTilt || 0.0).toFixed(0)}°`,
-                    Run.Inverted ? "180° inverted ✓" : `${(Run.BankSeconds || 0.0).toFixed(1)} s banked`,
-                    Hits > 0 ? `+${Hits} s (${Hits} cones)` : "clean ✓"
-                ],
-                Valid:   Qualified
-            });
-        }
-        else if (Run.Clock > 45.0)
-            this.Finish({ Primary: Run.Clock, Unit: "s", Lines: ["timed out"], Valid: false });
     }
 
     AdvanceLaunch(Run, Drill, State, Hits)

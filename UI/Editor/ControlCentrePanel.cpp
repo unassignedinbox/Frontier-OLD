@@ -338,7 +338,10 @@ void ControlCentrePanel::ConstructQuickLayout(PixelSpace &Surface, const PlaneEx
         const auto  Disc   = Spanning(X, Y, 64, 64);
         if (!Action)
             TileExtents[Index] = QueryPhysicalExtent(Disc);
-        const bool On    = !Action && (Index == 0 ? Notifications.QueryApplied().ShowFrameRateOverlay : NotificationsEnabled);
+        const ControlCentreQuickAction* HostAction = Action ? &QuickActions[Index - 2] : nullptr;
+        const bool On = HostAction != nullptr
+                            ? (HostAction->QueryActive ? HostAction->QueryActive() : false)
+                            : (Index == 0 ? Notifications.QueryApplied().ShowFrameRateOverlay : NotificationsEnabled);
         const bool Hover = ControlKit::Over(Disc, Pointer);
         ControlContact   = ControlContact || Hover;
         Surface.FillRectangle(Disc, On ? K.Accent : K.Raised, 32);

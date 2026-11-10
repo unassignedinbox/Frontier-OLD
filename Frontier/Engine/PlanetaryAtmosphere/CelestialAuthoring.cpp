@@ -4,6 +4,7 @@
 // 🧩 Phase, placement, orientation, surface, rings and atmosphere use the same descriptors in the viewport and body preview.
 
 #include "Engine/PlanetaryAtmosphere/CelestialAuthoring.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 #include <algorithm>
 #include <cmath>
 
@@ -11,7 +12,7 @@ namespace Frontier
 {
 namespace
 {
-constexpr float Radians = 3.14159265358979323846f / 180;
+constexpr float Radians = MathConstantsF::DegreesToRadians;
 Vec3            Cross(Vec3 First, Vec3 Second)
 {
     return {First.Y * Second.Z - First.Z * Second.Y, First.Z * Second.X - First.X * Second.Z, First.X * Second.Y - First.Y * Second.X};
@@ -44,7 +45,7 @@ LunarBodyDescriptor ResolveAuthoredMoon(const MoonInstanceConfiguration &Moon, f
     Result.OverridePhase        = true;
     const auto  Direction       = Result.DirectionUnit;
     const auto  Right           = Normalize(Cross(std::abs(Direction.Y) < .94f ? Vec3{0, 1, 0} : Vec3{1, 0, 0}, Direction));
-    const float Phase           = Moon.PhaseDays / 29.53f * 2 * 3.14159265358979323846f;
+    const float Phase           = Moon.PhaseDays / 29.53f * MathConstantsF::TwoPi;
     Result.PhaseLightDirection =
         Normalize({Direction.X * std::cos(Phase) + Right.X * std::sin(Phase), Direction.Y * std::cos(Phase) + Right.Y * std::sin(Phase),
                    Direction.Z * std::cos(Phase) + Right.Z * std::sin(Phase)});

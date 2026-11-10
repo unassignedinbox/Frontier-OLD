@@ -26,9 +26,9 @@ struct RenderInspectionView
 
 struct RenderInspectionModes
 {
-    static constexpr size_t ModeCount    = 15;   // [-] the demo's inspection views 0–14
-    static constexpr size_t ViewCount    = 16;   // [-] + the analytic illumination
-    static constexpr int    AnalyticView = 15;
+    static constexpr size_t ModeCount         = 15;   // [-] the demo's inspection views 0–14
+    static constexpr size_t ViewCount         = 16;   // [-] + direct shading
+    static constexpr int    DirectShadingView = 15;
     static const RenderInspectionView Views[ViewCount];
     static constexpr size_t DistanceCount = 3;   // [-] view 6 reads: DistanceInspection 1–3
     static const char* const DistanceNames[DistanceCount];

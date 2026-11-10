@@ -31,7 +31,7 @@ struct ParticleEditorContext
     const ParticleViewportImage& Image;
     const ParticleRefreshPlan*   Plan = nullptr;
     std::vector<std::string>&    Requests;
-    bool                         LevelFlowAvailable = false;   // the host can sample the level's Force Field
+    bool                         LevelFieldAvailable = false;   // the host can provide the level's native ForceField
 };
 
 namespace ParticleEditorPages

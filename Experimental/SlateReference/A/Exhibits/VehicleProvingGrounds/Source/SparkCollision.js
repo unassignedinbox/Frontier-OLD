@@ -1,7 +1,6 @@
-// Swept point collision against the analytic course, 3D stunt ramps, static world boxes and convex debris.
+// Swept point collision against the analytic course, static world boxes and convex debris.
 // Particles have a 3 mm skin; unlike endpoint tests, thin walls cannot be skipped.
 import { ResolveCourseHeight, ResolveCourseNormal } from './CourseStructure.js';
-import { CastSurfaceRay } from './RampSurfaceProjection.js';
 const Skin = 0.003;
 const Dot = (A, B) => A.reduce((Sum, Value, Axis) => Sum + Value * B[Axis], 0);
 export function SweepConvex(From, To, Planes) {
@@ -24,7 +23,7 @@ export function SweepConvex(From, To, Planes) {
 export function BoxPlanes({ Minimum: A, Maximum: B }) {
     return [1,0,0,B[0], -1,0,0,-A[0], 0,1,0,B[1], 0,-1,0,-A[1], 0,0,1,B[2], 0,0,-1,-A[2]];
 }
-export function SweepSpark(From, To, Boxes = [], Bodies = [], Surfaces = null) {
+export function SweepSpark(From, To, Boxes = [], Bodies = []) {
     let Hit = null;
     const Take = Candidate => { if (Candidate && (!Hit || Candidate.Time < Hit.Time)) Hit = Candidate; };
     const Overlaps = (Minimum, Maximum) => Minimum.every((Low, Axis) =>
@@ -34,20 +33,11 @@ export function SweepSpark(From, To, Boxes = [], Bodies = [], Surfaces = null) {
         const Min = Body.Position.map(Value => Value - Body.Radius), Max = Body.Position.map(Value => Value + Body.Radius);
         if (Overlaps(Min, Max)) Take(SweepConvex(From, To, Body.WorldPlanes));
     }
-    if (Surfaces && Surfaces.length > 0) {
-        const Dx = To[0] - From[0], Dy = To[1] - From[1], Dz = To[2] - From[2];
-        const Span = Math.hypot(Dx, Dy, Dz);
-        if (Span > 1e-6) {
-            const RampHit = CastSurfaceRay(Surfaces, From, [Dx / Span, Dy / Span, Dz / Span], Span + Skin);
-            if (RampHit && RampHit.Travel <= Span + Skin)
-                Take({ Time: Math.max(0.0, Math.min(1.0, (RampHit.Travel - Skin) / Span)), Normal: RampHit.Normal, Push: Skin });
-        }
-    }
     // Resolve the course in <= 2 cm horizontal intervals, then bisect the first crossing.
     // This also catches the ramp and raised kerbs when both endpoints lie above the flat pad.
     const Count = Math.max(1, Math.ceil(Math.hypot(To[0] - From[0], To[1] - From[1]) / 0.02));
     const At = T => From.map((Value, Axis) => Value + (To[Axis] - Value) * T);
-    const Height = P => P[2] - ResolveCourseHeight(P[0], P[1], P[2]) - Skin;
+    const Height = P => P[2] - ResolveCourseHeight(P[0], P[1]) - Skin;
     for (let Index = 0; Index <= Count; ++Index) {
         const T = Index / Count;
         if (Hit && T > Hit.Time) break;

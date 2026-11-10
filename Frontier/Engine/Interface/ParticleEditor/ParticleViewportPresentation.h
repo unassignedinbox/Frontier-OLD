@@ -16,6 +16,7 @@
 namespace Frontier
 {
 
+class IFieldSampler;
 struct ParticleRefreshPlan;
 struct ParticleEffectInstance;
 
@@ -25,6 +26,7 @@ struct ParticleViewportRequest
 {
     const ParticleRefreshPlan*                 Plan    = nullptr;
     const std::vector<ParticleEffectInstance>* Effects = nullptr;
+    std::shared_ptr<const IFieldSampler>       FieldSampler; // level ForceField snapshot shared by Particle and Fluid
     bool                                       ReadLattice = false;   // the field overlay wants the wind lattice this refresh
 };
 

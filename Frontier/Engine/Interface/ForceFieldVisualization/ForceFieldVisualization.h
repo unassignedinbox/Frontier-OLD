@@ -91,6 +91,10 @@ struct FieldVisualizationOptions
     float                           Opacity        = 1.0f;
     bool                            Arrows         = true;
     float                           ArrowSpacing   = 40.0f;   // [px]
+    bool                            Streamlines    = false;
+    float                           StreamlineSpacing = 48.0f; // [px]
+    uint32_t                        StreamlineSteps = 24;
+    bool                            StreamlinePulse = false;
     bool                            Tracers        = true;
     uint32_t                        TracerCount    = 360;
     double                          SliceHeight    = 10.0;    // [m] field Y of the slice
@@ -160,6 +164,8 @@ struct FieldInteraction
     int32_t               MovedSource  = -1;
     std::array<double, 2> MovedTo{};      // [X, Z]
     bool                  ViewChanged  = false;
+    bool                  Clicked      = false;
+    std::array<double, 2> ClickPoint{};   // [X, Z] on an empty part of the slice
     bool                  Hovering     = false;
     std::array<double, 2> HoverPoint{};   // [X, Z]
 };
@@ -279,6 +285,7 @@ class ForceFieldVisualization
     void RenderGroundGrid(ImDrawList* Ink) const;
     void RenderCascades(ImDrawList* Ink, const EditorTypefaces& Faces, float Scale) const;
     void RenderArrows(ImDrawList* Ink, float Scale);
+    void RenderStreamlines(ImDrawList* Ink, float Scale) const;
     void RenderTracers(ImDrawList* Ink, float Scale) const;
     void RenderSources(ImDrawList* Ink, const EditorTypefaces& Faces, float Scale) const;
     void RenderProbe(ImDrawList* Ink, float Scale) const;

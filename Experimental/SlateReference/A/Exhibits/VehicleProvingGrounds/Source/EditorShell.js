@@ -10,7 +10,6 @@
 //    P hides both columns (the viewport takes the window), V hides everything, as before.
 
 import { ConstructEntities, InspectionModes } from "./InspectorPages.js";
-import { LevelCatalog } from "./LevelStructure.js";
 import { EditorControls, ClearElement, AssignStyle } from "./EditorControls.js";
 import { ConstructGlyph } from "./EditorIcons.js";
 
@@ -48,7 +47,7 @@ export class EditorShell
         {
             Stored = null;
         }
-        this.Selected = Stored && this.Entities.some((Entity) => Entity.Id === Stored.Selected) ? Stored.Selected : "level";
+        this.Selected = Stored && this.Entities.some((Entity) => Entity.Id === Stored.Selected) ? Stored.Selected : "gas";
         this.ConstructOutliner();
         this.ConstructViewportBar();
         this.ConstructStatus();
@@ -79,8 +78,7 @@ export class EditorShell
         const Label = Construct("div", "scene-label", "WORKSPACE");
         Label.appendChild(Construct("span", "status-dot"));
         Body.appendChild(Label);
-        const ActiveTitle = this.Host.LevelDescriptor ? this.Host.LevelDescriptor.Title : "Proving Grounds";
-        const Title = Construct("div", "scene-title", ActiveTitle);
+        const Title = Construct("div", "scene-title", "Proving Grounds");
         Title.appendChild(Construct("span", "scene-extension", ".scene"));
         Body.appendChild(Title);
 
@@ -309,26 +307,6 @@ export class EditorShell
             return [Button, Free];
         });
         Bar.appendChild(Camera);
-        const LevelSelect = document.createElement("select");
-        LevelSelect.className = "select-field";
-        LevelSelect.style.width = "186px";
-        LevelSelect.title = "Switch arena level";
-        for (const Entry of LevelCatalog)
-        {
-            const Choice = document.createElement("option");
-            Choice.value = Entry.Key;
-            Choice.textContent = Entry.Title;
-            if (Entry.Key === Host.LevelKey)
-                Choice.selected = true;
-            LevelSelect.appendChild(Choice);
-        }
-        LevelSelect.addEventListener("change", () =>
-        {
-            Host.Settings.Level = LevelSelect.value;
-            Host.ApplySetting("Level");
-        });
-        this.LevelSelect = LevelSelect;
-        Bar.appendChild(LevelSelect);
         const Display = document.createElement("select");
         Display.className = "select-field";
         Display.style.width = "210px";
@@ -341,22 +319,7 @@ export class EditorShell
         }
         Display.addEventListener("change", () => { Host.Settings.Inspection = Number(Display.value); Host.ApplySetting("Inspection"); this.Controls.Synchronise(); });
         this.DisplaySelect = Display;
-        Bar.appendChild(Display);
-
-        // Dedicated Road Studio workspace launcher button in the viewport bar (Q/E reserved strictly for camera)
-        const RoadBtn = Construct("button", "action-button");
-        RoadBtn.title = "Switch to the in-world Road Studio workspace";
-        RoadBtn.style.cssText = "height:28px;padding:0 10px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;font-size:12px;";
-        RoadBtn.append(ConstructGlyph("Route", 14, 1.7), Construct("span", "", "Road Studio"));
-        RoadBtn.addEventListener("click", () =>
-        {
-            if (Host.RoadEditor)
-                Host.RoadEditor.OpenWorkspace();
-            else
-                this.Select("roadeditor");
-        });
-        this.RoadEditorButton = RoadBtn;
-        Bar.append(RoadBtn, Construct("span", "bar-fill"));
+        Bar.append(Display, Construct("span", "bar-fill"));
         const Icon = (Glyph, Title, Action) =>
         {
             const Button = Construct("button", "icon-button");
@@ -391,7 +354,6 @@ export class EditorShell
         Item("Quality", "QUALITY");
         Item("Sun", "SUN");
         Item("Speed", "SPEED");
-        Item("Signal", "SIGNAL");
         Item("Smoke", "SMOKE");
         Item("Fragments", "FRAGMENTS");
         Item("Camera", "CAM");
@@ -414,15 +376,6 @@ export class EditorShell
         Items.Quality.textContent = Host.GradeName;
         Items.Sun.textContent = `${Host.Settings.SunElevation.toFixed(1)}°`;
         Items.Speed.textContent = `${Math.abs(Telemetry.Speed * 3.6).toFixed(0)} km/h${Telemetry.Burnout ? " · burnout" : ""}`;
-        if (Host.TrafficLights)
-        {
-            const Near = Host.TrafficLights.QueryNearestSignal(Host.Vehicle.Position);
-            Items.Signal.textContent = Near ? `${Near.Aspect} · ${Near.RemainingSeconds.toFixed(0)}s` : "–";
-        }
-        else
-        {
-            Items.Signal.textContent = "–";
-        }
         Items.Smoke.textContent = Host.Smoke.Resident ? `resident · ${Host.Smoke.Metrics.Sources} src` : "idle";
         Items.Fragments.textContent = String(Host.Fracture.Metrics.ActiveFragments);
         const Eye = Host.CameraEye || [0, 0, 0];
@@ -433,8 +386,6 @@ export class EditorShell
         this.DisplaySelect.value = String(Host.Settings.Inspection);
         this.HudButton.classList.toggle("active", Host.Dock.QueryVisible("Hud"));
         this.InsetButton.classList.toggle("active", Host.Dock.QueryVisible("Inset"));
-        if (this.RoadEditorButton)
-            this.RoadEditorButton.classList.toggle("active", this.Selected === "roadeditor" || !!Host.RoadEditor?.FloatingOpen);
         this.Controls.RefreshLive();
         this.RefreshRows();
     }

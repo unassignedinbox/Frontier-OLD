@@ -44,9 +44,9 @@ inline constexpr std::array<RenderQualityGrade, 3> RenderQualityGrades = {{
 
 struct RenderSettingsReading
 {
-    const RenderQualityGrade* Grade     = &RenderQualityGrades[2];
-    bool                      Analytic  = false;   // [-] the analytic illumination is showing
-    bool                      RayTraced = false;   // [-] the RTX path
+    const RenderQualityGrade* Grade         = &RenderQualityGrades[2];
+    bool                      DirectShading = false;   // [-] direct shading is showing
+    bool                      RayTraced     = false;   // [-] the RTX path
     bool                      Measured  = false;   // [-] the extents are the viewport's, not derived
     std::array<uint32_t, 2>   Render    = {0, 0};  // [px]
     std::array<uint32_t, 2>   Trace     = {0, 0};  // [px] ReSTIR GI and reflection targets

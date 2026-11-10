@@ -25,11 +25,12 @@ Frontier/
 ├── Frontier/
 │   ├── Extensions/            # Bridges between engine systems and the applications/runtime (see CLAUDE.md)
 │   │   ├── Interface/         # ViewportTexture, GizmoSpace, GizmoRasterization
-│   │   ├── Rendering/         # RenderingExtension, SceneGeometryOccupancy
+│   │   ├── Rendering/         # RenderingExtension, SceneSubjectPlacement
 │   │   ├── Particle/          # ParticleExtension
 │   │   ├── Physics/           # PhysicsExtension, JoltExtension, PhysicsSpace
 │   │   └── Networking/        # NetworkingExtension, NetworkingSpace (EOSExtension / EpicAdapter later)
 │   └── Engine/                # Multi-realm PlanetaryAtmosphere, GeometricRaster, DeviceExchange, Rendering & Shaders
+│       ├── Foundation/Curves/ # CurveProfile, CurveSpace, `.curvespace` codec
 │       ├── DeviceExchange/    # VulkanComputeExchange (compute), DeviceExchange (raster + compute, WebGPU ordering), VulkanDeviceAccess
 │       ├── GeometricRaster/   # VisibilityProjection (cross-portal ray routing & reversed-Z visibility)
 │       ├── PlanetaryAtmosphere/ # AtmosphereScattering, AstronomicalEphemeris, SkyProjection, PlanetaryProjection,
@@ -39,7 +40,8 @@ Frontier/
 │       │   ├── GlobalIllumination/ # 1:1 port of the VehicleHMI ReSTIR GI renderer (distance field, cards, BVH, ReSTIR, SVGF)
 │       │   ├── SceneViewport/      # SceneViewport + EnvironmentOverlay: the GI refresh with PlanetaryAtmosphere over it
 │       │   │                       # and GPU picking (GlobalIllumination/PickProjection: the occupant under a click)
-│       │   └── VirtualizedGeometry/ # 1:1 port of the VehicleHMI cluster nesting (build, cut, GPU cull, pages) + I1-I5
+│       │   ├── VirtualizedGeometry/ # 1:1 port of the VehicleHMI cluster nesting (build, cut, GPU cull, pages) + I1-I5
+│       │   └── VisualEffects/      # EffectSpace profile and `.effectspace` codec; GPU sequence is still pending
 │       └── Shaders/           # Slang 2026 SPIR-V 1.3 compute & raster shaders, one folder per renderer above
 ├── UI/
 │   └── Editor/                # Lifecycle-owned production editor UI
@@ -53,7 +55,8 @@ Frontier/
 │   │   ├── Images/
 │   │   └── Results/
 │   └── EditorMirror/           # Comparison mirror of the C++ editor
-├── Experimental/              # Prototypes and experimental HTML
+├── Experimental/              # Prototypes and experimental HTML, including the restored Fluid Editor
+├── Experimental Remastered/   # Remastered standalone studios, including ParticleEditor/
 ├── EngineDocs/AgenticInstuctions/  # Four retained authoritative skills
 └── _ClaudeScratch/            # Ignored logs/, build/, tmp/
 ```
@@ -160,7 +163,7 @@ measured refinements (`RefreshToggles::Refinements`), against converged referenc
   engine (library `FrontierParticleSimulation`, archive set `ParticleSimulation`).
 - `Frontier/Engine/Interface/ParticleEditor/` and `ParticleEditor.*`: the editor window, its pages and field overlay.
 - `Frontier/Extensions/Particle/ParticleExtension.*`: the engine on the editor's device.
-- `EngineContent/ParticleArchives/ParticleLibrary.toml`: the 52 presets, exported by
+- `EngineContent/ParticleArchives/ParticleLibrary.particlespace`: the 52 presets, exported by
   `Automation/ExportParticleLibrary.mjs`.
 - `Exhibits/ForceFieldEditor/` and `Exhibits/ParticleEditor/`: parity tests, captures and their READMEs. The plan is
   `Documentation/Plans/Ongoing/ForceFieldParticleIntegration.md`.

@@ -97,7 +97,17 @@ float4 LensingFragment(float4 FragmentCoordinate : SV_Position) : SV_Target0
     if (Lensing.Miscellany.w > 0.5) { Shimmer += ResolveShimmerOffset(Coordinate, Lensing.Shimmer0, Lensing.Shimmer1); }
     if (Lensing.Miscellany.w > 1.5) { Shimmer += ResolveShimmerOffset(Coordinate, Lensing.Shimmer2, Lensing.Shimmer3); }
     Source += Shimmer;
-    let Colour = Captured.SampleLevel(CapturedSampler, Source, 0.0).rgb;
+    let Pixel = Captured.SampleLevel(CapturedSampler, Source, 0.0);
     let Glow = float3(1.0, 0.72, 0.4) * Ring * Lensing.Miscellany.z;
-    return float4(Colour * (1.0 - Inside) + Glow * (1.0 - Inside), 1.0);
+    if (Lensing.Padding.w > 0.5)
+    {
+        // 📝 The raster target is premultiplied; the interface image path consumes straight-alpha texels.
+        let Visibility = 1.0 - Inside;
+        let Premultiplied = (Pixel.rgb + Glow) * Visibility;
+        let Radiance = max(Pixel.a, max(max(Pixel.rgb.r, Pixel.rgb.g), Pixel.rgb.b));
+        let GlowAlpha = max(Glow.r, max(Glow.g, Glow.b));
+        let Alpha = clamp(max(Radiance, GlowAlpha) * Visibility, 0.0, 1.0);
+        return float4(Premultiplied / max(Alpha, 1e-5), Alpha);
+    }
+    return float4(Pixel.rgb * (1.0 - Inside) + Glow * (1.0 - Inside), 1.0);
 }

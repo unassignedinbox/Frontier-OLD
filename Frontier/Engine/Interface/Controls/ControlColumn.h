@@ -54,6 +54,9 @@ class ControlColumn
     static constexpr float PagePadding = 20.0f;   // [px] .native-environment padding
 
     ControlColumn(const ControlTheme& InTheme, const EditorTypefaces& InFaces, float InScale);
+    // 📝 A bare column over an explicit rect (workspace panels): no page fill, no theme padding; Finalize still
+    //    extends the scroll extent past the pending margin.
+    ControlColumn(const ControlTheme& InTheme, const EditorTypefaces& InFaces, float InScale, ImVec2 Min, float InWidth);
 
     [[nodiscard]] const ControlTheme&    QueryTheme() const noexcept { return Theme; }
     [[nodiscard]] const EditorTypefaces& QueryFaces() const noexcept { return Faces; }

@@ -10,7 +10,7 @@
 #include "EnvironmentEncoding.h"
 #include "IlluminationConstants.h"
 #include "LuminaireRegister.h"
-#include "OccupantDistanceSpace.h"
+#include "SubjectDistanceSpace.h"
 #include "RefreshEncoding.h"
 #include "RayTracingSpace.h"
 #include "ResamplingSequence.h"
@@ -164,7 +164,7 @@ class IlluminationHost
     IlluminationSettings                Settings{};
     QualityGrade                        Grade{};
     SceneStructure                      Scene{};
-    std::unique_ptr<OccupantDistanceSpace> Volumes{};
+    std::unique_ptr<SubjectDistanceSpace> Volumes{};
     std::unique_ptr<SurfaceCardDepot>   Cards{};
     std::unique_ptr<RayTracingSpace>    RayTracing{};
     std::unique_ptr<SceneDistanceSpace> Distance{};
@@ -188,7 +188,7 @@ class IlluminationHost
     EnvironmentEncoder                  EnvironmentEncoding{};
     LuminaireRegister                      Luminaires{};
     std::vector<LampPlacement>          StreetLampPoles{}, PointLampPosts{};
-    // 📝 Beyond the demo: occupants the editor relocated since the last refresh (OccupantRelocation), and those it relocated
+    // 📝 Beyond the demo: occupants the editor relocated since the last refresh (SubjectRelocation), and those it relocated
     //    before the last refresh, whose previous transform catches up at the next one.
     std::vector<uint32_t>               RelocatedOccupants{}, SettlingOccupants{};
     LightSolution                          LastLight{};

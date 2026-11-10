@@ -466,4 +466,62 @@ ControlTheme ControlTheme::ResolveOptics() noexcept
     return Theme;
 }
 
+ControlTheme ControlTheme::ResolveRemastered() noexcept
+{
+    // 📝 Experimental Remastered :root tokens (ParticleEditor.css): charcoal surfaces, warm accent, cream highlight.
+    ControlTheme Theme   = ResolveNative();
+    Theme.PageFill       = ResolveCssColour(0x0B0B0BFF);
+    Theme.Ink            = ResolveCssColour(0xEFEFEFFF);
+    Theme.Muted          = ResolveCssColour(0x848484FF);
+    Theme.Accent         = ResolveCssColour(0xE8C27AFF);
+    Theme.Eyebrow        = Theme.Muted;
+    Theme.Subtitle       = ResolveCssColour(0xBCBCBCFF);
+    Theme.Caption        = ResolveCssColour(0x7A7A7AFF);
+    Theme.ControlLabel   = ResolveCssColour(0xA7A7A7FF);
+    Theme.CardHeading    = ResolveCssColour(0xE4E4E4FF);
+    Theme.Index          = ResolveCssColour(0x6D6D6DFF);
+    Theme.CardBorder     = ResolveCssColour(0xFFFFFF0E);
+    Theme.CardTop        = ResolveCssColour(0x212121FF);
+    Theme.CardBottom     = ResolveCssColour(0x191919FF);
+    Theme.PillFill       = ResolveCssColour(0x000000FF);
+    Theme.PillBorder     = ResolveCssColour(0xFFFFFF17);
+    Theme.TrackFull      = ResolveCssColour(0x4E4E4EFF);
+    Theme.TrackEmpty     = ResolveCssColour(0x232323FF);
+    Theme.ThumbFill      = ResolveCssColour(0xE6E6E6FF);
+    Theme.HighlightFill  = ResolveCssColour(0xEFF4CFFF);
+    Theme.HighlightInk   = ResolveCssColour(0x17190EFF);
+    Theme.SwitchOn       = ResolveCssColour(0xFFFFFFFF);
+    Theme.SwitchOff      = ResolveCssColour(0x232323FF);
+    Theme.KnobOn         = ResolveCssColour(0x111111FF);
+    Theme.KnobOff        = ResolveCssColour(0xBCBCBCFF);
+    Theme.SegmentFill    = ResolveCssColour(0x292929FF);
+    Theme.SegmentText    = ResolveCssColour(0xF2F2F2FF);
+    Theme.SegmentIdle    = ResolveCssColour(0x828282FF);
+    Theme.TabRailFill    = ResolveCssColour(0x080808FF);
+    Theme.TabRailBorder  = ResolveCssColour(0xFFFFFF12);
+    Theme.TabText        = ResolveCssColour(0x7D7D7DFF);
+    Theme.TabSelectedFill = ResolveCssColour(0x282828FF);
+    Theme.TabSelectedText = ResolveCssColour(0xF3F3F3FF);
+    Theme.TabHoverFill   = ResolveCssColour(0x141414FF);
+    Theme.TabHoverText   = ResolveCssColour(0xD6D6D6FF);
+    Theme.MetricFill     = ResolveCssColour(0x1A1A1AFF);
+    Theme.MetricBorder   = ResolveCssColour(0xFFFFFF0F);
+    Theme.MetricLeadFill = Theme.HighlightFill;
+    Theme.MetricLeadInk  = Theme.HighlightInk;
+    Theme.MetricLeadMuted = ResolveCssColour(0x17190EA6);
+    Theme.SelectFill     = ResolveCssColour(0x0B0B0BFF);
+    Theme.SelectBorder   = ResolveCssColour(0xFFFFFF12);
+    Theme.SelectText     = ResolveCssColour(0xD6D6D6FF);
+    Theme.SliderRule     = 0;
+    Theme.SliderEmpty    = Theme.TrackEmpty;
+    Theme.SliderNumber   = ResolveCssColour(0xF0F0F0FF);
+    Theme.SliderUnit     = ResolveCssColour(0x777777FF);
+    Theme.ToggleFill     = ResolveCssColour(0x1A1A1AFF);
+    Theme.ToggleBorder   = ResolveCssColour(0xFFFFFF0F);
+    Theme.ToggleText     = ResolveCssColour(0xCFCFCFFF);
+    Theme.ToggleCaption  = ResolveCssColour(0x827070FF);
+    Theme.ToggleCaptionOn = ResolveCssColour(0x83D6A1FF);
+    return Theme;
+}
+
 } // namespace Frontier

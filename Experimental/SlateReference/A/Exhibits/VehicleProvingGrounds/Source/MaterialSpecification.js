@@ -104,13 +104,7 @@ export const CourseMaterial = Object.freeze({
     Mirror:          82,
     Aluminium:       83,
     Gold:            84,
-    ShowcaseGlass:   85,
-    // 📝 Hovering robotic intersection traffic-signal emitters & highway amber livery (appended so 0..85 stay fixed).
-    TrafficRed:      86,
-    TrafficYellow:   87,
-    TrafficOrange:   88,
-    TrafficGreen:    89,
-    BannerAmber:     90
+    ShowcaseGlass:   85
 });
 
 export const MarkedFamilyFirst = CourseMaterial.Asphalt;   // [-]
@@ -334,18 +328,6 @@ export function ConstructMaterialSpecification()
     Showcase.SpecularLevel = IorToF0(1.5);
     Showcase.Transmission = 1.0;
     Materials[CourseMaterial.ShowcaseGlass] = Showcase;
-
-    const Emitter = (AlbedoR, AlbedoG, AlbedoB, EmitR, EmitG, EmitB) =>
-    {
-        const Mat = Dielectric(AlbedoR, AlbedoG, AlbedoB, 0.14);
-        Mat.Emission = [EmitR, EmitG, EmitB];
-        return Mat;
-    };
-    Materials[CourseMaterial.TrafficRed]    = Emitter(0.85, 0.04, 0.03, 14.5,  0.28, 0.10);
-    Materials[CourseMaterial.TrafficYellow] = Emitter(0.95, 0.78, 0.04, 13.5, 10.20, 0.18);
-    Materials[CourseMaterial.TrafficOrange] = Emitter(0.95, 0.30, 0.02, 14.2,  3.10, 0.06);
-    Materials[CourseMaterial.TrafficGreen]  = Emitter(0.04, 0.85, 0.18,  0.16, 13.80, 1.95);
-    Materials[CourseMaterial.BannerAmber]   = Dielectric(0.86, 0.46, 0.03, 0.38);
     return Materials;
 }
 

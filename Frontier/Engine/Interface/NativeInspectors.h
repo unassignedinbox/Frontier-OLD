@@ -14,7 +14,6 @@
 #include "Engine/Interface/Inspectors/ChemicalInspector.h"
 #include "Engine/Interface/Inspectors/SurfaceOpticsInspector.h"
 #include "Engine/Interface/Inspectors/RenderSettingsInspector.h"
-#include "Engine/Interface/Inspectors/CameraInspector.h"
 #include "Engine/Interface/Inspectors/SolarInspector.h"
 #include "Engine/Interface/Inspectors/OpticalFlareInspector.h"
 #include "Engine/Interface/Inspectors/AtmosphereInspector.h"

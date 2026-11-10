@@ -38,7 +38,7 @@ std::string RenderSettingsInspector::QueryDirectoryReadout() const
 {
     const RenderSettingsReading Reading = ResolveRenderSettingsReading(Parameters);
     char Text[64];
-    std::snprintf(Text, sizeof(Text), "%s \xC2\xB7 %u\xC3\x97%u", Parameters.AnalyticIllumination ? "Analytic" : (Parameters.HardwareRayQueryTier ? "RTX" : "GTX"),
+    std::snprintf(Text, sizeof(Text), "%s \xC2\xB7 %u\xC3\x97%u", Parameters.DirectShading ? "Direct" : (Parameters.HardwareRayQueryTier ? "RTX" : "GTX"),
                   Reading.Render[0], Reading.Render[1]);
     return Text;
 }
@@ -53,7 +53,7 @@ bool RenderSettingsInspector::ConstructRenderer(ControlColumn& Page, const Rende
     int Renderer = Parameters.HardwareRayQueryTier ? 0 : 1;
     const bool Changed = TabStrip::Construct(Page, "Renderer", Renderers, 2, Renderer);
     if (Changed) Parameters.HardwareRayQueryTier = Renderer == 0;
-    if (Reading.Analytic)
+    if (Reading.DirectShading)
         CaptionText::Construct(Page, "The analytic illumination is showing (Debug views, or the viewport bar): the lighting settings below wait for the "
                                      "global illumination to return.", 0.0f, 12.0f);
     return Changed;
@@ -168,7 +168,7 @@ void RenderSettingsInspector::ConstructInspector()
         Demo.HardwareRayQueryTier = Parameters.HardwareRayQueryTier;
         Demo.QualityTier          = Parameters.QualityTier;
         Demo.InspectionModeIndex  = Parameters.InspectionModeIndex;
-        Demo.AnalyticIllumination = Parameters.AnalyticIllumination;
+        Demo.DirectShading        = Parameters.DirectShading;
         Demo.TargetRate           = Parameters.TargetRate;
         Demo.Measured             = Parameters.Measured;
         Demo.Revision             = Parameters.Revision;

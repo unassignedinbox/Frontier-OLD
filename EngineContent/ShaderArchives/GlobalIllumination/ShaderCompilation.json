@@ -1,7 +1,7 @@
 {
   "format": 1,
   "set": "GlobalIllumination",
-  "compiler": "unrecorded",
+  "compiler": "slangc 2026.14.1",
   "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets GlobalIllumination",
   "entries": [
     {
@@ -42,7 +42,7 @@
     },
     {
       "file": "DisplayAntialias.IntegrateAntialias.spv",
-      "spirv_sha256": "2db7893f3e1a4402af715cbddf4f0dd77f8f66d202891d07063211f3eeb4e2d6"
+      "spirv_sha256": "77717e11d95cf71450c87cdd9fd9eb3122f90f46fa6212e4e6dd113a4e67db66"
     },
     {
       "file": "DisplayExposure.IntegrateExposure.spv",
@@ -244,7 +244,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayAntialias.slang",
-      "sha256": "8a856102e48bccd653f35352dc3b8d83dcf1480b1df3fcf133467b0652651cc5"
+      "sha256": "774467520e1d699d9685d9fcb8fd83905918ffa7c08fde149c1a73c9734e20b6"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayExposure.slang",

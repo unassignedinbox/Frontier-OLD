@@ -773,6 +773,76 @@ void ForceFieldVisualization::RenderArrows(ImDrawList* Ink, float Scale)
 }
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                  RK2 STREAMLINES
+//------------------------------------------------------------------------------------------------------------------------
+
+void ForceFieldVisualization::RenderStreamlines(ImDrawList* Ink, float Scale) const
+{
+    if (!Options.Streamlines || Options.Contribution == ForceContribution::Damp || !Lattice_) return;
+    const double StepMetres = std::max(Lattice_->CellSpan * 0.75, View.Span / std::max(1.0f, Width_) * 2.4);
+    const float Spacing = std::clamp(Options.StreamlineSpacing, 14.0f, 180.0f) * Scale;
+    const uint32_t Steps = std::clamp(Options.StreamlineSteps, 4u, 120u);
+    const double MinimumSpeed = std::max(1.0e-4, (ScaleReading_ > 0.0 ? ScaleReading_ : 1.0) * 0.002);
+    int SeedIndex = 0;
+
+    for (float SeedY = Origin_.y + Spacing * 0.5f; SeedY < Origin_.y + Height_; SeedY += Spacing)
+    {
+        for (float SeedX = Origin_.x + Spacing * 0.5f; SeedX < Origin_.x + Width_; SeedX += Spacing, ++SeedIndex)
+        {
+            double SeedWorldX = 0.0, SeedWorldZ = 0.0;
+            if (!ScreenToPlane(ImVec2(SeedX, SeedY), SeedWorldX, SeedWorldZ)) continue;
+            double SeedVector[3]{};
+            if (!Interpolate(SeedWorldX, SeedWorldZ, SeedVector) || std::hypot(SeedVector[0], SeedVector[2]) < MinimumSpeed) continue;
+
+            for (int Direction : {-1, 1})
+            {
+                std::vector<ImVec2> Path;
+                Path.reserve(static_cast<size_t>(Steps) + 1);
+                double X = SeedWorldX, Z = SeedWorldZ;
+                ImVec2 Screen;
+                if (Project(X, Options.SliceHeight, Z, Screen)) Path.push_back(Screen);
+                for (uint32_t Step = 0; Step < Steps; ++Step)
+                {
+                    double First[3]{};
+                    if (!Interpolate(X, Z, First)) break;
+                    const double FirstSpeed = std::hypot(First[0], First[2]);
+                    if (FirstSpeed < MinimumSpeed) break;
+                    const double Sign = static_cast<double>(Direction);
+                    const double MidX = X + Sign * First[0] / FirstSpeed * StepMetres * 0.5;
+                    const double MidZ = Z + Sign * First[2] / FirstSpeed * StepMetres * 0.5;
+                    double Mid[3]{};
+                    if (!Interpolate(MidX, MidZ, Mid)) break;
+                    const double MidSpeed = std::hypot(Mid[0], Mid[2]);
+                    if (MidSpeed < MinimumSpeed) break;
+                    X += Sign * Mid[0] / MidSpeed * StepMetres;
+                    Z += Sign * Mid[2] / MidSpeed * StepMetres;
+                    if (Options.ClipToExtent && Options.HasExtent &&
+                        (X < Options.Extent[0] || Z < Options.Extent[1] || X > Options.Extent[2] || Z > Options.Extent[3])) break;
+                    if (!Project(X, Options.SliceHeight, Z, Screen)) break;
+                    if (Screen.x < Origin_.x - 2.0f * Scale || Screen.y < Origin_.y - 2.0f * Scale ||
+                        Screen.x > Origin_.x + Width_ + 2.0f * Scale || Screen.y > Origin_.y + Height_ + 2.0f * Scale) break;
+                    Path.push_back(Screen);
+                }
+                if (Path.size() < 2) continue;
+                const int Alpha = Direction > 0 ? 154 : 88;
+                const ImU32 Colour = IM_COL32(153, 226, 212, Alpha);
+                for (size_t Point = 1; Point < Path.size(); ++Point)
+                {
+                    const float Fade = static_cast<float>(Point) / static_cast<float>(Path.size());
+                    Ink->AddLine(Path[Point - 1], Path[Point], WithAlpha(Colour, 0.36f + 0.64f * Fade), 1.15f * Scale);
+                }
+                if (Options.StreamlinePulse && Path.size() > 4)
+                {
+                    const double Cycle = std::fmod(std::max(0.0, Time_) * 2.8 + SeedIndex * 0.37, static_cast<double>(Path.size() - 1));
+                    const size_t Pulse = std::clamp<size_t>(static_cast<size_t>(Cycle), 1, Path.size() - 1);
+                    Ink->AddCircleFilled(Path[Pulse], 1.8f * Scale, IM_COL32(239, 255, 250, 230), 8);
+                }
+            }
+        }
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
 //                                                    TRACERS
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -1216,6 +1286,7 @@ void ForceFieldVisualization::Render(ImDrawList* Ink, const EditorTypefaces& Fac
     RenderHeatmap(Ink);
     RenderGroundGrid(Ink);
     RenderCascades(Ink, Faces, Scale);
+    RenderStreamlines(Ink, Scale);
     RenderArrows(Ink, Scale);
     RenderTracers(Ink, Scale);
     RenderSources(Ink, Faces, Scale);
@@ -1351,6 +1422,11 @@ FieldInteraction ForceFieldVisualization::ConstructNavigation(const char* Id, Im
         else if (Turning) Drag_ = DragMode::Turn;
         else
         {
+            if (OnPlane)
+            {
+                Outcome.Clicked = !Turning;
+                Outcome.ClickPoint = {X, Z};
+            }
             Drag_       = DragMode::Pan;
             DragPlane_  = {X, Z};
             DragCentre_ = {View.CentreX, View.CentreZ};

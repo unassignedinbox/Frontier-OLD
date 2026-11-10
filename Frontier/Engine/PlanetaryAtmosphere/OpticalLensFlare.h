@@ -12,6 +12,7 @@
 #include "Engine/DeviceExchange/VulkanComputeExchange.h"
 #include "Engine/PlanetaryAtmosphere/AtmosphereScattering.h"
 #include "Engine/PlanetaryAtmosphere/VolumetricClouds.h"
+#include "Frontier/Engine/Foundation/Constants.h"
 
 #include <algorithm>
 #include <array>
@@ -73,7 +74,7 @@ struct SunDiscProfile
 
 [[nodiscard]] inline double SunDiscSolidAngleSr(double AngularRadiusRad) noexcept
 {
-    return 2.0 * 3.14159265358979323846 * (1.0 - std::cos(AngularRadiusRad));
+    return MathConstantsD::TwoPi * (1.0 - std::cos(AngularRadiusRad));
 }
 
 [[nodiscard]] inline double SunDiscMeanLimbFactor(const SunDiscProfile& Profile) noexcept

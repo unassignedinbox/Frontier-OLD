@@ -139,7 +139,7 @@ function ConstructGenerator(Seed)
 
 // 📝 Returns Capacity placements { Position [x, y], Yaw [rad], Shape, Family, Phase, Lamp }. Should the clear lattice
 //    run out (a pool larger than the pad holds), the remaining slots stack onto the crates already placed.
-export function ResolveStressPlacements(Capacity, Zones = ClearZones)
+export function ResolveStressPlacements(Capacity)
 {
     const Random = ConstructGenerator(0x5EED1234);
     const Cells = [];
@@ -150,14 +150,12 @@ export function ResolveStressPlacements(Capacity, Zones = ClearZones)
         {
             const X = -PadReach + Row * CellSpacing + (Random() - 0.5) * 0.7;
             const Y = -PadReach + Column * CellSpacing + (Random() - 0.5) * 0.7;
-            const Blocked = Zones.some(([MinimumX, MinimumY, MaximumX, MaximumY]) =>
+            const Blocked = ClearZones.some(([MinimumX, MinimumY, MaximumX, MaximumY]) =>
                 X > MinimumX - 1.4 && X < MaximumX + 1.4 && Y > MinimumY - 1.4 && Y < MaximumY + 1.4);
             if (!Blocked)
                 Cells.push([X, Y]);
         }
     }
-    if (Cells.length === 0)
-        Cells.push([PadReach, PadReach]);
     for (let Index = Cells.length - 1; Index > 0; --Index)
     {
         const Other = Math.floor(Random() * (Index + 1));

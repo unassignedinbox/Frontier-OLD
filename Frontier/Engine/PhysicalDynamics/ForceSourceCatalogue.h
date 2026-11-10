@@ -140,6 +140,7 @@ struct PreparedForceSource
     ForceSourceConfiguration Source{};
     ForceContribution        Contribution  = ForceContribution::Flow;
     ForceActivationReading   Activation{};
+    double                   TimeSeconds   = 0.0;
     SpatialVector            CentreMetres{};      // field axes
     double                   BoundX        = 0.0; // [m] half extent of the reach's rectangle across X
     double                   BoundZ        = 0.0; // [m] across Z

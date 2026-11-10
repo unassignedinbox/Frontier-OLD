@@ -29,7 +29,7 @@ namespace
 using namespace Frontier;
 
 constexpr float Pi               = 3.14159265358979323846f;
-constexpr float DegreesToRadians = Pi / 180.0f;
+constexpr float DegToRad = Pi / 180.0f;
 
 bool MeasureOnly = false;   // --measure-only: print every figure, fail no check (before/after comparisons)
 
@@ -74,8 +74,8 @@ float Dotted(Direction A, Direction B)
 // 📝 The environment's y-up axes (x east, y up, z south) from an elevation and an azimuth measured from north towards east.
 Direction SkyDirection(float ElevationDegrees, float AzimuthDegrees)
 {
-    const float Elevation = ElevationDegrees * DegreesToRadians;
-    const float Azimuth   = AzimuthDegrees * DegreesToRadians;
+    const float Elevation = ElevationDegrees * DegToRad;
+    const float Azimuth   = AzimuthDegrees * DegToRad;
     return {std::cos(Elevation) * std::sin(Azimuth), std::sin(Elevation), -std::cos(Elevation) * std::cos(Azimuth)};
 }
 
@@ -86,7 +86,7 @@ PlanetaryCameraView LookAlong(Direction Forward, uint32_t Width, uint32_t Height
     View.ForwardUnit    = Normalized(Forward);
     View.RightUnit      = Normalized(Crossed({0.0f, 1.0f, 0.0f}, View.ForwardUnit));
     View.UpUnit         = Normalized(Crossed(View.ForwardUnit, View.RightUnit));
-    View.VerticalFovRad = FieldOfViewDegrees * DegreesToRadians;
+    View.VerticalFovRad = FieldOfViewDegrees * DegToRad;
     View.ViewportWidth  = Width;
     View.ViewportHeight = Height;
     View.ExposureScale  = 4.0f;
@@ -124,7 +124,7 @@ PlanetaryRealmEnsemble MakeSky(Direction Sun, uint64_t Revision)
     Realm.MilkyWayIntensity   = 0.0f;
     RealmSolarSource Solar{};
     Solar.DirectionUnit         = Sun;
-    Solar.Disc.AngularRadiusRad = 0.5 * 0.53 * DegreesToRadians;
+    Solar.Disc.AngularRadiusRad = 0.5 * 0.53 * DegToRad;
     Solar.EnableLensFlare       = false;
     Realm.Suns.push_back(Solar);
     return Ensemble;
@@ -254,7 +254,7 @@ int main(int Argc, char** Argv)
     SolarOcclusionStage Stage(RepositoryRoot, ShaderFolder, OutputFolder);
 
     const Direction Sun       = SkyDirection(38.0f, 132.0f);
-    const float     DiscAngle = 0.5f * 0.53f * DegreesToRadians;
+    const float     DiscAngle = 0.5f * 0.53f * DegToRad;
 
     // ① a dense cloud across the disc: without it the disc outshines its surroundings, with it the disc must not show
     {
@@ -311,7 +311,7 @@ int main(int Argc, char** Argv)
         const auto                Hdr  = Stage.Render(Deck, View, "EverestDeckSun.png");
         std::printf("③ Everest deck into the sun  disc %.4f  ring %.4f  sky 10-20 deg %.4f\n",
                     MeanAround(Hdr, View, Sun, 0.0f, 0.7f * DiscAngle), MeanAround(Hdr, View, Sun, 1.6f * DiscAngle, 3.0f * DiscAngle),
-                    MeanAround(Hdr, View, Sun, 10.0f * DegreesToRadians, 20.0f * DegreesToRadians));
+                    MeanAround(Hdr, View, Sun, 10.0f * DegToRad, 20.0f * DegToRad));
     }
 
     std::printf("[SolarOcclusionValidation] PASSED\n");
